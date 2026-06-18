@@ -118,19 +118,22 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("duration")
-          .setLabel("Duration  (30m · 2h · 1d · blank = manual spin)")
+          .setLabel("Duration (30m / 2h / 1d — blank=manual)")
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
-          .setPlaceholder("e.g.  30m  /  2h  /  1d")
+          .setPlaceholder("e.g. 30m  /  2h  /  1d")
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId("prizes")
-          .setLabel("Prizes — one per line, edit/remove as needed")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setValue(preset.prizes)
-          .setPlaceholder("1st Place — Prize\n2nd Place — Prize\n...")
+        (() => {
+          const inp = new TextInputBuilder()
+            .setCustomId("prizes")
+            .setLabel("Prizes — one per line, edit as needed")
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setPlaceholder("1st Place — Prize\n2nd Place — Prize\n...");
+          if (preset.prizes) inp.setValue(preset.prizes);
+          return inp;
+        })()
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
