@@ -133,7 +133,7 @@ export async function initDb() {
   const owners = [
     { id: "198572092504014848", name: "Lu Chenzo" },
     { id: "378293480608497664", name: "Phoenix" },
-    { id: "632044470711484424", name: "Sierra Phoenix" }
+    { id: "1363222342800511058", name: "Sierra Phoenix" }
   ];
   const mechanics = [
     { id: "1179942814906327050", name: "Myx" },
@@ -148,10 +148,10 @@ export async function initDb() {
     { id: "1302529753739427961", name: "Dreico" },
     { id: "466238601672392734", name: "Ron" },
     { id: "1246285610319347754", name: "Mr Walkdown" },
-    { id: "424950499398254604", name: "Motion Montona" },
+    { id: "", name: "Motion Montona" },
     { id: "312410738977144832", name: "Brandon Strong" },
     { id: "1363222342800511058", name: "Ander Dingus" },
-    { id: "696524714146922496", name: "Ab" }
+    { id: "463492813711999006", name: "Ab" }
   ];
 
   for (const o of owners) {
