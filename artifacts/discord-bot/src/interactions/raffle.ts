@@ -232,20 +232,17 @@ export async function handleRaffleModal(interaction: any): Promise<boolean> {
   }
 
   const config = await getGuildConfig(guild.id);
-  if (!config?.raffle_channel_id) {
-    await interaction.editReply({ content: "❌ No raffle channel configured. Set one up from the admin panel first." });
-    return true;
-  }
+  const raffleChanId = config?.raffle_channel_id ?? interaction.channelId;
 
   const raffleId = randomUUID();
   await db.execute({
     sql: "INSERT INTO raffles (id, guild_id, channel_id, title, description, prizes, winner_count, ends_at, started_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    args: [raffleId, guild.id, config.raffle_channel_id, title, description, JSON.stringify(prizes), winnerCount, endsAt, interaction.user.id]
+    args: [raffleId, guild.id, raffleChanId, title, description, JSON.stringify(prizes), winnerCount, endsAt, interaction.user.id]
   });
 
   // Post raffle embed
   try {
-    const ch = await guild.channels.fetch(config.raffle_channel_id);
+    const ch = await guild.channels.fetch(raffleChanId);
     if (ch?.isTextBased()) {
       const embed = buildRaffleEmbed({ id: raffleId, title, description, winner_count: winnerCount, ends_at: endsAt, entry_count: 0, status: "active", prizes });
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -260,7 +257,7 @@ export async function handleRaffleModal(interaction: any): Promise<boolean> {
     return true;
   }
 
-  await interaction.editReply({ content: `✅ Raffle **${title}** created in <#${config.raffle_channel_id}>!` });
+  await interaction.editReply({ content: `✅ Raffle **${title}** created in <#${raffleChanId}>!` });
   return true;
 }
 

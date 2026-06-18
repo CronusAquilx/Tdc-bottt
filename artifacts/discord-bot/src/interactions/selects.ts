@@ -86,11 +86,20 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const order = rowToOrder(r.rows[0]);
     const currentItems: any[] = order.items ?? [];
 
-    // Map selected labels to catalog items
+    // Map selected labels to catalog items, skipping any already on the order
+    const existingKeys = new Set(currentItems.map((i: any) => `${i.category}::${i.label}`));
     const newItems = interaction.values.map(label => {
       const found = allItems.find(i => i.label === label && i.category === category);
-      return found ? { label: found.label, price: found.price, cost: found.cost, labour: found.labour, category: found.category } : null;
+      if (!found) return null;
+      const key = `${found.category}::${found.label}`;
+      if (existingKeys.has(key)) return null;
+      existingKeys.add(key);
+      return { label: found.label, price: found.price, cost: found.cost, labour: found.labour, category: found.category };
     }).filter(Boolean);
+
+    if (!newItems.length) {
+      await interaction.followUp({ content: "⚠️ All selected items are already on this order.", ephemeral: true });
+    }
 
     const merged = [...currentItems, ...newItems];
 

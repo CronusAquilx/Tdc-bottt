@@ -18,6 +18,7 @@ import { data as setupData,    execute as setupExecute    } from "./commands/set
 import { data as settingsData, execute as settingsExecute } from "./commands/settings.js";
 import { data as helpData,     execute as helpExecute     } from "./commands/help.js";
 import { data as payoutData,   execute as payoutExecute   } from "./commands/payout.js";
+import { data as loaData,      execute as loaExecute      } from "./commands/loa.js";
 import { handleButton }       from "./interactions/buttons.js";
 import { handleDraftButton }  from "./interactions/draftbuttons.js";
 import { handleModal }        from "./interactions/modals.js";
@@ -77,6 +78,7 @@ const commandDefs = [
   { data: settingsData, execute: settingsExecute },
   { data: helpData,     execute: helpExecute     },
   { data: payoutData,   execute: payoutExecute   },
+  { data: loaData,      execute: loaExecute      },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
