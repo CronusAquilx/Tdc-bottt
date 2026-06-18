@@ -8,16 +8,7 @@ import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
-import { postTimeclockPanel } from "./adminbuttons.js";
-
-const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id"; label: string }> = {
-  orders:  { field: "orders_channel_id",  label: "Orders"  },
-  jobs:    { field: "jobs_channel_id",    label: "Jobs"    },
-  logs:    { field: "log_channel_id",     label: "Logs"    },
-  archive: { field: "archive_channel_id", label: "Archive" },
-  loa:     { field: "loa_channel_id",     label: "LOA"     },
-  raffle:  { field: "raffle_channel_id",  label: "Raffle"  },
-};
+import { postTimeclockPanel, postLoaPanel, postRafflePanel, CHANNEL_MAP } from "./adminbuttons.js";
 
 export async function handleAdminModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const parts = interaction.customId.split(":");
@@ -98,7 +89,6 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
       permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
 
-    // Fetch individual staff members to avoid "not cached" error
     const managersR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
     for (const row of managersR.rows) {
       const mid = String(row[0]);
@@ -168,8 +158,9 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     await interaction.deferReply({ ephemeral: true });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
+    let ch: any;
     try {
-      const ch = await guild.channels.fetch(channelId);
+      ch = await guild.channels.fetch(channelId);
       if (!ch?.isTextBased()) throw new Error("Not a text channel");
     } catch {
       await interaction.editReply({ content: "❌ Channel not found." });
@@ -177,21 +168,23 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     }
 
     await setGuildConfig(guild.id, "timeclock_channel_id", channelId);
-    await interaction.editReply({ content: `✅ Timeclock channel set → <#${channelId}>` });
+    await postTimeclockPanel(ch as TextChannel);
+    await interaction.editReply({ content: `✅ Timeclock channel set → <#${channelId}> and panel posted.` });
     return true;
   }
 
   // ── Generic channel: attach existing ──────────────────────────────────────
   if (section === "chan" && action === "setexisting") {
     const chanType = parts[3];
-    const cfg = channelMap[chanType];
+    const cfg = CHANNEL_MAP[chanType];
     if (!cfg) return false;
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
+    let ch: any;
     try {
-      const ch = await guild.channels.fetch(channelId);
+      ch = await guild.channels.fetch(channelId);
       if (!ch?.isTextBased()) throw new Error("Not a text channel");
     } catch {
       await interaction.editReply({ content: "❌ Channel not found." });
@@ -199,7 +192,15 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     }
 
     await setGuildConfig(guild.id, cfg.field, channelId);
-    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>` });
+
+    // Post the panel embed for LOA and raffle channels
+    if (chanType === "loach") {
+      await postLoaPanel(ch as TextChannel);
+    } else if (chanType === "rafflech") {
+      await postRafflePanel(ch as TextChannel);
+    }
+
+    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${chanType === "loach" || chanType === "rafflech" ? " and panel posted." : "."}` });
     return true;
   }
 

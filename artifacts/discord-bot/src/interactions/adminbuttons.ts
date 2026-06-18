@@ -16,25 +16,24 @@ import { showLoaModal } from "./loa.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Modal-showing actions MUST be at the top — showModal() must be the very
+// first Discord API response (no defer/reply allowed before it).
+// ─────────────────────────────────────────────────────────────────────────────
 export async function handleAdminButton(interaction: ButtonInteraction): Promise<boolean> {
   const parts = interaction.customId.split(":");
   const [ns, section, action] = parts;
   if (ns !== "admin") return false;
 
-  if (!(await requireRole(interaction, "trainer"))) return true;
-
   const guild = interaction.guild!;
 
-  // ── Refresh admin panel ────────────────────────────────────────────────────
-  if (section === "setup" && action === "refresh") {
-    await interaction.deferUpdate();
-    const config = await getGuildConfig(guild.id);
-    const embed = buildAdminPanelEmbed(config);
-    await interaction.editReply({ embeds: [embed] });
+  // ── MODAL-FIRST HANDLERS (single role check, immediately show modal) ────────
+  if (section === "setup" && action === "createraffle") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await showCreateRaffleModal(interaction);
     return true;
   }
 
-  // ── Post Job Ad ────────────────────────────────────────────────────────────
   if (section === "setup" && action === "jobpost") {
     if (!(await requireRole(interaction, "owner"))) return true;
     const modal = new ModalBuilder().setCustomId("admin:jobpost").setTitle("Post a Job Ad");
@@ -50,16 +49,74 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Create Raffle ──────────────────────────────────────────────────────────
-  if (section === "setup" && action === "createraffle") {
-    if (!(await requireRole(interaction, "owner"))) return true;
-    await showCreateRaffleModal(interaction);
+  if (section === "setup" && action === "loa") {
+    await showLoaModal(interaction);
     return true;
   }
 
-  // ── Submit LOA (for mechanics via admin panel) ─────────────────────────────
-  if (section === "setup" && action === "loa") {
-    await showLoaModal(interaction);
+  if (section === "saleschan" && action === "new") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const modal = new ModalBuilder().setCustomId("admin:saleschan:new").setTitle("Create Sales Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (section === "saleschan" && action === "existing") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const modal = new ModalBuilder().setCustomId("admin:saleschan:existing").setTitle("Attach Existing Sales Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID to attach").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (section === "timeclock" && action === "existing") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const modal = new ModalBuilder().setCustomId("admin:timeclock:existing").setTitle("Attach Existing Timeclock Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (section === "chan" && action === "existing") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const chanType = parts[3];
+    const cfg = CHANNEL_MAP[chanType];
+    if (!cfg) return false;
+    const modal = new ModalBuilder().setCustomId(`admin:chan:setexisting:${chanType}`).setTitle(`Attach ${cfg.label} Channel`);
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── ALL OTHER HANDLERS (can defer/reply freely) ────────────────────────────
+  if (!(await requireRole(interaction, "trainer"))) return true;
+
+  // ── Refresh admin panel ────────────────────────────────────────────────────
+  if (section === "setup" && action === "refresh") {
+    await interaction.deferUpdate();
+    const config = await getGuildConfig(guild.id);
+    const embed = buildAdminPanelEmbed(config);
+    await interaction.editReply({ embeds: [embed] });
     return true;
   }
 
@@ -110,31 +167,6 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  if (section === "saleschan" && action === "new") {
-    const modal = new ModalBuilder().setCustomId("admin:saleschan:new").setTitle("Create Sales Channel");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
-      )
-    );
-    await interaction.showModal(modal);
-    return true;
-  }
-
-  if (section === "saleschan" && action === "existing") {
-    const modal = new ModalBuilder().setCustomId("admin:saleschan:existing").setTitle("Attach Existing Sales Channel");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID to attach").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
-      )
-    );
-    await interaction.showModal(modal);
-    return true;
-  }
-
   // ── Timeclock channel ──────────────────────────────────────────────────────
   if (section === "setup" && action === "timeclock") {
     if (!(await requireRole(interaction, "manager"))) return true;
@@ -180,31 +212,11 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  if (section === "timeclock" && action === "existing") {
-    const modal = new ModalBuilder().setCustomId("admin:timeclock:existing").setTitle("Attach Existing Timeclock Channel");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
-      )
-    );
-    await interaction.showModal(modal);
-    return true;
-  }
-
-  // ── Generic channel setups ─────────────────────────────────────────────────
-  const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id"; name: string; topic: string; label: string }> = {
-    orders:   { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",  label: "Orders"  },
-    jobs:     { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",       label: "Jobs"    },
-    logs:     { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",        label: "Logs"    },
-    archive:  { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",    label: "Archive" },
-    loach:    { field: "loa_channel_id",      name: "tdc-loa",     topic: "Tokyo Drift Customs — Leave of Absence",   label: "LOA"     },
-    rafflech: { field: "raffle_channel_id",   name: "tdc-raffle",  topic: "Tokyo Drift Customs — Raffles",            label: "Raffle"  },
-  };
-
-  if (section === "setup" && action in channelMap) {
+  // ── Generic channel setups (Orders, Jobs, Logs, Archive, LOA, Raffle) ──────
+  if (section === "setup" && action in CHANNEL_MAP) {
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
-    const cfg = channelMap[action];
+    const cfg = CHANNEL_MAP[action];
     const embed = new EmbedBuilder()
       .setTitle(`📡  ${cfg.label} Channel Setup`)
       .setColor(COLORS.dark)
@@ -220,12 +232,13 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   if (section === "chan" && action === "new") {
     const chanType = parts[3];
-    const cfg = channelMap[chanType];
+    const cfg = CHANNEL_MAP[chanType];
     if (!cfg) return false;
     await interaction.deferUpdate();
     try {
-      const ch = await guild.channels.create({ name: cfg.name, type: ChannelType.GuildText, topic: cfg.topic }) as any;
+      const ch = await guild.channels.create({ name: cfg.name, type: ChannelType.GuildText, topic: cfg.topic }) as TextChannel;
       await setGuildConfig(guild.id, cfg.field, ch.id);
+      await postChannelPanel(ch, chanType);
       await interaction.followUp({ content: `✅ **#${cfg.name}** created → <#${ch.id}>`, ephemeral: true });
     } catch (err: any) {
       await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
@@ -233,21 +246,81 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  if (section === "chan" && action === "existing") {
-    const chanType = parts[3];
-    const cfg = channelMap[chanType];
-    if (!cfg) return false;
-    const modal = new ModalBuilder().setCustomId(`admin:chan:setexisting:${chanType}`).setTitle(`Attach ${cfg.label} Channel`);
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
-      )
-    );
-    await interaction.showModal(modal);
-    return true;
-  }
-
   return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Channel map (used for generic setup + modal attach flows)
+// ─────────────────────────────────────────────────────────────────────────────
+export const CHANNEL_MAP: Record<string, {
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id";
+  name: string; topic: string; label: string;
+}> = {
+  orders:   { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",  label: "Orders"  },
+  jobs:     { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",       label: "Jobs"    },
+  logs:     { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",        label: "Logs"    },
+  archive:  { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",    label: "Archive" },
+  loach:    { field: "loa_channel_id",      name: "tdc-loa",     topic: "Tokyo Drift Customs — Leave of Absence",   label: "LOA"     },
+  rafflech: { field: "raffle_channel_id",   name: "tdc-raffle",  topic: "Tokyo Drift Customs — Raffles",            label: "Raffle"  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Panel embeds posted when channels are created or attached
+// ─────────────────────────────────────────────────────────────────────────────
+async function postChannelPanel(channel: TextChannel, chanType: string) {
+  if (chanType === "loach") {
+    await postLoaPanel(channel);
+  } else if (chanType === "rafflech") {
+    await postRafflePanel(channel);
+  }
+  // orders, jobs, logs, archive — no panel needed
+}
+
+export async function postLoaPanel(channel: TextChannel) {
+  const embed = new EmbedBuilder()
+    .setTitle("🌴  LEAVE OF ABSENCE")
+    .setColor(0xf39c12)
+    .setDescription(
+      "**Tokyo Drift Customs — LOA Board**\n\n" +
+      "Staff members can submit a Leave of Absence request to let management know you'll be away.\n\n" +
+      "**How to submit:**\n" +
+      "• Use the `/loa` command anywhere in the server\n" +
+      "• Requests will appear here for management to review\n\n" +
+      "*Management can approve or deny requests using the buttons below each submission.*"
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin:setup:loa")
+      .setLabel("📝  Submit LOA Request")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  const msg = await channel.send({ embeds: [embed], components: [row] });
+  try { await msg.pin(); } catch { /* ignore */ }
+  return msg;
+}
+
+export async function postRafflePanel(channel: TextChannel) {
+  const embed = new EmbedBuilder()
+    .setTitle("🎰  RAFFLE BOARD")
+    .setColor(0x9b59b6)
+    .setDescription(
+      "**Tokyo Drift Customs — Raffles**\n\n" +
+      "This is where raffles are posted. Keep an eye out for new drops! 🍀\n\n" +
+      "**How it works:**\n" +
+      "• Owners post raffles using the **Create Raffle** button in the admin panel\n" +
+      "• When a raffle is live, click **Enter Raffle** to throw your name in\n" +
+      "• The owner spins the wheel — winner is pinged right here"
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Good luck! 🍀" })
+    .setTimestamp();
+
+  const msg = await channel.send({ embeds: [embed] });
+  try { await msg.pin(); } catch { /* ignore */ }
+  return msg;
 }
 
 export async function postTimeclockPanel(channel: TextChannel) {
