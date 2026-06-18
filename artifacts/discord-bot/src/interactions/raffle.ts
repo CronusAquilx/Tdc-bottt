@@ -278,7 +278,7 @@ export async function showCreateRaffleModal(interaction: ButtonInteraction) {
       new TextInputBuilder().setCustomId("winners").setLabel("Number of Winners").setStyle(TextInputStyle.Short).setRequired(true).setValue("1").setPlaceholder("1")
     ),
     new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId("duration").setLabel("Duration (e.g. 30m, 2h, 1d) — leave blank for manual").setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder("30m")
+      new TextInputBuilder().setCustomId("duration").setLabel("Duration (30m / 2h / 1d — blank = manual)").setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder("30m")
     )
   );
   await interaction.showModal(modal);

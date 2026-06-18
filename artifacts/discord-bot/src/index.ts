@@ -27,6 +27,7 @@ import { handleAdminButton }  from "./interactions/adminbuttons.js";
 import { handleAdminModal }   from "./interactions/adminmodals.js";
 import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
+import { postLoaPanel, postRafflePanel }         from "./interactions/adminbuttons.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -96,6 +97,47 @@ client.once(Events.ClientReady, async (c) => {
     console.log(`[TDC] ✅ Registered ${result.length} commands: ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
   } catch (err) {
     console.error("[TDC] ❌ Failed to register commands:", err);
+  }
+
+  // Auto-post LOA and raffle panels to configured channels that are missing them
+  try {
+    const { db } = await import("./db.js");
+    const rows = await db.execute("SELECT guild_id, loa_channel_id, raffle_channel_id FROM guild_config");
+    for (const row of rows.rows) {
+      const guildId      = String(row[0] ?? "");
+      const loaChanId    = row[1] ? String(row[1]) : null;
+      const raffleChanId = row[2] ? String(row[2]) : null;
+      if (!guildId) continue;
+
+      let guild: any;
+      try { guild = await c.guilds.fetch(guildId); } catch { continue; }
+
+      for (const [chanId, panelFn, label] of [
+        [loaChanId,    postLoaPanel,    "LOA"],
+        [raffleChanId, postRafflePanel, "Raffle"],
+      ] as [string | null, (ch: any) => Promise<any>, string][]) {
+        if (!chanId) continue;
+        try {
+          const ch = await guild.channels.fetch(chanId);
+          if (!ch?.isTextBased()) continue;
+
+          // Check recent messages — if bot already posted here, skip
+          const recent = await ch.messages.fetch({ limit: 10 });
+          const botAlreadyPosted = [...recent.values()].some((m: any) => m.author?.id === c.user.id);
+          if (botAlreadyPosted) {
+            console.log(`[TDC] ✅ ${label} panel already present in #${ch.name}`);
+            continue;
+          }
+
+          await panelFn(ch);
+          console.log(`[TDC] 📌 Posted ${label} panel to #${ch.name}`);
+        } catch (err) {
+          console.error(`[TDC] ⚠️ Failed to post ${label} panel:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[TDC] ⚠️ Panel auto-post error:", err);
   }
 });
 
