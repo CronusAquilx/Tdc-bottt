@@ -4,7 +4,7 @@ import {
   ButtonBuilder, ButtonStyle, EmbedBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getSetting, rowToOrder } from "../db.js";
+import { db, getProfile, getSetting, rowToOrder, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, COLORS, money } from "../lib/embeds.js";
 
@@ -17,18 +17,56 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // ── "Create New Order" button from pinned panel ────────────────────────────
   if (ns === "order" && action === "newpanel") {
     if (!(await requireRole(interaction, "mechanic"))) return true;
-    const modal = new ModalBuilder().setCustomId("order:notes").setTitle("New Order");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId("notes")
-          .setLabel("Customer Notes (optional)")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(false)
-          .setPlaceholder("Customer name, vehicle, special requests...")
-      )
+
+    // Check the mechanic is clocked in
+    const active = await db.execute({
+      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      args: [interaction.user.id]
+    });
+    if (!active.rows[0]) {
+      await interaction.reply({
+        content: "⏰ **You need to clock in before creating an order.**\nHead to the timeclock channel and hit **Clock In** first.",
+        ephemeral: true
+      });
+      return true;
+    }
+
+    // Skip the notes modal — go straight to the draft
+    await interaction.deferReply({ ephemeral: true });
+
+    const { randomUUID } = await import("../lib/utils.js");
+    const { nextOrderNumber } = await import("../db.js");
+    const orderId = randomUUID();
+    const orderNumber = await nextOrderNumber();
+
+    await db.execute({
+      sql: "INSERT INTO orders (id, order_number, mechanic_id, status, items, parts_cost, total, labour, notes) VALUES (?, ?, ?, 'draft', '[]', 0, 0, 0, '')",
+      args: [orderId, orderNumber, interaction.user.id]
+    });
+
+    const catalogStr = await getSetting("parts_catalog");
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const categories: string[] = catalog.categories ?? [];
+
+    const catSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${orderId}`)
+      .setPlaceholder("Pick a service category...")
+      .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
+
+    const profile = await getProfile(interaction.user.id);
+    const rate = profile?.commission_rate ?? 0.3;
+
+    const draft = rowToOrder(
+      (await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]
     );
-    await interaction.showModal(modal);
+
+    await interaction.editReply({
+      embeds: [buildDraftEmbed(draft, rate)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        draftButtons(orderId)
+      ]
+    });
     return true;
   }
 
@@ -48,7 +86,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Select a category to add services...")
+      .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
     await interaction.editReply({
@@ -84,28 +122,26 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   if (action === "submit") {
     if (!(await requireRole(interaction, "mechanic"))) return true;
     await interaction.deferUpdate();
+
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
+
     if (!order.items.length) {
       await interaction.followUp({ content: "❌ Add at least one service before completing the order.", ephemeral: true });
       return true;
     }
 
-    await db.execute({ sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?", args: [orderId] });
+    await db.execute({
+      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
+      args: [orderId]
+    });
     const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
     const profile = await getProfile(interaction.user.id);
     const commRate = profile?.commission_rate ?? 0.3;
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", commRate);
-
-    // "Make New Order" button to display alongside the completed order
-    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("order:newpanel")
-        .setLabel("🔄  Create New Order")
-        .setStyle(ButtonStyle.Success)
-    );
+    const commission = completed.labour * commRate;
 
     // Post to mechanic's sales channel
     let postedTo = "";
@@ -113,18 +149,17 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       try {
         const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
         if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+          const msg = await (ch as any).send({ embeds: [embed] });
           postedTo = profile.sales_channel_id;
           await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
         }
       } catch { /* ignore */ }
     }
 
-    const commission = completed.labour * commRate;
     await interaction.editReply({
       content: postedTo
-        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>\n💵 **Your commission: ${money(commission)}**`
-        : `✅ **${completed.order_number}** complete! Set up a sales channel to auto-post orders.\n💵 **Your commission: ${money(commission)}**`,
+        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>\n💵 **Commission: ${money(commission)}**`
+        : `✅ **${completed.order_number}** complete!\n💵 **Commission: ${money(commission)}**\n_Set up a sales channel to auto-post orders._`,
       embeds: [embed],
       components: []
     });

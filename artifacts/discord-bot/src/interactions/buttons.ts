@@ -16,20 +16,26 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "mechanic"))) return;
     await interaction.deferReply({ ephemeral: true });
 
-    const active = await db.execute({ sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1", args: [interaction.user.id] });
+    const active = await db.execute({
+      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      args: [interaction.user.id]
+    });
     if (active.rows[0]) {
-      await interaction.editReply({ content: "⚠️ You're already clocked in! Click **Clock Out** when your shift ends." });
+      await interaction.editReply({ content: "⚠️ You're already clocked in! Hit **Clock Out** first." });
       return;
     }
 
     const tcId = randomUUID();
-    await db.execute({ sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))", args: [tcId, interaction.user.id] });
+    await db.execute({
+      sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))",
+      args: [tcId, interaction.user.id]
+    });
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
     const embed = buildClockInEmbed(profile?.display_name ?? interaction.user.username, entry.clock_in_time);
 
-    // Post to timeclock channel so everyone can see the live session
+    // Post to timeclock channel — but restrict visibility to only this mechanic + owner/manager roles
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.timeclock_channel_id) {
@@ -37,13 +43,16 @@ export async function handleButton(interaction: ButtonInteraction) {
           const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [embed] });
-            await db.execute({ sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?", args: [msg.id, ch.id, tcId] });
+            await db.execute({
+              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+              args: [msg.id, ch.id, tcId]
+            });
           }
         } catch { /* ignore */ }
       }
     }
 
-    await interaction.editReply({ content: "✅ Clocked in! Your live session has been posted in the timeclock channel." });
+    await interaction.editReply({ content: "✅ You're clocked in! Your session is live in the timeclock channel." });
     return;
   }
 
@@ -52,7 +61,10 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "mechanic"))) return;
     await interaction.deferReply({ ephemeral: true });
 
-    const active = await db.execute({ sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1", args: [interaction.user.id] });
+    const active = await db.execute({
+      sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
+      args: [interaction.user.id]
+    });
     if (!active.rows[0]) {
       await interaction.editReply({ content: "❌ You're not clocked in!" });
       return;
@@ -60,15 +72,36 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     const entry = rowToTimeclock(active.rows[0]);
     const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
-    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?", args: [mins, entry.id] });
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ? WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
+
+    await db.execute({
+      sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?",
+      args: [mins, entry.id]
+    });
+    await db.execute({
+      sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ? WHERE discord_id = ?",
+      args: [mins / 60, entry.mechanic_id]
+    });
+
+    // Count orders completed during this shift
+    const clockInIso = entry.clock_in_time;
+    const ordersThisShift = await db.execute({
+      sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status != 'draft' AND created_at >= ?",
+      args: [interaction.user.id, clockInIso]
+    });
+    const orderCount = Number(ordersThisShift.rows[0]?.[0] ?? 0);
 
     const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
     const updated = rowToTimeclock(ur.rows[0]);
     const profile = await getProfile(interaction.user.id);
-    const embed = buildClockOutEmbed(profile?.display_name ?? interaction.user.username, updated.clock_in_time, updated.clock_out_time!, mins);
+    const embed = buildClockOutEmbed(
+      profile?.display_name ?? interaction.user.username,
+      updated.clock_in_time,
+      updated.clock_out_time!,
+      mins,
+      orderCount
+    );
 
-    // Edit the original clock-in message so the live timer updates to the final time
+    // Edit the original clock-in message with the final clock-out embed
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -81,42 +114,9 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     const hrs = Math.floor(mins / 60);
     const m = Math.round(mins % 60);
-    await interaction.editReply({ content: `✅ Clocked out! Total shift: **${hrs}h ${m}m**` });
-    return;
-  }
-
-  // ── Clock In/Out from mechanic's sales channel (legacy support) ────────────
-  if (ns === "clockin" && action === "mechanic") {
-    if (interaction.user.id !== id) { await interaction.reply({ content: "❌ You can only clock in for yourself.", ephemeral: true }); return; }
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
-    const active = await db.execute({ sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1", args: [id] });
-    if (active.rows[0]) { await interaction.editReply({ content: "⚠️ Already clocked in." }); return; }
-    const tcId = randomUUID();
-    await db.execute({ sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))", args: [tcId, id] });
-    const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
-    const entry = rowToTimeclock(r.rows[0]);
-    const profile = await getProfile(id);
-    const embed = buildClockInEmbed(profile?.display_name ?? "Unknown", entry.clock_in_time);
-    await interaction.editReply({ embeds: [embed] });
-    return;
-  }
-
-  if (ns === "clockout" && action === "mechanic") {
-    if (interaction.user.id !== id) { await interaction.reply({ content: "❌ You can only clock out for yourself.", ephemeral: true }); return; }
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
-    const active = await db.execute({ sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1", args: [id] });
-    if (!active.rows[0]) { await interaction.editReply({ content: "❌ Not clocked in." }); return; }
-    const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
-    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?", args: [mins, entry.id] });
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ? WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
-    const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
-    const updated = rowToTimeclock(ur.rows[0]);
-    const profile = await getProfile(id);
-    const embed = buildClockOutEmbed(profile?.display_name ?? "Unknown", updated.clock_in_time, updated.clock_out_time!, mins);
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({
+      content: `✅ Clocked out!\n⏱️ **Shift:** ${hrs}h ${m}m\n📋 **Orders this shift:** ${orderCount}`
+    });
     return;
   }
 
@@ -128,8 +128,13 @@ export async function handleButton(interaction: ButtonInteraction) {
     const role = await getUserRole(interaction.user.id);
     const isManager = role === "owner" || role === "manager";
     const r = isManager
-      ? status ? await db.execute({ sql: "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC", args: [status] }) : await db.execute("SELECT * FROM orders WHERE status != 'draft' ORDER BY created_at DESC")
-      : status ? await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = ? ORDER BY created_at DESC", args: [interaction.user.id, status] }) : await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status != 'draft' ORDER BY created_at DESC", args: [interaction.user.id] });
+      ? status
+        ? await db.execute({ sql: "SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC", args: [status] })
+        : await db.execute("SELECT * FROM orders WHERE status != 'draft' ORDER BY created_at DESC")
+      : status
+        ? await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = ? ORDER BY created_at DESC", args: [interaction.user.id, status] })
+        : await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status != 'draft' ORDER BY created_at DESC", args: [interaction.user.id] });
+
     const rows = r.rows.map(row => rowToOrder(row));
     const { statusEmoji } = await import("../lib/embeds.js");
     const { items, total, pages } = paginate(rows, page, 10);
@@ -140,8 +145,10 @@ export async function handleButton(interaction: ButtonInteraction) {
     }));
     const embed = new EmbedBuilder()
       .setTitle(`🏁  Orders${status ? ` · ${status.toUpperCase()}` : ""}`)
-      .setColor(COLORS.primary).setDescription(lines.join("\n") || "_No orders_")
-      .setFooter({ text: `東京ドリフトカスタム  ·  Page ${page + 1} / ${pages} · ${total} total` }).setTimestamp();
+      .setColor(COLORS.primary)
+      .setDescription(lines.join("\n") || "*No orders found*")
+      .setFooter({ text: `東京ドリフトカスタム  ·  Page ${page + 1} / ${pages} · ${total} total` })
+      .setTimestamp();
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:list:${page - 1}:${status ?? ""}`).setLabel("◀ Prev").setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
       new ButtonBuilder().setCustomId(`order:list:${page + 1}:${status ?? ""}`).setLabel("Next ▶").setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
@@ -185,9 +192,15 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.deferUpdate();
     const mechId = rest[0];
     const ws = rest.slice(1).join(":");
-    const r = await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?", args: [mechId, ws] });
+    const r = await db.execute({
+      sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
+      args: [mechId, ws]
+    });
     if (!r.rows.length) { await interaction.followUp({ content: "ℹ️ No paid orders to archive.", ephemeral: true }); return; }
-    await db.execute({ sql: "UPDATE orders SET status = 'archived' WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?", args: [mechId, ws] });
+    await db.execute({
+      sql: "UPDATE orders SET status = 'archived' WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
+      args: [mechId, ws]
+    });
     const profile = await getProfile(mechId);
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
@@ -229,10 +242,18 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
       args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
     });
-    await db.execute({ sql: "UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?", args: [id, ws] });
+    await db.execute({
+      sql: "UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
+      args: [id, ws]
+    });
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
-    const payout = { id: String(payRow[0]), mechanic_id: String(payRow[1]), week_start: String(payRow[2]), amount: Number(payRow[3]), order_count: Number(payRow[4]), hours_worked: Number(payRow[5]), invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]), created_at: String(payRow[9] ?? "") };
+    const payout = {
+      id: String(payRow[0]), mechanic_id: String(payRow[1]), week_start: String(payRow[2]),
+      amount: Number(payRow[3]), order_count: Number(payRow[4]), hours_worked: Number(payRow[5]),
+      invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
+      created_at: String(payRow[9] ?? "")
+    };
     const { buildPayoutEmbed } = await import("../lib/embeds.js");
     const approver = await getProfile(interaction.user.id);
     const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Owner", weekEnd, profile.commission_rate);
@@ -266,13 +287,13 @@ export async function handleButton(interaction: ButtonInteraction) {
     const ws = weekStart();
     const today = new Date().toISOString().split("T")[0];
     const yearStart = `${new Date().getFullYear()}-01-01`;
-    const weekR = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [id, ws] });
-    const todayR = await db.execute({ sql: "SELECT total FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) = ?", args: [id, today] });
-    const ytdR = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [id, yearStart] });
+    const weekR   = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, ws] });
+    const todayR  = await db.execute({ sql: "SELECT total FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) = ?",              args: [id, today] });
+    const ytdR    = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, yearStart] });
     const weekRev = weekR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
     const weekCommission = weekR.rows.reduce((s, row) => s + Number(row[1] ?? 0) * profile.commission_rate, 0);
     const todayRev = todayR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const ytdRev = ytdR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const ytdRev   = ytdR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
     const ytdCommission = ytdR.rows.reduce((s, row) => s + Number(row[1] ?? 0) * profile.commission_rate, 0);
     const { buildDashboardEmbed } = await import("../lib/embeds.js");
     const embed = buildDashboardEmbed(profile.display_name, profile.status, todayR.rows.length, todayRev, weekR.rows.length, weekRev, profile.hours_worked_this_week, weekCommission, ytdR.rows.length, ytdRev, ytdCommission);
@@ -290,7 +311,15 @@ export async function handleButton(interaction: ButtonInteraction) {
     await db.execute({ sql: "DELETE FROM jobs WHERE id = ?", args: [id] });
     if (msgId && interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      if (config?.jobs_channel_id) { try { const ch = await interaction.guild.channels.fetch(config.jobs_channel_id); if (ch?.isTextBased()) { const msg = await (ch as any).messages.fetch(msgId); await msg.delete(); } } catch { /* ignore */ } }
+      if (config?.jobs_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.jobs_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).messages.fetch(msgId);
+            await msg.delete();
+          }
+        } catch { /* ignore */ }
+      }
     }
     await interaction.editReply({ content: `✅ Job **${title}** deleted.`, embeds: [], components: [] });
     return;
@@ -304,8 +333,12 @@ export async function handleButton(interaction: ButtonInteraction) {
     const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
     const modal = new ModalBuilder().setCustomId(`job:applymodal:${id}`).setTitle(`Apply — ${title.slice(0, 40)}`);
     modal.addComponents(
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(new TextInputBuilder().setCustomId("message").setLabel("Why do you want this position?").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)),
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(new TextInputBuilder().setCustomId("experience").setLabel("Relevant experience (optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200))
+      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+        new TextInputBuilder().setCustomId("message").setLabel("Why do you want this position?").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+      ),
+      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+        new TextInputBuilder().setCustomId("experience").setLabel("Relevant experience (optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200)
+      )
     );
     await interaction.showModal(modal);
     return;
@@ -324,11 +357,13 @@ export async function handleButton(interaction: ButtonInteraction) {
       grouped[item.category].push(`${item.label} — Parts: ${money(item.cost)} | Labour: ${money(item.labour)} | Total: ${money(item.price)}`);
     }
     const embed = new EmbedBuilder()
-      .setTitle("📋  Parts Catalog  ·  Tokyo Drift Customs")
+      .setTitle("📋  Parts & Services Catalog")
       .setColor(COLORS.dark)
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();
-    for (const [cat, list] of Object.entries(grouped)) embed.addFields({ name: cat, value: list.join("\n").slice(0, 1024) });
+    for (const [cat, list] of Object.entries(grouped)) {
+      embed.addFields({ name: cat, value: list.join("\n").slice(0, 1024) });
+    }
     await interaction.editReply({ embeds: [embed] });
     return;
   }

@@ -1,0 +1,272 @@
+import {
+  ButtonInteraction, EmbedBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
+  ChannelType, PermissionFlagsBits,
+  RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
+  TextChannel
+} from "discord.js";
+import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
+import { requireRole } from "../lib/roles.js";
+import { buildAdminPanelEmbed, buildJobEmbed, COLORS } from "../lib/embeds.js";
+import { randomUUID } from "../lib/utils.js";
+import { postOrderPanel } from "./orderpanel.js";
+
+const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
+
+export async function handleAdminButton(interaction: ButtonInteraction): Promise<boolean> {
+  const [ns, section, action] = interaction.customId.split(":");
+  if (ns !== "admin") return false;
+
+  // Only owners, managers, trainers can use admin panel
+  if (!(await requireRole(interaction, "trainer"))) return true;
+
+  const guild = interaction.guild!;
+
+  // ── Refresh admin panel ───────────────────────────────────────────────────
+  if (section === "setup" && action === "refresh") {
+    await interaction.deferUpdate();
+    const config = await getGuildConfig(guild.id);
+    const embed = buildAdminPanelEmbed(config);
+    await interaction.editReply({ embeds: [embed] });
+    return true;
+  }
+
+  // ── Post Job Ad ────────────────────────────────────────────────────────────
+  if (section === "setup" && action === "jobpost") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const modal = new ModalBuilder().setCustomId("admin:jobpost").setTitle("Post a Job Ad");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("title").setLabel("Position Title").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("e.g. Performance Builder, Detailer...")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("body").setLabel("Job Description").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setPlaceholder("Describe the role, requirements, pay, etc...")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Set Roles ──────────────────────────────────────────────────────────────
+  if (section === "setup" && action === "roles") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const config = await getGuildConfig(guild.id);
+    const embed = new EmbedBuilder()
+      .setTitle("🎭  Role Configuration")
+      .setColor(COLORS.dark)
+      .setDescription(
+        "Use the dropdowns below to map your Discord roles to bot permission levels.\n\n" +
+        `**👑 Owner** → ${config?.owner_role_id ? `<@&${config.owner_role_id}>` : "_Not set_"}\n` +
+        `**🔧 Manager** → ${config?.manager_role_id ? `<@&${config.manager_role_id}>` : "_Not set_"}\n` +
+        `**📚 Trainer** → ${config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "_Not set_"}\n` +
+        `**🔩 Mechanic** → ${config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "_Not set_"}`
+      )
+      .setFooter({ text: FOOTER });
+    const rows = [
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:owner").setPlaceholder("👑 Select Owner role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:manager").setPlaceholder("🔧 Select Manager role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:trainer").setPlaceholder("📚 Select Trainer role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:mechanic").setPlaceholder("🔩 Select Mechanic role")),
+    ];
+    await interaction.editReply({ embeds: [embed], components: rows });
+    return true;
+  }
+
+  // ── Sales Channel ──────────────────────────────────────────────────────────
+  if (section === "setup" && action === "saleschannel") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setTitle("➕  Sales Channel Setup")
+      .setColor(COLORS.primary)
+      .setDescription(
+        "**How would you like to set up a sales channel?**\n\n" +
+        "🆕 **Create New** — the bot creates a fresh private channel for the mechanic\n" +
+        "🔗 **Use Existing** — attach an existing channel as a mechanic's sales channel"
+      )
+      .setFooter({ text: FOOTER });
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:saleschan:new").setLabel("🆕 Create New Channel").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:saleschan:existing").setLabel("🔗 Use Existing Channel").setStyle(ButtonStyle.Secondary),
+    );
+
+    await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Sales Channel: Create New (show modal for mechanic Discord ID) ─────────
+  if (section === "saleschan" && action === "new") {
+    const modal = new ModalBuilder().setCustomId("admin:saleschan:new").setTitle("Create Sales Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Sales Channel: Use Existing (show modal) ───────────────────────────────
+  if (section === "saleschan" && action === "existing") {
+    const modal = new ModalBuilder().setCustomId("admin:saleschan:existing").setTitle("Attach Existing Sales Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID to attach").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Timeclock Channel ──────────────────────────────────────────────────────
+  if (section === "setup" && action === "timeclock") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setTitle("⏰  Timeclock Channel Setup")
+      .setColor(COLORS.dark)
+      .setDescription("Create a new timeclock channel, or attach an existing one.")
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:timeclock:new").setLabel("🆕 Create New").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:timeclock:existing").setLabel("🔗 Use Existing").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  if (section === "timeclock" && action === "new") {
+    await interaction.deferUpdate();
+    try {
+      const config = await getGuildConfig(guild.id);
+      const ownerRoleId = config?.owner_role_id;
+      const managerRoleId = config?.manager_role_id;
+
+      const permOverwrites: any[] = [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+      ];
+      if (guild.members.me) {
+        permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
+      }
+      // Staff roles can view but not send
+      for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id, config?.mechanic_role_id].filter(Boolean)) {
+        permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
+      }
+
+      const ch = await guild.channels.create({
+        name: "tdc-timeclock",
+        type: ChannelType.GuildText,
+        topic: "⏰ Tokyo Drift Customs — Clock in and out here",
+        permissionOverwrites: permOverwrites
+      }) as TextChannel;
+
+      await postTimeclockPanel(ch);
+      await setGuildConfig(guild.id, "timeclock_channel_id", ch.id);
+      await interaction.followUp({ content: `✅ Timeclock channel created → <#${ch.id}>`, ephemeral: true });
+    } catch (err: any) {
+      await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
+    }
+    return true;
+  }
+
+  if (section === "timeclock" && action === "existing") {
+    const modal = new ModalBuilder().setCustomId("admin:timeclock:existing").setTitle("Attach Existing Timeclock Channel");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Generic channel setups (orders, jobs, logs, archive) ──────────────────
+  const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id"; name: string; topic: string; label: string }> = {
+    orders:  { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",   label: "Orders"  },
+    jobs:    { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",        label: "Jobs"    },
+    logs:    { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",         label: "Logs"    },
+    archive: { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",     label: "Archive" },
+  };
+
+  if (section === "setup" && action in channelMap) {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const cfg = channelMap[action];
+    const embed = new EmbedBuilder()
+      .setTitle(`📡  ${cfg.label} Channel Setup`)
+      .setColor(COLORS.dark)
+      .setDescription(`Create a new **#${cfg.name}** channel or attach an existing one.`)
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`admin:chan:new:${action}`).setLabel("🆕 Create New").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`admin:chan:existing:${action}`).setLabel("🔗 Use Existing").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Generic channel new ───────────────────────────────────────────────────
+  if (section === "chan" && action === "new") {
+    const chanType = interaction.customId.split(":")[3];
+    const cfg = channelMap[chanType];
+    if (!cfg) return false;
+    await interaction.deferUpdate();
+    try {
+      const ch = await guild.channels.create({ name: cfg.name, type: ChannelType.GuildText, topic: cfg.topic }) as any;
+      await setGuildConfig(guild.id, cfg.field, ch.id);
+      await interaction.followUp({ content: `✅ **#${cfg.name}** created → <#${ch.id}>`, ephemeral: true });
+    } catch (err: any) {
+      await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
+    }
+    return true;
+  }
+
+  // ── Generic channel existing ──────────────────────────────────────────────
+  if (section === "chan" && action === "existing") {
+    const chanType = interaction.customId.split(":")[3];
+    const cfg = channelMap[chanType];
+    if (!cfg) return false;
+    const modal = new ModalBuilder().setCustomId(`admin:chan:setexisting:${chanType}`).setTitle(`Attach ${cfg.label} Channel`);
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  return false;
+}
+
+export async function postTimeclockPanel(channel: TextChannel) {
+  const { EmbedBuilder } = await import("discord.js");
+  const panelEmbed = new EmbedBuilder()
+    .setTitle("⏰  TIME CLOCK")
+    .setColor(0x0d0d0d)
+    .setDescription(
+      "**Tokyo Drift Customs — Shift Tracker**\n\n" +
+      "Click **Clock In** when your shift starts.\n" +
+      "Click **Clock Out** when you're done — it'll log your total time and orders completed.\n\n" +
+      "*Only mechanics and above can use these buttons.*"
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+    .setTimestamp();
+
+  const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
+  );
+
+  const msg = await channel.send({ embeds: [panelEmbed], components: [clockRow] });
+  try { await msg.pin(); } catch { /* ignore */ }
+  return msg;
+}
