@@ -6,7 +6,8 @@ import {
 } from "discord.js";
 import { db, getProfile, getSetting, rowToOrder, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, buildDraftEmbed, COLORS, money } from "../lib/embeds.js";
+import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, buildClockInEmbed, COLORS, money } from "../lib/embeds.js";
+import { randomUUID } from "../lib/utils.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -23,25 +24,31 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
     });
+
     if (!active.rows[0]) {
+      // Show ephemeral clock-in embed with a clock-in button
+      const promptEmbed = buildClockInPromptEmbed();
+      const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In Now").setStyle(ButtonStyle.Success)
+      );
       await interaction.reply({
-        content: "⏰ **You need to clock in before creating an order.**\nHead to the timeclock channel and hit **Clock In** first.",
+        embeds: [promptEmbed],
+        components: [clockRow],
         ephemeral: true
       });
       return true;
     }
 
-    // Skip the notes modal — go straight to the draft
+    // Clocked in — go straight to draft (no notes modal)
     await interaction.deferReply({ ephemeral: true });
 
-    const { randomUUID } = await import("../lib/utils.js");
+    const newOrderId = randomUUID();
     const { nextOrderNumber } = await import("../db.js");
-    const orderId = randomUUID();
     const orderNumber = await nextOrderNumber();
 
     await db.execute({
       sql: "INSERT INTO orders (id, order_number, mechanic_id, status, items, parts_cost, total, labour, notes) VALUES (?, ?, ?, 'draft', '[]', 0, 0, 0, '')",
-      args: [orderId, orderNumber, interaction.user.id]
+      args: [newOrderId, orderNumber, interaction.user.id]
     });
 
     const catalogStr = await getSetting("parts_catalog");
@@ -49,7 +56,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const categories: string[] = catalog.categories ?? [];
 
     const catSelect = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectcategory:${orderId}`)
+      .setCustomId(`order:selectcategory:${newOrderId}`)
       .setPlaceholder("Pick a service category...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
@@ -57,14 +64,14 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const rate = profile?.commission_rate ?? 0.3;
 
     const draft = rowToOrder(
-      (await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]
+      (await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] })).rows[0]
     );
 
     await interaction.editReply({
       embeds: [buildDraftEmbed(draft, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        draftButtons(orderId)
+        draftButtons(newOrderId)
       ]
     });
     return true;
@@ -143,13 +150,21 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", commRate);
     const commission = completed.labour * commRate;
 
-    // Post to mechanic's sales channel
+    // "New Order" button to attach to the sales channel post
+    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("order:newpanel")
+        .setLabel("📋  New Order")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    // Post to mechanic's sales channel WITH the New Order button
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {
       try {
         const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
         if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed] });
+          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
           postedTo = profile.sales_channel_id;
           await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
         }
@@ -159,7 +174,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>\n💵 **Commission: ${money(commission)}**`
-        : `✅ **${completed.order_number}** complete!\n💵 **Commission: ${money(commission)}**\n_Set up a sales channel to auto-post orders._`,
+        : `✅ **${completed.order_number}** complete!\n💵 **Commission: ${money(commission)}**\n*Set up a sales channel to auto-post orders.*`,
       embeds: [embed],
       components: []
     });

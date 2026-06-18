@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   ChannelType, PermissionFlagsBits,
-  RoleSelectMenuBuilder, ChannelSelectMenuBuilder,
+  RoleSelectMenuBuilder,
   TextChannel
 } from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
@@ -11,19 +11,21 @@ import { requireRole } from "../lib/roles.js";
 import { buildAdminPanelEmbed, buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
+import { showCreateRaffleModal } from "./raffle.js";
+import { showLoaModal } from "./loa.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export async function handleAdminButton(interaction: ButtonInteraction): Promise<boolean> {
-  const [ns, section, action] = interaction.customId.split(":");
+  const parts = interaction.customId.split(":");
+  const [ns, section, action] = parts;
   if (ns !== "admin") return false;
 
-  // Only owners, managers, trainers can use admin panel
   if (!(await requireRole(interaction, "trainer"))) return true;
 
   const guild = interaction.guild!;
 
-  // ── Refresh admin panel ───────────────────────────────────────────────────
+  // ── Refresh admin panel ────────────────────────────────────────────────────
   if (section === "setup" && action === "refresh") {
     await interaction.deferUpdate();
     const config = await getGuildConfig(guild.id);
@@ -48,6 +50,19 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
+  // ── Create Raffle ──────────────────────────────────────────────────────────
+  if (section === "setup" && action === "createraffle") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await showCreateRaffleModal(interaction);
+    return true;
+  }
+
+  // ── Submit LOA (for mechanics via admin panel) ─────────────────────────────
+  if (section === "setup" && action === "loa") {
+    await showLoaModal(interaction);
+    return true;
+  }
+
   // ── Set Roles ──────────────────────────────────────────────────────────────
   if (section === "setup" && action === "roles") {
     if (!(await requireRole(interaction, "owner"))) return true;
@@ -57,11 +72,11 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setTitle("🎭  Role Configuration")
       .setColor(COLORS.dark)
       .setDescription(
-        "Use the dropdowns below to map your Discord roles to bot permission levels.\n\n" +
-        `**👑 Owner** → ${config?.owner_role_id ? `<@&${config.owner_role_id}>` : "_Not set_"}\n` +
-        `**🔧 Manager** → ${config?.manager_role_id ? `<@&${config.manager_role_id}>` : "_Not set_"}\n` +
-        `**📚 Trainer** → ${config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "_Not set_"}\n` +
-        `**🔩 Mechanic** → ${config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "_Not set_"}`
+        "Map your Discord roles to bot permission levels.\n\n" +
+        `👑 Owner → ${config?.owner_role_id ? `<@&${config.owner_role_id}>` : "_Not set_"}\n` +
+        `🔧 Manager → ${config?.manager_role_id ? `<@&${config.manager_role_id}>` : "_Not set_"}\n` +
+        `📚 Trainer → ${config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "_Not set_"}\n` +
+        `🔩 Mechanic → ${config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "_Not set_"}`
       )
       .setFooter({ text: FOOTER });
     const rows = [
@@ -74,31 +89,27 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Sales Channel ──────────────────────────────────────────────────────────
+  // ── Sales Channel setup ────────────────────────────────────────────────────
   if (section === "setup" && action === "saleschannel") {
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
-
     const embed = new EmbedBuilder()
       .setTitle("➕  Sales Channel Setup")
       .setColor(COLORS.primary)
       .setDescription(
         "**How would you like to set up a sales channel?**\n\n" +
-        "🆕 **Create New** — the bot creates a fresh private channel for the mechanic\n" +
-        "🔗 **Use Existing** — attach an existing channel as a mechanic's sales channel"
+        "🆕 **Create New** — bot creates a fresh private channel for the mechanic\n" +
+        "🔗 **Use Existing** — attach an existing channel as their sales channel"
       )
       .setFooter({ text: FOOTER });
-
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:saleschan:new").setLabel("🆕 Create New Channel").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:saleschan:existing").setLabel("🔗 Use Existing Channel").setStyle(ButtonStyle.Secondary),
     );
-
     await interaction.editReply({ embeds: [embed], components: [row] });
     return true;
   }
 
-  // ── Sales Channel: Create New (show modal for mechanic Discord ID) ─────────
   if (section === "saleschan" && action === "new") {
     const modal = new ModalBuilder().setCustomId("admin:saleschan:new").setTitle("Create Sales Channel");
     modal.addComponents(
@@ -110,7 +121,6 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Sales Channel: Use Existing (show modal) ───────────────────────────────
   if (section === "saleschan" && action === "existing") {
     const modal = new ModalBuilder().setCustomId("admin:saleschan:existing").setTitle("Attach Existing Sales Channel");
     modal.addComponents(
@@ -125,15 +135,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Timeclock Channel ──────────────────────────────────────────────────────
+  // ── Timeclock channel ──────────────────────────────────────────────────────
   if (section === "setup" && action === "timeclock") {
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
-
     const embed = new EmbedBuilder()
       .setTitle("⏰  Timeclock Channel Setup")
       .setColor(COLORS.dark)
-      .setDescription("Create a new timeclock channel, or attach an existing one.")
+      .setDescription("Create a new timeclock channel or attach an existing one.")
       .setFooter({ text: FOOTER });
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:timeclock:new").setLabel("🆕 Create New").setStyle(ButtonStyle.Primary),
@@ -147,27 +156,21 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     await interaction.deferUpdate();
     try {
       const config = await getGuildConfig(guild.id);
-      const ownerRoleId = config?.owner_role_id;
-      const managerRoleId = config?.manager_role_id;
-
       const permOverwrites: any[] = [
         { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
       ];
       if (guild.members.me) {
         permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
       }
-      // Staff roles can view but not send
       for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id, config?.mechanic_role_id].filter(Boolean)) {
         permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
       }
-
       const ch = await guild.channels.create({
         name: "tdc-timeclock",
         type: ChannelType.GuildText,
         topic: "⏰ Tokyo Drift Customs — Clock in and out here",
         permissionOverwrites: permOverwrites
       }) as TextChannel;
-
       await postTimeclockPanel(ch);
       await setGuildConfig(guild.id, "timeclock_channel_id", ch.id);
       await interaction.followUp({ content: `✅ Timeclock channel created → <#${ch.id}>`, ephemeral: true });
@@ -188,12 +191,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Generic channel setups (orders, jobs, logs, archive) ──────────────────
-  const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id"; name: string; topic: string; label: string }> = {
-    orders:  { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",   label: "Orders"  },
-    jobs:    { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",        label: "Jobs"    },
-    logs:    { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",         label: "Logs"    },
-    archive: { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",     label: "Archive" },
+  // ── Generic channel setups ─────────────────────────────────────────────────
+  const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id"; name: string; topic: string; label: string }> = {
+    orders:   { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",  label: "Orders"  },
+    jobs:     { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",       label: "Jobs"    },
+    logs:     { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",        label: "Logs"    },
+    archive:  { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",    label: "Archive" },
+    loach:    { field: "loa_channel_id",      name: "tdc-loa",     topic: "Tokyo Drift Customs — Leave of Absence",   label: "LOA"     },
+    rafflech: { field: "raffle_channel_id",   name: "tdc-raffle",  topic: "Tokyo Drift Customs — Raffles",            label: "Raffle"  },
   };
 
   if (section === "setup" && action in channelMap) {
@@ -203,7 +208,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     const embed = new EmbedBuilder()
       .setTitle(`📡  ${cfg.label} Channel Setup`)
       .setColor(COLORS.dark)
-      .setDescription(`Create a new **#${cfg.name}** channel or attach an existing one.`)
+      .setDescription(`Create a new **#${cfg.name}** channel, or attach an existing one.`)
       .setFooter({ text: FOOTER });
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`admin:chan:new:${action}`).setLabel("🆕 Create New").setStyle(ButtonStyle.Primary),
@@ -213,9 +218,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Generic channel new ───────────────────────────────────────────────────
   if (section === "chan" && action === "new") {
-    const chanType = interaction.customId.split(":")[3];
+    const chanType = parts[3];
     const cfg = channelMap[chanType];
     if (!cfg) return false;
     await interaction.deferUpdate();
@@ -229,9 +233,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Generic channel existing ──────────────────────────────────────────────
   if (section === "chan" && action === "existing") {
-    const chanType = interaction.customId.split(":")[3];
+    const chanType = parts[3];
     const cfg = channelMap[chanType];
     if (!cfg) return false;
     const modal = new ModalBuilder().setCustomId(`admin:chan:setexisting:${chanType}`).setTitle(`Attach ${cfg.label} Channel`);
@@ -248,7 +251,6 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 }
 
 export async function postTimeclockPanel(channel: TextChannel) {
-  const { EmbedBuilder } = await import("discord.js");
   const panelEmbed = new EmbedBuilder()
     .setTitle("⏰  TIME CLOCK")
     .setColor(0x0d0d0d)

@@ -24,6 +24,8 @@ import { handleModal }        from "./interactions/modals.js";
 import { handleSelect }       from "./interactions/selects.js";
 import { handleAdminButton }  from "./interactions/adminbuttons.js";
 import { handleAdminModal }   from "./interactions/adminmodals.js";
+import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
+import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -104,22 +106,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
-      // Admin panel buttons first
-      const adminHandled = await handleAdminButton(interaction);
-      if (adminHandled) return;
-      // Draft order buttons
-      const draftHandled = await handleDraftButton(interaction);
-      if (draftHandled) return;
-      // Everything else
+      if (await handleAdminButton(interaction)) return;
+      if (await handleRaffleButton(interaction)) return;
+      if (await handleLoaButton(interaction)) return;
+      if (await handleDraftButton(interaction)) return;
       await handleButton(interaction);
       return;
     }
 
     if (interaction.isModalSubmit()) {
-      // Admin modals first
-      const adminHandled = await handleAdminModal(interaction);
-      if (adminHandled) return;
-      // Everything else
+      if (await handleAdminModal(interaction)) return;
+      if (await handleRaffleModal(interaction)) return;
+      if (await handleLoaModal(interaction)) return;
       await handleModal(interaction);
       return;
     }

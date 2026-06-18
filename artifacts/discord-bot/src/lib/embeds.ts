@@ -12,6 +12,8 @@ export const COLORS = {
   paid:      0x10b981,
   warning:   0xf59e0b,
   gold:      0xffd700,
+  raffle:    0x9b59b6,
+  loa:       0xf39c12,
 } as const;
 
 export function money(n: number): string {
@@ -49,7 +51,6 @@ export function statusColor(status: string): number {
 }
 
 const FOOTER_TEXT = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
-const DIVIDER = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬";
 
 export function buildOrderEmbed(
   order: Order,
@@ -69,42 +70,34 @@ export function buildOrderEmbed(
     archived:  "🗃️ ARCHIVED"
   };
 
+  // Clean bullet-point format — no code boxes
   const itemLines = items.length
-    ? items.map(i => `\`${i.category.padEnd(16)}\` **${i.label}** — ${money(i.price)}`).join("\n")
+    ? items.map(i => `• **${i.label}** — ${money(i.price)}`).join("\n")
     : "*No services added*";
 
   const dateTs = Math.floor(new Date(order.created_at).getTime() / 1000);
+  const noteBlock = order.notes ? `\n\n📋 **Notes:** ${order.notes.slice(0, 300)}` : "";
 
   const embed = new EmbedBuilder()
-    .setTitle(`🏁  ORDER  ·  ${order.order_number}`)
+    .setTitle(`🏁  Tokyo Drift Customs — Invoice`)
     .setColor(statusColor(order.status))
     .setDescription(
       `**${statusLabel[order.status] ?? order.status.toUpperCase()}**\n` +
-      `> **Mechanic:** ${mechanicName}\n` +
-      `> **Date:** <t:${dateTs}:D>  ·  <t:${dateTs}:t>`
+      `Mechanic: **${mechanicName}**  ·  <t:${dateTs}:D>${noteBlock}`
     )
     .addFields(
-      {
-        name: "🔧 Services",
-        value: itemLines.slice(0, 1024),
-        inline: false
-      },
-      { name: DIVIDER, value: "\u200b", inline: false },
-      { name: "🔩 Parts Cost",        value: `\`${money(order.parts_cost)}\``, inline: true },
-      { name: "⚙️ Labour",            value: `\`${money(order.labour)}\``,     inline: true },
-      { name: "💰 Customer Total",    value: `**\`${money(order.total)}\`**`,   inline: true }
+      { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
+      { name: "🔩 Parts Cost",     value: money(order.parts_cost), inline: true },
+      { name: "⚙️ Labour",        value: money(order.labour),     inline: true },
+      { name: "💰 Customer Total", value: money(order.total),      inline: true }
     );
 
   if (order.status !== "draft") {
     embed.addFields({
-      name: `💵 YOUR CUT  ·  ${(commissionRate * 100).toFixed(0)}%`,
-      value: `# ${money(commission)}`,
+      name: `💵 Your Commission  ·  ${(commissionRate * 100).toFixed(0)}%`,
+      value: `**${money(commission)}**`,
       inline: false
     });
-  }
-
-  if (order.notes) {
-    embed.addFields({ name: "📋 Customer Notes", value: `> ${order.notes.slice(0, 512)}`, inline: false });
   }
 
   embed.setFooter({ text: FOOTER_TEXT }).setTimestamp();
@@ -126,24 +119,20 @@ export function buildDraftEmbed(
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
   const commission = order.labour * commissionRate;
 
+  // Clean bullet-point format — no code boxes
   const itemLines = items.length
-    ? items.map(i => `\`${i.category.padEnd(16)}\` **${i.label}** — ${money(i.price)}`).join("\n")
-    : "*No services added yet — pick a category below*";
+    ? items.map(i => `• **${i.label}** — ${money(i.price)}`).join("\n")
+    : "*No services yet — pick a category below*";
 
   return new EmbedBuilder()
-    .setTitle(`🔧  NEW ORDER  ·  ${order.order_number}`)
+    .setTitle(`🔧  Draft Order  ·  ${order.order_number}`)
     .setColor(COLORS.draft)
-    .setDescription("Pick services from the dropdown. Adjust labour if needed, then hit **Complete Order** when done.")
+    .setDescription("Pick services from the dropdown. Adjust labour if needed, then hit **Complete Order**.")
     .addFields(
-      {
-        name: "🛠️ Services Added",
-        value: itemLines.slice(0, 1024),
-        inline: false
-      },
-      { name: DIVIDER, value: "\u200b", inline: false },
-      { name: "🔩 Parts",               value: `\`${money(order.parts_cost)}\``, inline: true },
-      { name: "⚙️ Labour",              value: `\`${money(order.labour)}\``,     inline: true },
-      { name: "💰 Total",               value: `**\`${money(order.total)}\`**`,  inline: true },
+      { name: "🛠️ Services", value: itemLines.slice(0, 1024), inline: false },
+      { name: "🔩 Parts",    value: money(order.parts_cost), inline: true },
+      { name: "⚙️ Labour",  value: money(order.labour),     inline: true },
+      { name: "💰 Total",   value: money(order.total),      inline: true },
       { name: `💵 Est. Commission  ·  ${(commissionRate * 100).toFixed(0)}%`, value: `**${money(commission)}**`, inline: false }
     )
     .setFooter({ text: FOOTER_TEXT })
@@ -181,10 +170,10 @@ export function buildClockOutEmbed(
     .setColor(COLORS.primary)
     .setDescription(`**${mechanicName}** has clocked out.`)
     .addFields(
-      { name: "🟢 Clocked In",    value: `<t:${inTs}:t>`,              inline: true },
-      { name: "🔴 Clocked Out",   value: `<t:${outTs}:t>`,             inline: true },
-      { name: "⏱️ Total Time",    value: `**${hrs}h ${mins}m**`,       inline: true },
-      { name: "📋 Orders This Shift", value: `**${ordersThisSession}**`, inline: true }
+      { name: "🟢 Clocked In",        value: `<t:${inTs}:t>`,          inline: true },
+      { name: "🔴 Clocked Out",        value: `<t:${outTs}:t>`,         inline: true },
+      { name: "⏱️ Total Time",         value: `**${hrs}h ${mins}m**`,   inline: true },
+      { name: "📋 Orders This Shift",  value: `**${ordersThisSession}**`, inline: true }
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Shift closed" })
     .setTimestamp();
@@ -198,10 +187,19 @@ export function buildTimeclockEmbed(
   status: string,
   notes: string | null
 ): EmbedBuilder {
-  if (clockOut) {
-    return buildClockOutEmbed(mechanicName, clockIn, clockOut, durationMins);
-  }
+  if (clockOut) return buildClockOutEmbed(mechanicName, clockIn, clockOut, durationMins);
   return buildClockInEmbed(mechanicName, clockIn);
+}
+
+export function buildClockInPromptEmbed(): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle("⏰  Clock In Required")
+    .setColor(COLORS.warning)
+    .setDescription(
+      "**You need to be clocked in before creating an order.**\n\n" +
+      "Click the button below to clock in — your shift will start immediately and appear in the timeclock channel."
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." });
 }
 
 export function buildPayoutEmbed(
@@ -214,18 +212,18 @@ export function buildPayoutEmbed(
   const labour = commissionRate > 0 ? payout.amount / commissionRate : 0;
 
   return new EmbedBuilder()
-    .setTitle(`💸  PAYOUT  ·  ${mechanicName}`)
+    .setTitle(`💸  Payout  ·  ${mechanicName}`)
     .setColor(COLORS.paid)
     .setDescription(`Payout processed for **${mechanicName}** — week of ${payout.week_start}`)
     .addFields(
-      { name: "📅 Week",              value: `${payout.week_start} – ${weekEnd}`,   inline: true },
-      { name: "✅ Paid",              value: `<t:${Math.floor(Date.now() / 1000)}:D>`, inline: true },
-      { name: "\u200b",               value: "\u200b",                                 inline: true },
-      { name: "📋 Orders",            value: `**${payout.order_count}**`,            inline: true },
-      { name: "💰 Total Revenue",     value: `**${money(labour)}**`,                 inline: true },
-      { name: "🕐 Hours Worked",      value: `**${payout.hours_worked.toFixed(1)} hrs**`, inline: true },
-      { name: "📊 Commission Rate",   value: `**${(commissionRate * 100).toFixed(0)}%**`,  inline: true },
-      { name: "💵 TOTAL PAYOUT",      value: `# ${money(payout.amount)}`,            inline: false }
+      { name: "📅 Week",           value: `${payout.week_start} – ${weekEnd}`,          inline: true },
+      { name: "✅ Paid",           value: `<t:${Math.floor(Date.now() / 1000)}:D>`,      inline: true },
+      { name: "\u200b",            value: "\u200b",                                       inline: true },
+      { name: "📋 Orders",         value: `**${payout.order_count}**`,                   inline: true },
+      { name: "💰 Total Revenue",  value: `**${money(labour)}**`,                        inline: true },
+      { name: "🕐 Hours Worked",   value: `**${payout.hours_worked.toFixed(1)} hrs**`,   inline: true },
+      { name: "📊 Commission Rate",value: `**${(commissionRate * 100).toFixed(0)}%**`,   inline: true },
+      { name: "💵 TOTAL PAYOUT",   value: `**${money(payout.amount)}**`,                 inline: false }
     )
     .setFooter({ text: `東京ドリフトカスタム  ·  Processed by ${processedBy}` })
     .setTimestamp();
@@ -250,16 +248,16 @@ export function buildDashboardEmbed(
   const pct = Math.round((weekRevenue / weeklyTarget) * 100);
 
   return new EmbedBuilder()
-    .setTitle(`📊  SALES DASHBOARD  ·  ${mechanicName}`)
+    .setTitle(`📊  Sales Dashboard  ·  ${mechanicName}`)
     .setColor(COLORS.primary)
     .setDescription(`**Status:** ${statusEmoji(status)} ${status.replace("_", " ").toUpperCase()}  ·  **${weekHours.toFixed(1)} hrs** this week`)
     .addFields(
-      { name: "📅 Today",          value: `**${todayOrders}** orders\n${money(todayRevenue)}`,   inline: true },
-      { name: "📆 This Week",      value: `**${weekOrders}** orders\n${money(weekRevenue)}`,     inline: true },
-      { name: "📈 Year to Date",   value: `**${ytdOrders}** orders\n${money(ytdRevenue)}`,       inline: true },
-      { name: "💵 Commission (Week)", value: `**${money(weekCommission)}**`,                     inline: true },
-      { name: "💵 Commission (YTD)",  value: `**${money(ytdCommission)}**`,                     inline: true },
-      { name: "\u200b",           value: "\u200b",                                               inline: true },
+      { name: "📅 Today",             value: `**${todayOrders}** orders\n${money(todayRevenue)}`,  inline: true },
+      { name: "📆 This Week",         value: `**${weekOrders}** orders\n${money(weekRevenue)}`,    inline: true },
+      { name: "📈 Year to Date",      value: `**${ytdOrders}** orders\n${money(ytdRevenue)}`,      inline: true },
+      { name: "💵 Commission (Week)", value: `**${money(weekCommission)}**`,                        inline: true },
+      { name: "💵 Commission (YTD)",  value: `**${money(ytdCommission)}**`,                        inline: true },
+      { name: "\u200b",               value: "\u200b",                                             inline: true },
       { name: `🎯 Weekly Target  ·  ${pct}%`, value: `\`${revBar}\`\n${money(weekRevenue)} / ${money(weeklyTarget)}`, inline: false }
     )
     .setFooter({ text: FOOTER_TEXT })
@@ -268,7 +266,7 @@ export function buildDashboardEmbed(
 
 export function buildJobEmbed(title: string, body: string, postedBy: string, expiresAt?: string): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle(`🔧  NOW HIRING  ·  ${title}`)
+    .setTitle(`🔧  Now Hiring  ·  ${title}`)
     .setColor(COLORS.gold)
     .setDescription(body)
     .addFields(
@@ -287,38 +285,108 @@ export function buildAdminPanelEmbed(config: {
   log_channel_id: string | null;
   archive_channel_id: string | null;
   timeclock_channel_id: string | null;
+  loa_channel_id?: string | null;
+  raffle_channel_id?: string | null;
   owner_role_id: string | null;
   manager_role_id: string | null;
   trainer_role_id: string | null;
   mechanic_role_id: string | null;
 } | null): EmbedBuilder {
-  const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`❌ Not set`";
-  const ro = (id: string | null | undefined) => id ? `<@&${id}>` : "`❌ Not set`";
+  const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
+  const ro = (id: string | null | undefined) => id ? `<@&${id}>` : "`Not set`";
 
   return new EmbedBuilder()
-    .setTitle("⚙️  TDC ADMIN PANEL")
+    .setTitle("⚙️  TDC Admin Panel")
     .setColor(COLORS.dark)
     .setDescription(
       "**Tokyo Drift Customs — Server Control Panel**\n" +
-      "Use the buttons below to configure channels, roles, and more.\n" +
+      "Use the buttons below to configure channels, roles, and systems.\n" +
       "Only owners, managers, and trainers can interact with this panel."
     )
     .addFields(
-      { name: DIVIDER, value: "**📡 Channels**", inline: false },
-      { name: "📋 Orders",    value: ch(config?.orders_channel_id),    inline: true },
-      { name: "🕐 Timeclock", value: ch(config?.timeclock_channel_id), inline: true },
-      { name: "💼 Jobs",      value: ch(config?.jobs_channel_id),      inline: true },
-      { name: "📜 Logs",      value: ch(config?.log_channel_id),       inline: true },
-      { name: "🗃️ Archive",  value: ch(config?.archive_channel_id),   inline: true },
-      { name: "\u200b",       value: "\u200b",                          inline: true },
-      { name: DIVIDER, value: "**🎭 Roles**", inline: false },
-      { name: "👑 Owner",     value: ro(config?.owner_role_id),    inline: true },
-      { name: "🔧 Manager",   value: ro(config?.manager_role_id),  inline: true },
-      { name: "📚 Trainer",   value: ro(config?.trainer_role_id),  inline: true },
-      { name: "🔩 Mechanic",  value: ro(config?.mechanic_role_id), inline: true },
-      { name: "\u200b",       value: "\u200b",                     inline: true },
-      { name: "\u200b",       value: "\u200b",                     inline: true },
+      { name: "📡 Channels", value:
+          `📋 Orders: ${ch(config?.orders_channel_id)}\n` +
+          `⏰ Timeclock: ${ch(config?.timeclock_channel_id)}\n` +
+          `💼 Jobs: ${ch(config?.jobs_channel_id)}\n` +
+          `📜 Logs: ${ch(config?.log_channel_id)}\n` +
+          `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
+          `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
+          `🎰 Raffle: ${ch(config?.raffle_channel_id)}`,
+        inline: true
+      },
+      { name: "🎭 Roles", value:
+          `👑 Owner: ${ro(config?.owner_role_id)}\n` +
+          `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
+          `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
+          `🔩 Mechanic: ${ro(config?.mechanic_role_id)}`,
+        inline: true
+      }
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+    .setTimestamp();
+}
+
+export function buildRaffleEmbed(raffle: {
+  id: string;
+  title: string;
+  description: string;
+  winner_count: number;
+  ends_at: string | null;
+  entry_count: number;
+  status: string;
+  prizes?: string[];
+}): EmbedBuilder {
+  const ts = raffle.ends_at ? Math.floor(new Date(raffle.ends_at).getTime() / 1000) : null;
+  const prizes = raffle.prizes?.length ? raffle.prizes.map((p, i) => `${i + 1}. ${p}`).join("\n") : raffle.title;
+
+  const statusLine = raffle.status === "active"
+    ? (ts ? `⏰ Ends: <t:${ts}:R>  ·  <t:${ts}:F>` : "⏰ Ends when the owner starts the wheel")
+    : raffle.status === "ended" ? "🏁 Raffle has ended"
+    : "🎰 Spinning...";
+
+  return new EmbedBuilder()
+    .setTitle("🎰  RAFFLE  ·  Tokyo Drift Customs")
+    .setColor(COLORS.raffle)
+    .setDescription(
+      `## ${raffle.title}\n\n${raffle.description}\n\n${statusLine}`
+    )
+    .addFields(
+      { name: "🎁 Prize(s)",      value: prizes,                          inline: true },
+      { name: "🏆 Winners",       value: `**${raffle.winner_count}**`,    inline: true },
+      { name: "🎟️ Entries",      value: `**${raffle.entry_count}**`,     inline: true }
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Good luck! 🍀" })
+    .setTimestamp();
+}
+
+export function buildLoaEmbed(loa: {
+  mechanic_name: string;
+  reason: string;
+  start_date: string;
+  return_date: string;
+  notes?: string;
+  status: string;
+}): EmbedBuilder {
+  const startTs  = Math.floor(new Date(loa.start_date).getTime() / 1000);
+  const returnTs = Math.floor(new Date(loa.return_date).getTime() / 1000);
+
+  const statusColors: Record<string, number> = { pending: COLORS.warning, approved: COLORS.approved, denied: COLORS.rejected };
+  const statusLabels: Record<string, string> = { pending: "⏳ Pending", approved: "✅ Approved", denied: "❌ Denied" };
+
+  return new EmbedBuilder()
+    .setTitle(`🌴  Leave of Absence  ·  ${loa.mechanic_name}`)
+    .setColor(statusColors[loa.status] ?? COLORS.loa)
+    .setDescription(`**${loa.mechanic_name}** has submitted a Leave of Absence request.`)
+    .addFields(
+      { name: "📋 Status",       value: statusLabels[loa.status] ?? loa.status, inline: true },
+      { name: "👤 Mechanic",     value: loa.mechanic_name,                       inline: true },
+      { name: "\u200b",          value: "\u200b",                                inline: true },
+      { name: "📅 Start Date",   value: `<t:${startTs}:D>  ·  <t:${startTs}:R>`,  inline: true },
+      { name: "🔙 Return Date",  value: `<t:${returnTs}:D>  ·  <t:${returnTs}:R>`, inline: true },
+      { name: "\u200b",          value: "\u200b",                                inline: true },
+      { name: "📝 Reason",       value: loa.reason,                              inline: false },
+      ...(loa.notes ? [{ name: "📌 Additional Notes", value: loa.notes, inline: false }] : [])
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Leave of Absence" })
     .setTimestamp();
 }

@@ -2,19 +2,16 @@ import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ChannelType, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  PermissionFlagsBits, RoleSelectMenuBuilder,
-  ChannelSelectMenuBuilder, TextChannel
+  PermissionFlagsBits, TextChannel
 } from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
-import { COLORS, buildAdminPanelEmbed } from "../lib/embeds.js";
+import { getGuildConfig } from "../db.js";
+import { buildAdminPanelEmbed } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
   .setName("setup")
   .setDescription("Tokyo Drift Customs — setup & configuration")
-  .addSubcommand(s => s.setName("init").setDescription("Create the #tdc-admin control panel channel and post the setup panel"))
+  .addSubcommand(s => s.setName("init").setDescription("Create the #tdc-admin control panel channel"))
   .addSubcommand(s => s.setName("status").setDescription("Show current bot configuration"));
-
-const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ ephemeral: true });
@@ -28,11 +25,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // ── /setup init ────────────────────────────────────────────────────────────
   if (sub === "init") {
     const config = await getGuildConfig(guild.id);
 
-    // Build permission overwrites for the admin channel
     const permOverwrites: any[] = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
     ];
@@ -66,7 +61,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
 
     await postAdminPanel(adminChannel, guild.id);
-    await interaction.editReply({ content: `✅ Admin panel posted in <#${adminChannel.id}>\nAll bot setup can be done from there.` });
+    await interaction.editReply({ content: `✅ Admin panel created in <#${adminChannel.id}>` });
   }
 }
 
@@ -74,24 +69,31 @@ export async function postAdminPanel(channel: TextChannel, guildId: string) {
   const config = await getGuildConfig(guildId);
   const embed = buildAdminPanelEmbed(config);
 
-  // Row 1: Channel setup buttons
+  // Row 1 — channel setup
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("admin:setup:saleschannel").setLabel("➕ Sales Channel").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("admin:setup:saleschannel").setLabel("➕ Sales Ch").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰ Timeclock").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("admin:setup:orders").setLabel("📋 Orders Ch").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("admin:setup:jobs").setLabel("💼 Jobs Ch").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("admin:setup:logs").setLabel("📜 Logs Ch").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:orders").setLabel("📋 Orders").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:jobs").setLabel("💼 Jobs").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
   );
 
-  // Row 2: More setup + roles
+  // Row 2 — more channels + roles
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("admin:setup:archive").setLabel("🗃️ Archive Ch").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("admin:setup:roles").setLabel("🎭 Set Roles").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("admin:setup:jobpost").setLabel("📢 Post Job Ad").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("admin:setup:archive").setLabel("🗃️ Archive").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:loach").setLabel("🌴 LOA Ch").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:rafflech").setLabel("🎰 Raffle Ch").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:setup:roles").setLabel("🎭 Roles").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("admin:setup:refresh").setLabel("🔄 Refresh").setStyle(ButtonStyle.Secondary),
   );
 
-  const msg = await channel.send({ embeds: [embed], components: [row1, row2] });
+  // Row 3 — actions
+  const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("admin:setup:jobpost").setLabel("📢 Post Job Ad").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("admin:setup:createraffle").setLabel("🎰 Create Raffle").setStyle(ButtonStyle.Success),
+  );
+
+  const msg = await channel.send({ embeds: [embed], components: [row1, row2, row3] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }
