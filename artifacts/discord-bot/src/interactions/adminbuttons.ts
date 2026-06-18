@@ -11,7 +11,7 @@ import { requireRole } from "../lib/roles.js";
 import { buildAdminPanelEmbed, buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
-import { showCreateRaffleModal } from "./raffle.js";
+import { showRaffleTypeSelector } from "./raffle.js";
 import { showLoaModal } from "./loa.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
@@ -30,7 +30,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── MODAL-FIRST HANDLERS (single role check, immediately show modal) ────────
   if (section === "setup" && action === "createraffle") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await showCreateRaffleModal(interaction);
+    await showRaffleTypeSelector(interaction);
     return true;
   }
 
