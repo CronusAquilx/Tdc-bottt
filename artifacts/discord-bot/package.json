@@ -1,0 +1,19 @@
+{
+  "name": "@workspace/discord-bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm run build && node --enable-source-maps dist/index.js",
+    "build": "tsc",
+    "start": "node --enable-source-maps dist/index.js",
+    "deploy": "node --enable-source-maps dist/deploy-commands.js"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "discord.js": "^14.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}
