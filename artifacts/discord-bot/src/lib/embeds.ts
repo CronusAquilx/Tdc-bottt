@@ -6,8 +6,9 @@ export const COLORS = {
   approved: 0x10b981,
   rejected: 0xef4444,
   submitted: 0x3b82f6,
+  complete: 0xe5342b,
   draft: 0x6b7280,
-  dark: 0x1f2937,
+  dark: 0x111111,
   paid: 0x10b981
 } as const;
 
@@ -19,6 +20,7 @@ export function statusEmoji(status: string): string {
   const map: Record<string, string> = {
     draft: "📝",
     submitted: "📋",
+    complete: "✅",
     approved: "✅",
     paid: "💸",
     rejected: "❌",
@@ -35,73 +37,161 @@ export function statusColor(status: string): number {
   const map: Record<string, number> = {
     draft: COLORS.draft,
     submitted: COLORS.submitted,
+    complete: COLORS.primary,
     approved: COLORS.approved,
     paid: COLORS.paid,
     rejected: COLORS.rejected,
-    archived: COLORS.draft
+    archived: COLORS.dark
   };
   return map[status] ?? COLORS.primary;
 }
 
-function footer(extra?: string): { text: string } {
-  return { text: `Tokyo Drift Customs${extra ? ` | ${extra}` : ""}` };
-}
+const FOOTER_TEXT = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export function buildOrderEmbed(
   order: Order,
   mechanicName: string,
-  approverName?: string,
-  commissionRate = 0.4
+  commissionRate = 0.3
 ): EmbedBuilder {
-  const items = Array.isArray(order.items) ? order.items : JSON.parse(order.items as unknown as string);
+  const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
   const commission = order.labour * commissionRate;
 
-  const grouped: Record<string, string[]> = {};
-  for (const item of items) {
-    if (!grouped[item.category]) grouped[item.category] = [];
-    grouped[item.category].push(`${item.label} — ${money(item.price)}`);
-  }
+  const statusLabel: Record<string, string> = {
+    draft: "📝 DRAFT",
+    complete: "✅ COMPLETE",
+    submitted: "📋 SUBMITTED",
+    approved: "✅ APPROVED",
+    paid: "💸 PAID",
+    rejected: "❌ REJECTED",
+    archived: "🗃️ ARCHIVED"
+  };
 
-  const workDone = Object.entries(grouped)
-    .map(([cat, list]) => `**${cat}:** ${list.join(", ")}`)
-    .join("\n") || "_No items added_";
+  const itemLines = items.length
+    ? items.map(i => `> **${i.label}** — ${money(i.price)}`).join("\n")
+    : "> _No services added_";
+
+  const dateTs = Math.floor(new Date(order.created_at).getTime() / 1000);
 
   const embed = new EmbedBuilder()
-    .setTitle(`${statusEmoji(order.status)} Order ${order.status.charAt(0).toUpperCase() + order.status.slice(1)} · ${order.order_number}`)
+    .setTitle(`🏁  ${order.order_number}`)
     .setColor(statusColor(order.status))
     .addFields(
       { name: "Mechanic", value: mechanicName, inline: true },
-      { name: "Status", value: order.status.toUpperCase(), inline: true },
-      { name: "Date", value: new Date(order.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), inline: true },
-      { name: "Customer Total", value: money(order.total), inline: true },
-      { name: "Parts Cost", value: money(order.parts_cost), inline: true },
-      { name: "Labour", value: money(order.labour), inline: true },
-      { name: `Commission (${(commissionRate * 100).toFixed(0)}%)`, value: money(commission), inline: true }
+      { name: "Status", value: statusLabel[order.status] ?? order.status.toUpperCase(), inline: true },
+      { name: "Date", value: `<t:${dateTs}:d>`, inline: true },
+      {
+        name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        value: itemLines.slice(0, 1024),
+        inline: false
+      },
+      { name: "🔩 Parts Cost", value: money(order.parts_cost), inline: true },
+      { name: "🔧 Labour", value: money(order.labour), inline: true },
+      { name: "💰 Customer Total", value: money(order.total), inline: true }
     );
 
-  if (order.approved_at) {
+  if (order.status !== "draft") {
     embed.addFields({
-      name: "Approved",
-      value: new Date(order.approved_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
-      inline: true
+      name: `💵  YOUR COMMISSION  (${(commissionRate * 100).toFixed(0)}%)`,
+      value: `## ${money(commission)}`,
+      inline: false
     });
   }
-  if (approverName) {
-    embed.addFields({ name: "Approved By", value: approverName, inline: true });
-  }
-
-  embed.addFields({ name: "Work Done", value: workDone.slice(0, 1024) });
 
   if (order.notes) {
-    embed.addFields({ name: "Notes", value: order.notes.slice(0, 1024) });
-  }
-  if (order.rejected_reason) {
-    embed.addFields({ name: "Rejection Reason", value: order.rejected_reason });
+    embed.addFields({ name: "📝 Notes", value: order.notes.slice(0, 512), inline: false });
   }
 
-  embed.setFooter(footer(approverName ? `Approved by: ${approverName}` : undefined));
-  embed.setTimestamp();
+  embed.setFooter({ text: FOOTER_TEXT }).setTimestamp();
   return embed;
+}
+
+interface OrderItem {
+  label: string;
+  price: number;
+  cost: number;
+  labour: number;
+  category: string;
+}
+
+export function buildDraftEmbed(
+  order: Order,
+  commissionRate = 0.3
+): EmbedBuilder {
+  const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
+  const commission = order.labour * commissionRate;
+
+  const itemLines = items.length
+    ? items.map(i => `> **${i.label}** — ${money(i.price)}`).join("\n")
+    : "> _No services yet — select a category below_";
+
+  return new EmbedBuilder()
+    .setTitle(`📝  DRAFT  ·  ${order.order_number}`)
+    .setColor(COLORS.draft)
+    .setDescription("Select services by category. Labour is auto-suggested — edit it if needed.")
+    .addFields(
+      {
+        name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        value: itemLines.slice(0, 1024),
+        inline: false
+      },
+      { name: "🔩 Parts", value: money(order.parts_cost), inline: true },
+      { name: "🔧 Labour (suggested)", value: money(order.labour), inline: true },
+      { name: "💰 Total", value: money(order.total), inline: true },
+      { name: `💵 Est. Commission (${(commissionRate * 100).toFixed(0)}%)`, value: money(commission), inline: false }
+    )
+    .setFooter({ text: FOOTER_TEXT })
+    .setTimestamp();
+}
+
+export function buildClockInEmbed(mechanicName: string, clockInTime: string): EmbedBuilder {
+  const unixTs = Math.floor(new Date(clockInTime).getTime() / 1000);
+  return new EmbedBuilder()
+    .setTitle("🟢  CLOCKED IN")
+    .setColor(0x10b981)
+    .setDescription(`**${mechanicName}** is now on shift`)
+    .addFields(
+      { name: "Started", value: `<t:${unixTs}:F>`, inline: true },
+      { name: "Live Duration", value: `<t:${unixTs}:R>`, inline: true }
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Session in progress" })
+    .setTimestamp();
+}
+
+export function buildClockOutEmbed(
+  mechanicName: string,
+  clockInTime: string,
+  clockOutTime: string,
+  durationMins: number
+): EmbedBuilder {
+  const inTs = Math.floor(new Date(clockInTime).getTime() / 1000);
+  const outTs = Math.floor(new Date(clockOutTime).getTime() / 1000);
+  const hrs = Math.floor(durationMins / 60);
+  const mins = Math.round(durationMins % 60);
+  return new EmbedBuilder()
+    .setTitle("🔴  SHIFT COMPLETE")
+    .setColor(COLORS.primary)
+    .setDescription(`**${mechanicName}** clocked out`)
+    .addFields(
+      { name: "Clocked In", value: `<t:${inTs}:F>`, inline: true },
+      { name: "Clocked Out", value: `<t:${outTs}:F>`, inline: true },
+      { name: "Total Time", value: `**${hrs}h ${mins}m**`, inline: true }
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Session complete" })
+    .setTimestamp();
+}
+
+export function buildTimeclockEmbed(
+  mechanicName: string,
+  clockIn: string,
+  clockOut: string | null,
+  durationMins: number,
+  status: string,
+  notes: string | null
+): EmbedBuilder {
+  if (clockOut) {
+    return buildClockOutEmbed(mechanicName, clockIn, clockOut, durationMins);
+  }
+  return buildClockInEmbed(mechanicName, clockIn);
 }
 
 export function buildPayoutEmbed(
@@ -109,26 +199,24 @@ export function buildPayoutEmbed(
   mechanicName: string,
   processedBy: string,
   weekEnd: string,
-  commissionRate = 0.4
+  commissionRate = 0.3
 ): EmbedBuilder {
   const labour = commissionRate > 0 ? payout.amount / commissionRate : 0;
 
   return new EmbedBuilder()
-    .setTitle(`💸 Weekly Payout · ${mechanicName}`)
+    .setTitle(`💸  PAYOUT  ·  ${mechanicName}`)
     .setColor(COLORS.paid)
     .addFields(
       { name: "Week", value: `${payout.week_start} – ${weekEnd}`, inline: true },
-      { name: "Paid", value: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), inline: true },
+      { name: "Paid", value: `<t:${Math.floor(Date.now() / 1000)}:d>`, inline: true },
       { name: "\u200b", value: "\u200b", inline: true },
       { name: "Orders Completed", value: String(payout.order_count), inline: true },
       { name: "Total Revenue", value: money(labour), inline: true },
       { name: "Hours Worked", value: `${payout.hours_worked.toFixed(1)} hrs`, inline: true },
       { name: "Commission Rate", value: `${(commissionRate * 100).toFixed(0)}%`, inline: true },
-      { name: "Commission Earned", value: money(payout.amount), inline: true },
-      { name: "Invoice Count", value: String(payout.invoice_count), inline: true },
-      { name: "💰 Total Payout", value: `**${money(payout.amount)}**` }
+      { name: "💰 Total Payout", value: `## ${money(payout.amount)}` }
     )
-    .setFooter({ text: `Tokyo Drift Customs | Processed by: ${processedBy}` })
+    .setFooter({ text: `東京ドリフトカスタム  ·  Processed by: ${processedBy}` })
     .setTimestamp();
 }
 
@@ -148,118 +236,36 @@ export function buildDashboardEmbed(
 ): EmbedBuilder {
   const revPct = Math.min(Math.round((weekRevenue / weeklyTarget) * 20), 20);
   const revBar = "█".repeat(revPct) + "░".repeat(20 - revPct);
-  const ordTarget = 15;
-  const ordPct = Math.min(Math.round((weekOrders / ordTarget) * 20), 20);
-  const ordBar = "█".repeat(ordPct) + "░".repeat(20 - ordPct);
 
   return new EmbedBuilder()
-    .setTitle(`📊 Sales Dashboard · ${mechanicName}`)
+    .setTitle(`📊  MY SALES  ·  ${mechanicName}`)
     .setColor(COLORS.primary)
     .addFields(
       { name: "Status", value: `${statusEmoji(status)} ${status.replace("_", " ").toUpperCase()}`, inline: true },
       { name: "Hours This Week", value: `${weekHours.toFixed(1)} hrs`, inline: true },
       { name: "\u200b", value: "\u200b", inline: true },
-      { name: "Orders Today", value: String(todayOrders), inline: true },
-      { name: "Revenue Today", value: money(todayRevenue), inline: true },
+      { name: "Today", value: `${todayOrders} orders · ${money(todayRevenue)}`, inline: true },
+      { name: "This Week", value: `${weekOrders} orders · ${money(weekRevenue)}`, inline: true },
+      { name: "YTD", value: `${ytdOrders} orders · ${money(ytdRevenue)}`, inline: true },
+      { name: "💵 Commission This Week", value: money(weekCommission), inline: true },
+      { name: "💵 Commission YTD", value: money(ytdCommission), inline: true },
       { name: "\u200b", value: "\u200b", inline: true },
-      { name: "This Week", value: `${weekOrders} orders · ${money(weekRevenue)} · ${weekHours.toFixed(1)} hrs`, inline: false },
-      { name: "Commission Earned", value: money(weekCommission), inline: true },
-      { name: "YTD", value: `${ytdOrders} orders · ${money(ytdRevenue)} · ${money(ytdCommission)} commission`, inline: false },
-      {
-        name: "Progress",
-        value: `Revenue: \`${revBar}\` ${money(weekRevenue)} / ${money(weeklyTarget)}\nOrders:  \`${ordBar}\` ${weekOrders} / ${ordTarget}`
-      }
+      { name: "Weekly Progress", value: `\`${revBar}\` ${money(weekRevenue)} / ${money(weeklyTarget)}` }
     )
-    .setFooter({ text: "Tokyo Drift Customs" })
-    .setTimestamp();
-}
-
-export function buildAnalyticsEmbed(
-  title: string,
-  topPerformer: string,
-  topPerformerOrders: number,
-  topPerformerRevenue: number,
-  avgOrderValue: number,
-  totalOrders: number,
-  totalRevenue: number,
-  totalCommission: number,
-  teamHours: number,
-  mechanicStats: { name: string; orders: number; max: number }[]
-): EmbedBuilder {
-  const maxOrders = Math.max(...mechanicStats.map(m => m.orders), 1);
-  const bars = mechanicStats
-    .sort((a, b) => b.orders - a.orders)
-    .slice(0, 8)
-    .map(m => {
-      const filled = Math.round((m.orders / maxOrders) * 12);
-      const bar = "█".repeat(filled) + "░".repeat(12 - filled);
-      return `\`${m.name.padEnd(14).slice(0, 14)}\` ${bar} (${m.orders})`;
-    })
-    .join("\n");
-
-  return new EmbedBuilder()
-    .setTitle(`📈 ${title}`)
-    .setColor(COLORS.primary)
-    .addFields(
-      { name: "Top Performer", value: `${topPerformer} (${topPerformerOrders} orders, ${money(topPerformerRevenue)})`, inline: false },
-      { name: "Avg Order Value", value: money(avgOrderValue), inline: true },
-      { name: "Total Orders", value: String(totalOrders), inline: true },
-      { name: "Total Revenue", value: money(totalRevenue), inline: true },
-      { name: "Total Commission", value: money(totalCommission), inline: true },
-      { name: "Team Hours", value: `${teamHours.toFixed(1)} hrs`, inline: true },
-      { name: "\u200b", value: "\u200b", inline: true },
-      { name: "Orders per Mechanic", value: bars || "_No data_" }
-    )
-    .setFooter(footer(`Generated: ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`))
+    .setFooter({ text: FOOTER_TEXT })
     .setTimestamp();
 }
 
 export function buildJobEmbed(title: string, body: string, postedBy: string, expiresAt?: string): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle(`🔧 ${title}`)
+    .setTitle(`🔧  ${title}`)
     .setColor(COLORS.primary)
     .setDescription(body)
     .addFields(
-      { name: "Posted", value: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), inline: true },
-      { name: "Posted By", value: postedBy, inline: true }
+      { name: "Posted By", value: postedBy, inline: true },
+      { name: "Posted", value: `<t:${Math.floor(Date.now() / 1000)}:d>`, inline: true }
     );
-
-  if (expiresAt) {
-    embed.addFields({ name: "Expires", value: expiresAt, inline: true });
-  }
-
-  embed.setFooter(footer()).setTimestamp();
-  return embed;
-}
-
-export function buildTimeclockEmbed(
-  mechanicName: string,
-  clockIn: string,
-  clockOut: string | null,
-  durationMins: number,
-  status: string,
-  notes: string | null
-): EmbedBuilder {
-  const inTime = new Date(clockIn).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-  const outTime = clockOut
-    ? new Date(clockOut).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-    : "Active";
-  const hrs = Math.floor(durationMins / 60);
-  const mins = Math.round(durationMins % 60);
-
-  const embed = new EmbedBuilder()
-    .setTitle(`⏰ ${clockOut ? "Clock Out" : "Clock In"} Confirmation · ${mechanicName}`)
-    .setColor(status === "approved" ? COLORS.approved : COLORS.submitted)
-    .addFields(
-      { name: "Session", value: `${inTime} – ${outTime}`, inline: true },
-      { name: "Duration", value: clockOut ? `${hrs}h ${mins}m` : "In Progress", inline: true },
-      { name: "Status", value: `${statusEmoji(status)} ${status.charAt(0).toUpperCase() + status.slice(1)}`, inline: true }
-    );
-
-  if (notes) {
-    embed.addFields({ name: "Notes", value: notes });
-  }
-
-  embed.setFooter(footer(status === "pending" ? "Awaiting Approval" : undefined)).setTimestamp();
+  if (expiresAt) embed.addFields({ name: "Expires", value: expiresAt, inline: true });
+  embed.setFooter({ text: FOOTER_TEXT }).setTimestamp();
   return embed;
 }

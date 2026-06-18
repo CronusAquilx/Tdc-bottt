@@ -6,14 +6,14 @@ import {
 } from "discord.js";
 import { db, getProfile, getGuildConfig, nextOrderNumber, getSetting, rowToOrder } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
+import { buildOrderEmbed, buildDraftEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
 
-  // ── New order notes ────────────────────────────────────
+  // ── New order notes ────────────────────────────────────────────────────────
   if (ns === "order" && action === "notes") {
     await interaction.deferReply({ ephemeral: true });
     const notes = interaction.fields.getTextInputValue("notes");
@@ -25,80 +25,75 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     });
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
-    const categories: string[] = catalog.categories ?? ["Performance", "Visual & Body", "Tires", "Misc", "Upgrades", "Interior"];
+    const categories: string[] = catalog.categories ?? [];
 
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Select a category to add items...")
+      .setPlaceholder("Select a service category...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`order:setpartscost:${orderId}`).setLabel("💰 Set Parts Cost").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("📋 Submit Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
     );
 
-    const embed = new EmbedBuilder()
-      .setTitle(`📝 Draft Order · ${orderNumber}`).setColor(COLORS.draft)
-      .setDescription("Select a category to add items, then submit when ready.")
-      .addFields({ name: "Notes", value: notes || "_None_" }, { name: "Items", value: "_No items added yet_" }, { name: "Total", value: "$0" })
-      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+    const profile = await getProfile(interaction.user.id);
+    const rate = profile?.commission_rate ?? 0.3;
+
+    const draft = rowToOrder(
+      (await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]
+    );
 
     await interaction.editReply({
-      embeds: [embed],
+      embeds: [buildDraftEmbed(draft, rate)],
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect), buttons]
     });
     return;
   }
 
-  // ── Order reject from modal ────────────────────────────
-  if (ns === "order" && action === "rejectmodal") {
+  // ── Edit Labour ────────────────────────────────────────────────────────────
+  if (ns === "order" && action === "setlabour") {
     await interaction.deferReply({ ephemeral: true });
-    const reason = interaction.fields.getTextInputValue("reason");
+    const labourStr = interaction.fields.getTextInputValue("labour").replace(/[$,]/g, "");
+    const labour = parseFloat(labourStr);
+    if (isNaN(labour) || labour < 0) {
+      await interaction.editReply({ content: "❌ Invalid labour amount." });
+      return;
+    }
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
     const order = rowToOrder(r.rows[0]);
-    await db.execute({ sql: "UPDATE orders SET status = 'rejected', rejected_reason = ? WHERE id = ?", args: [reason, extra] });
-    const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
-    const updated = rowToOrder(ur.rows[0]);
-    const mechanic = await getProfile(order.mechanic_id);
-    const commRate = mechanic?.commission_rate ?? 0.4;
-    const embed = buildOrderEmbed(updated, mechanic?.display_name ?? "Unknown", undefined, commRate);
-    if (order.discord_message_id && interaction.guild) {
-      const config = await getGuildConfig(interaction.guild.id);
-      if (config?.orders_channel_id) {
-        try {
-          const ch = await interaction.guild.channels.fetch(config.orders_channel_id);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).messages.fetch(order.discord_message_id);
-            const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder().setCustomId(`order:archive:${extra}`).setLabel("🗃️ Archive").setStyle(ButtonStyle.Secondary)
-            );
-            await msg.edit({ embeds: [embed], components: [archiveRow] });
-          }
-        } catch { /* ignore */ }
-      }
-    }
-    await interaction.editReply({ content: `❌ Order **${order.order_number}** rejected.`, embeds: [embed] });
+    const newTotal = order.parts_cost + labour;
+    await db.execute({ sql: "UPDATE orders SET labour = ?, total = ? WHERE id = ?", args: [labour, newTotal, extra] });
+
+    const updated = rowToOrder((await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] })).rows[0]);
+    const profile = await getProfile(interaction.user.id);
+    const rate = profile?.commission_rate ?? 0.3;
+
+    const catalogStr = await getSetting("parts_catalog");
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const categories: string[] = catalog.categories ?? [];
+    const catSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${extra}`)
+      .setPlaceholder("Add more services...")
+      .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
+
+    const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:editlabour:${extra}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:submit:${extra}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`order:cancel:${extra}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
+    );
+
+    await interaction.editReply({
+      content: `✅ Labour updated to **${money(labour)}** · Total: **${money(newTotal)}**`,
+      embeds: [buildDraftEmbed(updated, rate)],
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect), buttons]
+    });
     return;
   }
 
-  // ── Parts cost modal ───────────────────────────────────
-  if (ns === "order" && action === "partscost") {
-    await interaction.deferReply({ ephemeral: true });
-    const costStr = interaction.fields.getTextInputValue("cost").replace(/[$,]/g, "");
-    const cost = parseFloat(costStr);
-    if (isNaN(cost) || cost < 0) { await interaction.editReply({ content: "❌ Invalid cost value." }); return; }
-    const r = await db.execute({ sql: "SELECT total FROM orders WHERE id = ?", args: [extra] });
-    if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
-    const total = Number(r.rows[0][0] ?? 0);
-    const labour = total - cost;
-    await db.execute({ sql: "UPDATE orders SET parts_cost = ?, labour = ? WHERE id = ?", args: [cost, labour, extra] });
-    await interaction.editReply({ content: `✅ Parts cost set to **${money(cost)}** · Labour: **${money(labour)}**` });
-    return;
-  }
-
-  // ── Job posting modal ──────────────────────────────────
+  // ── Job posting modal ──────────────────────────────────────────────────────
   if (ns === "job" && action === "posting") {
     await interaction.deferReply({ ephemeral: true });
     const title = interaction.fields.getTextInputValue("title");
@@ -125,48 +120,41 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     await interaction.editReply({
       content: msgId
         ? `✅ Job **${title}** posted${jobsCh ? ` to <#${jobsCh}>` : ""}!`
-        : `✅ Job **${title}** saved. Configure a jobs channel with \`/setup jobs-channel\` to post it publicly.`
+        : `✅ Job **${title}** saved. Use \`/setup jobs-channel\` to post publicly.`
     });
     return;
   }
 
-  // ── Job apply modal ────────────────────────────────────
+  // ── Job apply modal ────────────────────────────────────────────────────────
   if (ns === "job" && action === "applymodal") {
     await interaction.deferReply({ ephemeral: true });
     const jobId = extra;
     const message = interaction.fields.getTextInputValue("message");
     const experience = interaction.fields.getTextInputValue("experience");
-
     const r = await db.execute({ sql: "SELECT title, posted_by FROM jobs WHERE id = ?", args: [jobId] });
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ This job posting no longer exists." }); return; }
     const title = String(r.rows[0][0]);
     const posterId = String(r.rows[0][1]);
-
     const applicantProfile = await getProfile(interaction.user.id);
     const applicantName = applicantProfile?.display_name ?? interaction.user.username;
-
     const applicationEmbed = new EmbedBuilder()
-      .setTitle(`📩 New Application — ${title}`)
+      .setTitle(`📩  New Application — ${title}`)
       .setColor(COLORS.submitted)
       .addFields(
         { name: "Applicant", value: `${applicantName} (<@${interaction.user.id}>)`, inline: true },
-        { name: "Applied", value: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), inline: true },
+        { name: "Applied", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
         { name: "\u200b", value: "\u200b", inline: true },
         { name: "Message", value: message },
         ...(experience ? [{ name: "Experience", value: experience }] : [])
       )
-      .setFooter({ text: "Tokyo Drift Customs | Job Application" })
+      .setFooter({ text: "東京ドリフトカスタム  ·  Job Application" })
       .setTimestamp();
-
-    // DM the job poster
     let dmSent = false;
     try {
       const poster = await interaction.client.users.fetch(posterId);
       await poster.send({ embeds: [applicationEmbed] });
       dmSent = true;
     } catch { /* DMs may be closed */ }
-
-    // Also post to logs channel if configured
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.log_channel_id) {
@@ -176,11 +164,10 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         } catch { /* ignore */ }
       }
     }
-
     await interaction.editReply({
       content: dmSent
-        ? `✅ Your application for **${title}** has been sent! The poster will reach out if you're a good fit.`
-        : `✅ Your application for **${title}** has been submitted and logged.`
+        ? `✅ Your application for **${title}** has been sent!`
+        : `✅ Your application for **${title}** has been submitted.`
     });
     return;
   }

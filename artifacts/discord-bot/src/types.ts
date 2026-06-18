@@ -19,6 +19,7 @@ export interface OrderItem {
   label: string;
   price: number;
   cost: number;
+  labour: number;
   category: string;
 }
 
@@ -26,7 +27,7 @@ export interface Order {
   id: string;
   order_number: string;
   mechanic_id: string;
-  status: "draft" | "submitted" | "approved" | "paid" | "rejected" | "archived";
+  status: "draft" | "submitted" | "complete" | "approved" | "paid" | "rejected" | "archived";
   items: OrderItem[];
   parts_cost: number;
   total: number;
@@ -50,6 +51,8 @@ export interface Timeclock {
   status: "pending" | "approved" | "rejected";
   notes: string | null;
   created_at: string;
+  clock_message_id: string | null;
+  clock_channel_id: string | null;
 }
 
 export interface Payout {
@@ -81,6 +84,11 @@ export interface GuildConfig {
   jobs_channel_id: string | null;
   log_channel_id: string | null;
   archive_channel_id: string | null;
+  owner_role_id: string | null;
+  manager_role_id: string | null;
+  trainer_role_id: string | null;
+  mechanic_role_id: string | null;
+  timeclock_channel_id: string | null;
 }
 
 export interface AppSetting {

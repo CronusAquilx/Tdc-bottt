@@ -1,15 +1,14 @@
 import {
-  SlashCommandBuilder, ChatInputCommandInteraction,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder
+  SlashCommandBuilder, ChatInputCommandInteraction
 } from "discord.js";
-import { db, getProfile, rowToTimeclock } from "../db.js";
+import { db, getProfile, rowToTimeclock, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildTimeclockEmbed } from "../lib/embeds.js";
+import { buildClockInEmbed, buildClockOutEmbed } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clock")
-  .setDescription("Time tracking")
+  .setDescription("Time tracking (or use the buttons in the timeclock channel)")
   .addSubcommand(s => s.setName("in").setDescription("Clock in to start your shift"))
   .addSubcommand(s =>
     s.setName("out")
@@ -23,10 +22,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === "in") {
     if (!(await requireRole(interaction, "mechanic"))) return;
     await interaction.deferReply({ ephemeral: true });
-    const active = await db.execute({ sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1", args: [interaction.user.id] });
+    const active = await db.execute({ sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1", args: [interaction.user.id] });
     if (active.rows[0]) {
-      const t = rowToTimeclock(active.rows[0]);
-      await interaction.editReply({ content: `⚠️ Already clocked in since **${new Date(t.clock_in_time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}**. Use \`/clock out\` first.` });
+      await interaction.editReply({ content: "⚠️ You're already clocked in. Use `/clock out` or the **Clock Out** button in the timeclock channel." });
       return;
     }
     const id = randomUUID();
@@ -34,9 +32,25 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [id] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
-    const embed = buildTimeclockEmbed(profile?.display_name ?? "Unknown", entry.clock_in_time, null, 0, "pending", null);
-    await interaction.editReply({ embeds: [embed] });
-    await postToSalesChannel(interaction, interaction.user.id, embed);
+    const embed = buildClockInEmbed(profile?.display_name ?? interaction.user.username, entry.clock_in_time);
+
+    // Post to timeclock channel if configured
+    let channelMention = "";
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config?.timeclock_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({ embeds: [embed] });
+            await db.execute({ sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?", args: [msg.id, ch.id, id] });
+            channelMention = ` Session posted in <#${ch.id}>.`;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    await interaction.editReply({ content: `✅ Clocked in!${channelMention}`, embeds: [embed] });
     return;
   }
 
@@ -45,34 +59,32 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply({ ephemeral: true });
     const notes = interaction.options.getString("notes");
     const active = await db.execute({ sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1", args: [interaction.user.id] });
-    if (!active.rows[0]) { await interaction.editReply({ content: "❌ You're not currently clocked in." }); return; }
+    if (!active.rows[0]) {
+      await interaction.editReply({ content: "❌ You're not clocked in." });
+      return;
+    }
     const entry = rowToTimeclock(active.rows[0]);
     const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
-    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'pending' WHERE id = ?", args: [mins, notes ?? null, entry.id] });
+    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'approved' WHERE id = ?", args: [mins, notes ?? null, entry.id] });
+    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ? WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
     const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
     const updated = rowToTimeclock(ur.rows[0]);
     const profile = await getProfile(interaction.user.id);
-    const embed = buildTimeclockEmbed(profile?.display_name ?? "Unknown", updated.clock_in_time, updated.clock_out_time, mins, "pending", notes ?? null);
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`timeclock:approve:${entry.id}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`timeclock:reject:${entry.id}`).setLabel("❌ Reject").setStyle(ButtonStyle.Danger)
-    );
-    await interaction.editReply({ embeds: [embed], components: [row] });
-    await postToSalesChannel(interaction, interaction.user.id, embed, [row]);
-  }
-}
+    const embed = buildClockOutEmbed(profile?.display_name ?? interaction.user.username, updated.clock_in_time, updated.clock_out_time!, mins);
 
-async function postToSalesChannel(
-  interaction: ChatInputCommandInteraction,
-  mechanicId: string,
-  embed: EmbedBuilder,
-  components?: ActionRowBuilder<ButtonBuilder>[]
-) {
-  try {
-    if (!interaction.guild) return;
-    const profile = await getProfile(mechanicId);
-    if (!profile?.sales_channel_id) return;
-    const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
-    if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed], components: components ?? [] });
-  } catch { /* ignore */ }
+    // Update the clock-in message if stored
+    if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
+      try {
+        const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).messages.fetch(updated.clock_message_id);
+          await msg.edit({ embeds: [embed] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    const hrs = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    await interaction.editReply({ content: `✅ Clocked out! Session: **${hrs}h ${m}m**`, embeds: [embed] });
+  }
 }

@@ -4,15 +4,37 @@ import {
   ButtonBuilder, ButtonStyle, EmbedBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getGuildConfig, getSetting, rowToOrder } from "../db.js";
+import { db, getProfile, getSetting, rowToOrder } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, COLORS, money } from "../lib/embeds.js";
+import { buildOrderEmbed, buildDraftEmbed, COLORS, money } from "../lib/embeds.js";
+
+const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export async function handleDraftButton(interaction: ButtonInteraction): Promise<boolean> {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const orderId = rest.join(":");
+
+  // ── "Create New Order" button from pinned panel ────────────────────────────
+  if (ns === "order" && action === "newpanel") {
+    if (!(await requireRole(interaction, "mechanic"))) return true;
+    const modal = new ModalBuilder().setCustomId("order:notes").setTitle("New Order");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("notes")
+          .setLabel("Customer Notes (optional)")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setPlaceholder("Customer name, vehicle, special requests...")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
   if (ns !== "order") return false;
 
+  // ── Back to categories ──────────────────────────────────────────────────────
   if (action === "backtocats") {
     await interaction.deferUpdate();
     const catalogStr = await getSetting("parts_catalog");
@@ -21,78 +43,95 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
+    const profile = await getProfile(interaction.user.id);
+    const rate = profile?.commission_rate ?? 0.3;
+
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Select a category to add items...")
+      .setPlaceholder("Select a category to add services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
-    const embed = new EmbedBuilder()
-      .setTitle(`📝 Draft · ${order.order_number}`).setColor(COLORS.draft)
-      .addFields(
-        { name: `Items (${order.items.length})`, value: order.items.map((i: any) => `• ${i.label} — ${money(i.price)}`).join("\n") || "_None_" },
-        { name: "Total", value: money(order.total), inline: true },
-        { name: "Parts Cost", value: money(order.parts_cost), inline: true },
-        { name: "Labour", value: money(order.labour), inline: true }
-      ).setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+
     await interaction.editReply({
-      embeds: [embed],
+      embeds: [buildDraftEmbed(order, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(`order:setpartscost:${orderId}`).setLabel("💰 Set Parts Cost").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("📋 Submit Order").setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
-        )
+        draftButtons(orderId)
       ]
     });
     return true;
   }
 
-  if (action === "setpartscost") {
-    const modal = new ModalBuilder().setCustomId(`order:partscost:${orderId}`).setTitle("Set Parts Cost");
+  // ── Edit Labour modal ───────────────────────────────────────────────────────
+  if (action === "editlabour") {
+    const r = await db.execute({ sql: "SELECT labour FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) return true;
+    const currentLabour = Number(r.rows[0][0] ?? 0);
+    const modal = new ModalBuilder().setCustomId(`order:setlabour:${orderId}`).setTitle("Edit Labour Amount");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder().setCustomId("cost").setLabel("Parts cost amount (e.g. 5000)").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("0")
+      new TextInputBuilder()
+        .setCustomId("labour")
+        .setLabel("Labour amount (e.g. 15000)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(String(currentLabour))
+        .setPlaceholder("Enter custom labour amount...")
     ));
     await interaction.showModal(modal);
     return true;
   }
 
+  // ── Complete Order ──────────────────────────────────────────────────────────
   if (action === "submit") {
     if (!(await requireRole(interaction, "mechanic"))) return true;
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
-    if (!order.items.length) { await interaction.followUp({ content: "❌ Add at least one item before submitting.", ephemeral: true }); return true; }
-    await db.execute({ sql: "UPDATE orders SET status = 'submitted' WHERE id = ?", args: [orderId] });
-    const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    const submitted = rowToOrder(ur.rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const embed = buildOrderEmbed(submitted, profile?.display_name ?? "Unknown");
-    const approveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`order:approve:${orderId}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`order:rejectprompt:${orderId}`).setLabel("❌ Reject").setStyle(ButtonStyle.Danger)
-    );
-    let msgId = "";
-    if (interaction.guild) {
-      const config = await getGuildConfig(interaction.guild.id);
-      if (config?.orders_channel_id) {
-        try {
-          const ch = await interaction.guild.channels.fetch(config.orders_channel_id);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).send({ embeds: [embed], components: [approveRow] });
-            msgId = msg.id;
-            await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
-          }
-        } catch { /* ignore */ }
-      }
+    if (!order.items.length) {
+      await interaction.followUp({ content: "❌ Add at least one service before completing the order.", ephemeral: true });
+      return true;
     }
+
+    await db.execute({ sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?", args: [orderId] });
+    const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    const completed = rowToOrder(ur.rows[0]);
+    const profile = await getProfile(interaction.user.id);
+    const commRate = profile?.commission_rate ?? 0.3;
+    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", commRate);
+
+    // "Make New Order" button to display alongside the completed order
+    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("order:newpanel")
+        .setLabel("🔄  Create New Order")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    // Post to mechanic's sales channel
+    let postedTo = "";
+    if (interaction.guild && profile?.sales_channel_id) {
+      try {
+        const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+          postedTo = profile.sales_channel_id;
+          await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    const commission = completed.labour * commRate;
     await interaction.editReply({
-      content: msgId ? `✅ Order **${submitted.order_number}** submitted to orders channel!` : `✅ Order **${submitted.order_number}** submitted! Configure an orders channel with \`/setup orders-channel\`.`,
-      embeds: [embed], components: []
+      content: postedTo
+        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>\n💵 **Your commission: ${money(commission)}**`
+        : `✅ **${completed.order_number}** complete! Set up a sales channel to auto-post orders.\n💵 **Your commission: ${money(commission)}**`,
+      embeds: [embed],
+      components: []
     });
     return true;
   }
 
+  // ── Cancel ──────────────────────────────────────────────────────────────────
   if (action === "cancel") {
     await interaction.deferUpdate();
     await db.execute({ sql: "DELETE FROM orders WHERE id = ?", args: [orderId] });
@@ -101,4 +140,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   }
 
   return false;
+}
+
+function draftButtons(orderId: string): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
+  );
 }

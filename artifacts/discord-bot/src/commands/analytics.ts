@@ -1,7 +1,8 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import { db, getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildAnalyticsEmbed } from "../lib/embeds.js";
+import { EmbedBuilder } from "discord.js";
+import { COLORS, money } from "../lib/embeds.js";
 import { weekStart } from "../lib/utils.js";
 
 export const data = new SlashCommandBuilder()
@@ -39,8 +40,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const r = targetUser
-    ? await db.execute({ sql: "SELECT mechanic_id, total, labour FROM orders WHERE mechanic_id = ? AND status IN ('approved','paid') AND DATE(created_at) >= ?", args: [targetUser.id, dateFrom] })
-    : await db.execute({ sql: "SELECT mechanic_id, total, labour FROM orders WHERE status IN ('approved','paid') AND DATE(created_at) >= ?", args: [dateFrom] });
+    ? await db.execute({ sql: "SELECT mechanic_id, total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [targetUser.id, dateFrom] })
+    : await db.execute({ sql: "SELECT mechanic_id, total, labour FROM orders WHERE status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [dateFrom] });
 
   const totalRevenue = r.rows.reduce((s, row) => s + Number(row[1] ?? 0), 0);
 
@@ -68,12 +69,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   );
   const teamHours = Number(hoursR.rows[0]?.[0] ?? 0);
 
-  const embed = buildAnalyticsEmbed(
-    `Team Analytics · ${periodLabel}`,
-    top.name, top.orders, top.revenue,
-    avgOrderValue, r.rows.length, totalRevenue, totalCommission,
-    teamHours,
-    sorted.map(m => ({ name: m.name, orders: m.orders, max: top.orders }))
-  );
+  const embed = new EmbedBuilder()
+    .setTitle(`📊  Team Analytics  ·  ${periodLabel}`)
+    .setColor(COLORS.primary)
+    .addFields(
+      { name: "Total Orders", value: String(r.rows.length), inline: true },
+      { name: "Total Revenue", value: money(totalRevenue), inline: true },
+      { name: "Total Commission Paid Out", value: money(totalCommission), inline: true },
+      { name: "Avg Order Value", value: money(avgOrderValue), inline: true },
+      { name: "Team Hours", value: `${teamHours.toFixed(1)} hrs`, inline: true },
+      { name: "Top Performer", value: `${top.name} — ${top.orders} orders · ${money(top.revenue)}`, inline: false },
+      ...(sorted.length
+        ? [{ name: "Mechanic Breakdown", value: sorted.map(m => `**${m.name}**: ${m.orders} orders · ${money(m.revenue)} · Commission: ${money(m.commission)}`).join("\n").slice(0, 1024), inline: false }]
+        : [])
+    )
+    .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+    .setTimestamp();
   await interaction.editReply({ embeds: [embed] });
 }

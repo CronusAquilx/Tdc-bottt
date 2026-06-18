@@ -1,0 +1,1 @@
+- [TDC Bot Architecture](tdc-bot-arch.md) — commission = labour × 0.3 only; order flow is draft → complete (no approve/reject); clock in/out via panel buttons posts to timeclock channel with live Discord <t:UNIX:R> timestamps

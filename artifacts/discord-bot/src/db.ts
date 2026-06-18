@@ -22,13 +22,51 @@ async function safeAlter(sql: string) {
   try { await db.execute(sql); } catch { /* column already exists */ }
 }
 
+const TDC_CATALOG = JSON.stringify({
+  categories: ["Repair", "Brakes", "Engine", "Suspension", "Transmission", "Turbo", "Visual & Body", "Neon & Lighting", "Extras"],
+  items: [
+    { label: "Full Repair",         category: "Repair",        price: 800,   cost: 100,   labour: 700   },
+    { label: "Brakes 1",            category: "Brakes",        price: 8100,  cost: 2500,  labour: 5600  },
+    { label: "Brakes 2",            category: "Brakes",        price: 12500, cost: 5000,  labour: 7500  },
+    { label: "Brakes 3",            category: "Brakes",        price: 16900, cost: 7500,  labour: 9400  },
+    { label: "Engine 1",            category: "Engine",        price: 25000, cost: 10000, labour: 15000 },
+    { label: "Engine 2",            category: "Engine",        price: 42500, cost: 20000, labour: 22500 },
+    { label: "Engine 3",            category: "Engine",        price: 60000, cost: 30000, labour: 30000 },
+    { label: "Engine 4",            category: "Engine",        price: 70000, cost: 40000, labour: 30000 },
+    { label: "Suspension 1",        category: "Suspension",    price: 5300,  cost: 3000,  labour: 2300  },
+    { label: "Suspension 2",        category: "Suspension",    price: 10500, cost: 6000,  labour: 4500  },
+    { label: "Suspension 3",        category: "Suspension",    price: 15800, cost: 9000,  labour: 6800  },
+    { label: "Suspension 4",        category: "Suspension",    price: 21000, cost: 12000, labour: 9000  },
+    { label: "Transmission 1",      category: "Transmission",  price: 8800,  cost: 5000,  labour: 3800  },
+    { label: "Transmission 2",      category: "Transmission",  price: 17500, cost: 10000, labour: 7500  },
+    { label: "Transmission 3",      category: "Transmission",  price: 26300, cost: 15000, labour: 11300 },
+    { label: "Turbo",               category: "Turbo",         price: 40000, cost: 10000, labour: 30000 },
+    { label: "Primary Color",       category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Secondary Color",     category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Respray Dashboard",   category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Interior",            category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Respray (Primary)",   category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Respray (Secondary)", category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Respray Wheels",      category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Pearlescent",         category: "Visual & Body", price: 11500, cost: 1000,  labour: 10500 },
+    { label: "Neon Kit",            category: "Neon & Lighting", price: 4000, cost: 1000, labour: 3000  },
+    { label: "Tire Smoke",          category: "Neon & Lighting", price: 4000, cost: 1000, labour: 3000  },
+    { label: "Window Tinting",      category: "Neon & Lighting", price: 2100, cost: 1000, labour: 1100  },
+    { label: "Xenon Lighting",      category: "Neon & Lighting", price: 2100, cost: 1000, labour: 1100  },
+    { label: "Horns",               category: "Extras",        price: 1600,  cost: 500,   labour: 1100  },
+    { label: "Hydraulics",          category: "Extras",        price: 1600,  cost: 500,   labour: 1100  },
+    { label: "Plate Style",         category: "Extras",        price: 1600,  cost: 500,   labour: 1100  },
+    { label: "Wheels",              category: "Extras",        price: 3900,  cost: 500,   labour: 3400  }
+  ]
+});
+
 export async function initDb() {
   await exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       discord_id TEXT PRIMARY KEY,
       display_name TEXT NOT NULL,
       sales_channel_id TEXT,
-      commission_rate REAL NOT NULL DEFAULT 0.4,
+      commission_rate REAL NOT NULL DEFAULT 0.3,
       hours_worked_this_week REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'offline',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -65,7 +103,7 @@ export async function initDb() {
       clock_out_time TEXT,
       duration_minutes REAL NOT NULL DEFAULT 0,
       approved_by TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'approved',
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -107,37 +145,18 @@ export async function initDb() {
     )
   `);
 
-  // Safe migrations — add new columns if they don't exist yet
+  // Safe migrations
   await safeAlter("ALTER TABLE guild_config ADD COLUMN owner_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN mechanic_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN timeclock_channel_id TEXT");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN clock_message_id TEXT");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN clock_channel_id TEXT");
 
-  // Seed default settings
-  const defaultCatalog = JSON.stringify({
-    categories: ["Performance", "Visual & Body", "Tires", "Misc", "Upgrades", "Interior"],
-    items: [
-      { label: "Turbo Upgrade", category: "Performance", price: 15000, cost: 8000 },
-      { label: "ECU Tune", category: "Performance", price: 8000, cost: 3000 },
-      { label: "Cold Air Intake", category: "Performance", price: 3500, cost: 1500 },
-      { label: "Exhaust System", category: "Performance", price: 9000, cost: 4500 },
-      { label: "Suspension Kit", category: "Performance", price: 12000, cost: 6000 },
-      { label: "Custom Paint", category: "Visual & Body", price: 20000, cost: 8000 },
-      { label: "Body Kit", category: "Visual & Body", price: 18000, cost: 9000 },
-      { label: "Spoiler", category: "Visual & Body", price: 5000, cost: 2000 },
-      { label: "Window Tint", category: "Visual & Body", price: 3000, cost: 800 },
-      { label: "Wheels", category: "Tires", price: 14000, cost: 7000 },
-      { label: "Tire Set", category: "Tires", price: 8000, cost: 4000 },
-      { label: "Lowering Springs", category: "Upgrades", price: 6000, cost: 2500 },
-      { label: "Brake Upgrade", category: "Upgrades", price: 10000, cost: 5000 },
-      { label: "Seat Swap", category: "Interior", price: 7000, cost: 3000 },
-      { label: "Roll Cage", category: "Interior", price: 25000, cost: 12000 },
-      { label: "Misc Parts", category: "Misc", price: 2000, cost: 1000 }
-    ]
-  });
-
-  await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.4"] });
-  await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", defaultCatalog] });
+  // Seed / update catalog — always keep the latest prices
+  await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
+  await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });
 
   // Seed owners
   const owners = [
@@ -158,9 +177,7 @@ export async function initDb() {
     { id: "1302529753739427961", name: "Dreico" },
     { id: "466238601672392734", name: "Ron" },
     { id: "1246285610319347754", name: "Mr Walkdown" },
-    { id: "", name: "Motion Montona" },
     { id: "312410738977144832", name: "Brandon Strong" },
-    { id: "1363222342800511058", name: "Ander Dingus" },
     { id: "463492813711999006", name: "Ab" }
   ];
 
@@ -170,7 +187,7 @@ export async function initDb() {
   }
   for (const m of mechanics) {
     if (!m.id) continue;
-    await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name) VALUES (?, ?)", args: [m.id, m.name] });
+    await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [m.id, m.name] });
     await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [m.id, "mechanic"] });
   }
 
@@ -202,12 +219,13 @@ export async function getGuildConfig(guildId: string) {
     manager_role_id: row[6] ? String(row[6]) : null,
     trainer_role_id: row[7] ? String(row[7]) : null,
     mechanic_role_id: row[8] ? String(row[8]) : null,
+    timeclock_channel_id: row[9] ? String(row[9]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
@@ -245,7 +263,7 @@ export async function getProfile(discordId: string) {
     discord_id: String(row[0] ?? ""),
     display_name: String(row[1] ?? ""),
     sales_channel_id: row[2] ? String(row[2]) : null,
-    commission_rate: Number(row[3] ?? 0.4),
+    commission_rate: Number(row[3] ?? 0.3),
     hours_worked_this_week: Number(row[4] ?? 0),
     status: String(row[5] ?? "offline"),
     created_at: String(row[6] ?? ""),
@@ -309,8 +327,10 @@ export function rowToTimeclock(row: unknown): import("./types.js").Timeclock {
     clock_out_time: c(3) ? String(c(3)) : null,
     duration_minutes: Number(c(4) ?? 0),
     approved_by: c(5) ? String(c(5)) : null,
-    status: String(c(6) ?? "pending") as any,
+    status: String(c(6) ?? "approved") as any,
     notes: c(7) ? String(c(7)) : null,
     created_at: String(c(8) ?? ""),
+    clock_message_id: c(9) ? String(c(9)) : null,
+    clock_channel_id: c(10) ? String(c(10)) : null,
   };
 }

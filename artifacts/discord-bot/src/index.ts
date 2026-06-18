@@ -12,15 +12,13 @@ import { initDb } from "./db.js";
 import { data as orderData, execute as orderExecute } from "./commands/order.js";
 import { data as crewData, execute as crewExecute } from "./commands/crew.js";
 import { data as timeclockData, execute as timeclockExecute } from "./commands/timeclock.js";
-import { data as timeclockManageData, execute as timeclockManageExecute } from "./commands/timeclockmanage.js";
 import { data as mysalesData, execute as mysalesExecute } from "./commands/mysales.js";
-import { data as breakdownData, execute as breakdownExecute } from "./commands/breakdown.js";
-import { data as analyticsData, execute as analyticsExecute } from "./commands/analytics.js";
-import { data as commissionData, execute as commissionExecute } from "./commands/commission.js";
 import { data as payData, execute as payExecute } from "./commands/pay.js";
 import { data as jobData, execute as jobExecute } from "./commands/job.js";
 import { data as setupData, execute as setupExecute } from "./commands/setup.js";
 import { data as settingsData, execute as settingsExecute } from "./commands/settings.js";
+import { data as helpData, execute as helpExecute } from "./commands/help.js";
+import { data as payoutData, execute as payoutExecute } from "./commands/payout.js";
 import { handleButton } from "./interactions/buttons.js";
 import { handleDraftButton } from "./interactions/draftbuttons.js";
 import { handleModal } from "./interactions/modals.js";
@@ -32,13 +30,10 @@ if (!token) {
   process.exit(1);
 }
 
-// Auto-detect client ID from token
 const tokenParts = token.split(".");
 const clientId = Buffer.from(tokenParts[0], "base64").toString("utf-8");
 
-// ── Health / uptime HTTP server ───────────────────────────────────────────────
-// Register the URL below in Discord Developer Portal → General Information → "Interactions Endpoint URL" (optional)
-// or use it as a keep-alive ping target:  https://<your-domain>/healthz
+// ── Health server ─────────────────────────────────────────────────────────────
 const HTTP_PORT = parseInt(process.env.BOT_HTTP_PORT ?? "3001", 10);
 const httpServer = http.createServer((req, res) => {
   if (req.url === "/healthz" || req.url === "/") {
@@ -47,6 +42,13 @@ const httpServer = http.createServer((req, res) => {
   } else {
     res.writeHead(404);
     res.end();
+  }
+});
+httpServer.on("error", (err: any) => {
+  if (err.code === "EADDRINUSE") {
+    console.warn(`[TDC] ⚠️ Port ${HTTP_PORT} in use — health server skipped.`);
+  } else {
+    console.error("[TDC] HTTP server error:", err);
   }
 });
 httpServer.listen(HTTP_PORT, () => {
@@ -63,18 +65,16 @@ const client = new Client({
 });
 
 const commandDefs = [
-  { data: orderData, execute: orderExecute },
-  { data: crewData, execute: crewExecute },
+  { data: orderData,    execute: orderExecute },
+  { data: crewData,     execute: crewExecute },
   { data: timeclockData, execute: timeclockExecute },
-  { data: timeclockManageData, execute: timeclockManageExecute },
-  { data: mysalesData, execute: mysalesExecute },
-  { data: breakdownData, execute: breakdownExecute },
-  { data: analyticsData, execute: analyticsExecute },
-  { data: commissionData, execute: commissionExecute },
-  { data: payData, execute: payExecute },
-  { data: jobData, execute: jobExecute },
-  { data: setupData, execute: setupExecute },
-  { data: settingsData, execute: settingsExecute }
+  { data: mysalesData,  execute: mysalesExecute },
+  { data: payData,      execute: payExecute },
+  { data: jobData,      execute: jobExecute },
+  { data: setupData,    execute: setupExecute },
+  { data: settingsData, execute: settingsExecute },
+  { data: helpData,     execute: helpExecute },
+  { data: payoutData,   execute: payoutExecute }
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -131,7 +131,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Init DB then start bot
 initDb().then(() => {
   client.login(token!);
 }).catch(err => {
