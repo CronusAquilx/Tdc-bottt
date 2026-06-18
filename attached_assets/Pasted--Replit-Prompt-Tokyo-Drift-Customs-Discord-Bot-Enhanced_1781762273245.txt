@@ -1,0 +1,622 @@
+# Replit Prompt — Tokyo Drift Customs Discord Bot (Enhanced)
+
+Build a Discord bot (Node.js + discord.js v14, TypeScript, hosted on Replit) that serves as the comprehensive management system for Tokyo Drift Customs mechanic shop. All functionality must run through slash commands, buttons, modals, and select menus inside Discord. Use Supabase (Postgres) as the database so data persists across restarts. Use Replit Secrets for DISCORD_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ORDERS_CHANNEL_ID, JOBS_CHANNEL_ID, LOG_CHANNEL_ID, SHOP_LOGO_URL.
+
+---
+
+## 1. Roles & Accounts (Four-Tier Hierarchy)
+
+Four role tiers, stored in a `user_roles` table keyed by Discord user ID (no passwords needed — Discord IS the auth):
+
+### Owner (Admin)
+Full system access, user management, financial oversight, channel configuration.
+Seed these IDs:
+- Lu Chenzo: 198572092504014848
+- Phoenix: 378293480608497664
+- Sierra Phoenix: 632044470711484424
+
+### Manager
+Oversee mechanics, approve orders, manage job postings, view analytics and reports. Can assign trainers and mechanics. Cannot access financial settings.
+Seed:
+- (Add manager IDs)
+
+### Trainer
+Train mechanics, view their progress, approve clock in/out logs, monitor individual performance. Cannot create orders but can view training metrics.
+Seed:
+- (Add trainer IDs)
+
+### Mechanic
+Create and submit orders, clock in/out for work tracking, view personal dashboard and sales channel. Cannot approve orders or manage other users.
+Seed:
+- Myx: 1179942814906327050
+- Yancy: 1088337283180146758
+- Uncle Cracker: 623677968786653194
+- Smoke: 1445564490463711413
+- Magnus: 1069621699378679828
+- Louielue: 733808236293128314
+- Dayytradezz: 727706928536616963
+- Ahmed Brown: 1455587333071175755
+- Onlythegamers: 748420441881706534
+- Dreico: 1302529753739427961
+- Ron: 466238601672392734
+- Mr Walkdown: 1246285610319347754
+- Motion Montona: 424950499398254604
+- Brandon Strong: 312410738977144832
+- Ander Dingus: 1363222342800511058
+- Ab: 696524714146922496
+- Jeff Jeffery: (create on first run)
+
+Gate every command with a role check helper `requireRole(interaction, "owner" | "manager" | "trainer" | "mechanic")`.
+
+---
+
+## 2. Database Schema (Supabase)
+
+Tables (all with RLS off since the bot uses the service role key):
+
+### profiles
+```
+discord_id (PK)
+display_name
+sales_channel_id (nullable) — auto-created personal sales channel
+commission_rate (numeric, default 0.4)
+hours_worked_this_week (numeric, default 0) — updated via clock in/out
+status (online|offline|on_break)
+created_at
+```
+
+### user_roles
+```
+discord_id
+role (owner|manager|trainer|mechanic)
+unique(discord_id, role)
+```
+
+### orders
+```
+id (uuid PK)
+order_number (auto TDC-0001)
+mechanic_id
+status (draft|submitted|approved|paid|rejected|archived)
+items (jsonb array of {label, price, cost, category})
+parts_cost (numeric)
+total (numeric)
+labour (numeric, calculated = total - parts_cost)
+notes (text)
+rejected_reason (nullable)
+discord_message_id (nullable)
+created_at
+approved_at (nullable)
+approved_by (nullable)
+completed_at (nullable)
+```
+
+### timeclock
+```
+id (uuid PK)
+mechanic_id
+clock_in_time (timestamp)
+clock_out_time (nullable timestamp)
+duration_minutes (numeric, calculated)
+approved_by (nullable) — trainer/manager who verified
+status (pending|approved|rejected)
+notes (nullable)
+created_at
+```
+
+### sales_metrics
+```
+id (uuid PK)
+mechanic_id
+date (date)
+orders_completed (integer)
+total_revenue (numeric)
+parts_revenue (numeric)
+labour_revenue (numeric)
+commission_earned (numeric)
+hours_worked (numeric)
+created_at
+```
+
+### payouts
+```
+id (uuid PK)
+mechanic_id
+week_start (date)
+amount (numeric)
+order_count (integer)
+hours_worked (numeric)
+invoice_count (integer)
+paid_at (nullable timestamp)
+paid_by (nullable)
+created_at
+```
+
+### jobs
+```
+id (uuid PK)
+posted_by
+title (text)
+body (text)
+discord_message_id
+created_at
+expires_at (nullable)
+```
+
+### channel_config
+```
+id (uuid PK)
+type (sales|archive|logs|announcements)
+channel_id (text)
+mechanic_id (nullable, if personal sales channel)
+created_by
+created_at
+```
+
+### app_settings
+```
+key (PK)
+value (jsonb)
+— commission_default: number
+— parts_catalog: { categories: [...], items: [...] }
+— brand_color: string (#E5342B)
+— shop_logo_url: string
+```
+
+---
+
+## 3. Slash Commands
+
+### Mechanic Commands
+
+#### /order new
+Opens a modal for order notes. Follow-up ephemeral message shows select menus to add items from parts catalog (categories: Performance, Visual & Body, Tires, Misc, Upgrades, Interior). Buttons: `+ Add Item`, `Set Parts Cost`, `Submit Order`, `Cancel`. On submit, posts a rich embed to #orders channel and stores `discord_message_id`.
+
+#### /order list [status]
+Paginated embed of your own orders (manager+ sees all). Buttons: `◀ Prev`, `Next ▶`, `Filter by Status`. Shows TDC order numbers, status badges, and totals at a glance.
+
+#### /order view <order_number>
+Full beautiful embed with items listed, totals broken down, mechanic info, status with color badge, and timestamps. Include a `View Details` button for expanded ephemeral modal.
+
+#### /clock in
+Records clock-in timestamp in `timeclock` table with status `pending`. Returns a confirmation embed in the mechanic's sales channel. Shows current session start time.
+
+#### /clock out [notes]
+Records clock-out timestamp, calculates duration. Posts a session summary to mechanic's personal sales channel showing hours worked, notes, and approval status. Status stays `pending` until trainer/manager approves via button.
+
+#### /mysales [week|month]
+Shows a beautiful personal dashboard embed: orders completed this period, revenue (total, parts, labour), hours worked, commission earned, and YTD totals. Includes a chart-style ASCII bar graph or emoji progress bars.
+
+#### /saleslog
+Shows the mechanic's auto-created sales channel (if not exists, prompt to create via setup command). Posts daily/weekly summaries of completed orders there.
+
+### Manager + Owner Commands
+
+#### /order approve <order_number>
+Manager+ reviews submitted orders. Posts approval confirmation to the original order embed (edit in place, add ✅ badge). Records `approved_by` and timestamp.
+
+#### /order reject <order_number> reason:<text>
+Sets status to `rejected`, edits the original orders-channel embed to red badge (❌ Order Rejected), and logs the rejection. Does NOT send DMs (no pinging).
+
+#### /timeclock approve <mechanic_id> [week_start_date]
+Shows all pending timeclock entries for that mechanic. Manager+ can approve/reject with inline buttons. On approval, updates `hours_worked_this_week` in profiles table.
+
+#### /breakdown [mechanic:<@user>|all]
+Posts a comprehensive embed grouped per mechanic:
+- # of orders (total, this week, completed)
+- Total revenue, parts cost, labour earned
+- Commission rate & expected payout
+- Hours worked this week
+- Activity status (online/offline/on_break)
+
+Followed by buttons per mechanic that expand into ephemeral order drilldown; each order shows items, cost breakdown, and approve/reject buttons (manager+ only).
+
+#### /analytics [mechanic:<@user>|period:week|month|year]
+Posts beautiful analytics embed with:
+- Revenue trends (ASCII chart or emoji bars)
+- Orders per day/week
+- Average order value
+- Top categories/items sold
+- Performance vs. shop average
+
+#### /crew add user:<@user> role:<manager|trainer|mechanic> display_name:<text>
+Creates profile + role row. Posts confirmation to #logs.
+
+#### /crew remove user:<@user>
+Removes all roles, archives their sales channel. Posts to #logs.
+
+#### /crew list
+Embed grouped by role with display name, Discord mention, commission rate, hours worked this week, and status (online/offline/on_break).
+
+#### /crew status user:<@user> status:<online|offline|on_break>
+Updates mechanic's status. Reflected in sales channel and crew list.
+
+#### /commission user:<@user> rate:<0-1>
+Updates that mechanic's commission rate (default 0.4). Validates caller is owner **BEFORE** the role check on target. Logs change to #logs.
+
+### Owner Only Commands
+
+#### /setup sales-channel mechanic:<@user>
+Creates a personal sales channel for that mechanic (channel name: `sales-{mechanic_name}`). Bot posts a welcome embed with:
+- Mechanic's name and avatar
+- Link to their profile/dashboard
+- Daily sales summary template
+- Quick stats (orders today, revenue, hours worked)
+- Buttons: `View Detailed Analytics`, `Clock In`, `Clock Out`
+
+Store channel_id + mechanic_id in `channel_config` table.
+
+#### /setup archive-channel
+Creates or configures the #archive channel for rejected/old orders. Posts a descriptive intro embed.
+
+#### /setup logs-channel
+Configures the #logs channel for system events (crew changes, order approvals, rejections, payouts). Posts intro embed.
+
+#### /pay mechanic:<@user>
+Confirmation button → marks all approved orders for that mechanic this week as `paid`, inserts a `payouts` row, posts a payout summary embed to #logs (no mentions, just plain text: "Mechanic Name paid $5,432.10 for 12 orders, 40 hours, week of Jun 10"). Include a receipt-style breakdown.
+
+#### /job post
+Modal with title + body fields. Posts to #jobs channel using Tokyo Drift Customs branding (red accent color #E5342B, thumbnail = shop logo). Preserve custom Discord emojis in body verbatim. Example:
+```
+Tokyo Drift Customs — Open
+Pull up and get your car built right 🔧🔥
+Full max performance upgrades starting at 120K 💸
+Custom builds • Clean upgrades • Street-ready setups 🏁
+We can work with your budget 💯
+📍 Postal: 7228
+```
+Include buttons: `Apply` (opens a form), `Share`, `Delete`.
+
+#### /job list
+Paginated list of active job postings. Buttons to view full body, edit, or delete.
+
+#### /job delete <id>
+Removes job from #jobs channel and archives.
+
+#### /settings
+Opens a settings menu (buttons or select menu):
+- Commission Default Rate
+- Parts Catalog (show current items per category)
+- Brand Color / Logo
+- Channel Configuration (show all configured channels)
+
+---
+
+## 4. Beautiful Embed Design (Tokyo Drift Customs Branding)
+
+### Color Palette
+- **Primary Red**: #E5342B
+- **Approved/Paid**: #10B981 (green)
+- **Rejected**: #EF4444 (red)
+- **Submitted/Pending**: #3B82F6 (blue)
+- **Draft**: #6B7280 (gray)
+- **Headers/Accents**: #1F2937 (dark)
+
+### General Layout
+- **Author**: Shop logo thumbnail (left), "Tokyo Drift Customs" name, timestamp
+- **Title**: Include status emoji + descriptive text
+  - ✅ Order Approved · TDC-0042
+  - ❌ Order Rejected · TDC-0042
+  - 📋 Order Submitted · TDC-0042
+  - 💸 Weekly Payout · Mechanic Name
+- **Fields** (inline where noted, max 3 per row):
+  - Mechanic, Status, Date Created
+  - Customer Total, Parts Cost, Labour Earned
+  - Commission Rate, Commission Earned, Expected Payout
+  - Work Done (bulleted list, max 1024 chars)
+  - Notes, Rejection Reason, Approved By
+- **Item List** (if order items exist):
+  - Each item as: `🔧 [Category] Item Name — $1,234 (cost: $567)`
+- **Footer**: Tokyo Drift Customs | Timestamp
+
+### Specific Embed Types
+
+#### Order Embed (Submitted/Approved)
+```
+Title: ✅ Order Approved · TDC-0042
+Color: #10B981 (approved) or #3B82F6 (submitted)
+Fields:
+  - Mechanic: Myx | Status: Approved | Date: Jun 15, 2024
+  - Customer Total: $5,432 | Parts Cost: $2,100 | Labour: $3,332
+  - Commission (40%): $1,333 | Approval Date: Jun 16, 2024
+  - Work Done:
+    🔧 Performance — Turbo Upgrade, ECU Tune, Cold Air Intake
+    🎨 Visual & Body — Custom Paint, Body Kit, Spoiler
+  - Notes: "Customer requested matte black finish"
+Footer: Tokyo Drift Customs | Approved by: Phoenix
+```
+
+#### Payout Embed
+```
+Title: 💸 Weekly Payout · Mechanic Name
+Color: #10B981
+Fields:
+  - Week: Jun 10 – Jun 16 | Paid: Jun 17, 2024
+  - Orders Completed: 12 | Total Revenue: $54,320
+  - Parts Revenue: $21,000 | Labour Revenue: $33,320
+  - Commission Rate: 40% | Commission Earned: $13,328
+  - Hours Worked: 40 hrs | Hourly Rate: $333/hr
+  - **Total Payout: $13,328**
+Footer: Tokyo Drift Customs | Processed by: Owner Name
+```
+
+#### Personal Sales Dashboard
+```
+Title: 📊 Sales Dashboard · Mechanic Name
+Color: #E5342B
+Fields:
+  - Status: Online | Hours Worked Today: 6.5 hrs
+  - Orders Completed Today: 3 | Revenue Today: $12,540
+  - This Week: 12 orders | $54,320 total | 40 hrs worked
+  - Commission Earned: $13,328 | Expected Payout: Jun 17
+  - YTD: 120 orders | $543,200 | $217,280 commission
+Graphical Element (ASCII or emoji bars):
+  Revenue: ████████████████░░ $12.5k / $15k
+  Orders: ██████████░░░░░░░░ 10 / 15
+Footer: Tokyo Drift Customs | Last Updated: [timestamp]
+```
+
+#### Timeclock Session Summary
+```
+Title: ⏰ Clock Out Confirmation · Mechanic Name
+Color: #3B82F6 (pending approval) or #10B981 (approved)
+Fields:
+  - Session: 9:00 AM – 5:30 PM
+  - Duration: 8 hrs 30 mins
+  - Status: Pending Trainer Approval
+  - Notes: "Completed 4 orders, 2 custom paint jobs"
+Buttons:
+  - [Approve] (trainer+ only)
+  - [Reject] (trainer+ only)
+Footer: Tokyo Drift Customs | Awaiting Approval
+```
+
+#### Job Posting
+```
+Title: 🔧 Job Title
+Color: #E5342B
+Body: Full formatted text with preserved emojis
+Fields:
+  - Posted: Jun 15, 2024 | Expires: Jun 30, 2024
+  - Posted By: Phoenix
+Buttons:
+  - [Apply]
+  - [Share]
+  - [Delete] (owner+ only)
+Footer: Tokyo Drift Customs
+```
+
+#### Analytics Report
+```
+Title: 📈 Team Analytics · Week of Jun 10
+Color: #E5342B
+Fields:
+  - Top Performer: Mechanic Name (12 orders, $54.3k)
+  - Average Order Value: $4,527
+  - Total Orders This Week: 47
+  - Total Revenue: $212,769
+  - Total Commission: $85,108
+  - Team Hours: 188 hrs
+Graphical Elements:
+  Revenue Trend: ▁▂▃▅▆▇█▆ (per day)
+  Orders per Mechanic:
+    Myx:        ██████████░░ (12)
+    Yancy:      ████████░░░░ (10)
+    Uncle Cracker: ███████░░░░░ (8)
+Footer: Tokyo Drift Customs | Generated: Jun 17, 2024
+```
+
+---
+
+## 5. Interaction Routing & Features
+
+### Button Handlers (prefix-based customId routing)
+```
+order:approve:<orderId>
+order:reject:<orderId>
+order:additem:<draftId>
+timeclock:approve:<timeclockId>
+timeclock:reject:<timeclockId>
+clockin:mechanic:<mechanicId>
+clockout:mechanic:<mechanicId>
+breakdown:expand:<mechId>
+job:apply:<jobId>
+job:delete:<jobId>
+analytics:view:<mechId>
+sales:viewdetailed:<mechId>
+```
+
+### Modal Handlers (for free-form text)
+```
+order:notes
+order:rejectReason
+timeclock:notes
+job:posting
+clock_out:notes
+quote:details
+```
+
+### Select Menu Handlers
+```
+order:selectitem
+order:selectcategory
+crew:selectrole
+settings:selectoption
+```
+
+### General Interaction Rules
+- Defer any handler that does DB work: `interaction.deferReply({ ephemeral: true })`
+- Use ephemeral replies for anything not meant for the whole channel
+- Use modals (TextInputBuilder) for free text
+- Use select menus for picking items/categories/users
+- **NO PINGING**: Never use `allowed_mentions: { users: [...] }` or `<@id>` in message content. Post clean text summaries to #logs instead.
+
+---
+
+## 6. Project Structure
+
+```
+src/
+  index.ts                    # client + login, event listeners
+  deploy-commands.ts          # registers slash commands to GUILD_ID
+  db.ts                       # supabase client (service role)
+  
+  lib/
+    roles.ts                  # requireRole, getRole, hasPermission
+    embeds.ts                 # buildOrderEmbed, buildPayoutEmbed, buildAnalyticsEmbed, buildJobEmbed, buildDashboardEmbed
+    pricing.ts                # formatMoney, computeTotals, calculateCommission
+    channels.ts               # createSalesChannel, getChannelConfig, updateChannelConfig
+    timeclock.ts              # clockIn, clockOut, approveClock, getTotalHours
+    analytics.ts              # getMetrics, generateReport, calculateTrends
+  
+  commands/
+    order.ts                  # /order new, list, view, approve, reject
+    crew.ts                   # /crew add, remove, list, status
+    commission.ts             # /commission
+    breakdown.ts              # /breakdown
+    job.ts                    # /job post, list, delete
+    timeclock.ts              # /clock in, /clock out
+    mysales.ts                # /mysales, /saleslog
+    pay.ts                    # /pay mechanic
+    setup.ts                  # /setup sales-channel, archive-channel, logs-channel
+    analytics.ts              # /analytics [mechanic|period]
+    settings.ts               # /settings
+  
+  interactions/
+    buttons.ts                # handleButtonInteraction (order:*, timeclock:*, job:*, breakdown:*, sales:*)
+    modals.ts                 # handleModalInteraction (order:*, timeclock:*, job:*)
+    selects.ts                # handleSelectMenuInteraction (order:*, crew:*, settings:*)
+  
+  seed.ts                     # idempotent seed of owners, managers, trainers, mechanics
+  types.ts                    # TypeScript interfaces (Order, Timeclock, Payout, etc.)
+```
+
+---
+
+## 7. Key Features & Workflows
+
+### Clock In / Clock Out Workflow
+1. Mechanic runs `/clock in` → timestamp recorded, status = `pending`
+2. Embed posted to their personal sales channel confirming start time
+3. Mechanic runs `/clock out [notes]` → end timestamp recorded, duration calculated
+4. Session summary embed posted to sales channel with `[Approve]` and `[Reject]` buttons (trainer+ only)
+5. Trainer/Manager reviews and clicks `[Approve]` → status = `approved`, hours added to weekly total, reflected in dashboard
+6. If rejected → status = `rejected`, trainer can add rejection notes
+
+### Sales Channel Setup
+1. Owner runs `/setup sales-channel mechanic:<@user>`
+2. Bot creates private channel: `sales-{mechanic_name}` (bot + mechanic + managers/trainers can view)
+3. Bot posts welcome embed with mechanic's info and quick access buttons
+4. Mechanic's completed orders, clock sessions, and daily summaries auto-post here
+5. Buttons in sales channel: `View Detailed Analytics`, `Clock In`, `Clock Out` for quick access
+6. Owner can view all sales channels to monitor activity
+
+### Order Workflow (No Pinging)
+1. Mechanic runs `/order new` → modal for notes
+2. Mechanic adds items via select menus, sets parts cost
+3. Mechanic runs `/order submit` → order embed posts to #orders (plain text, no mentions)
+4. Manager+ sees button `[Approve]` in that embed
+5. Manager approves → embed color changes to green, `approved_by` + timestamp recorded
+6. Once order is completed, owner runs `/pay mechanic:<user>` 
+7. Bot marks orders as `paid`, creates payout row, posts summary to #logs (no pinging)
+8. Mechanic sees payout reflected in `/mysales` dashboard
+
+### Payroll & Analytics
+- `/breakdown` shows all mechanics' YTD stats, with buttons to expand each into detailed order lists
+- `/analytics [mechanic|period]` generates trend charts and performance comparisons
+- `/mysales` personal dashboard shows commission earned, hours worked, revenue
+- `/pay mechanic` confirms and logs payout (all to #logs, no DMs or pings)
+
+---
+
+## 8. Setup & Deployment
+
+### Prerequisites
+- Discord bot token (applications.commands + bot scopes)
+- Intents: Guilds, GuildMembers, GuildMessages, MessageContent, DirectMessages
+- Permissions: Send Messages, Embed Links, Use Slash Commands, Read Message History, Manage Channels (for creating sales channels)
+
+### Initial Setup
+1. Create a Discord server and invite the bot (see permissions above)
+2. Fill Replit Secrets:
+   - DISCORD_TOKEN
+   - DISCORD_CLIENT_ID
+   - DISCORD_GUILD_ID
+   - SUPABASE_URL
+   - SUPABASE_SERVICE_ROLE_KEY
+   - ORDERS_CHANNEL_ID
+   - JOBS_CHANNEL_ID
+   - LOG_CHANNEL_ID
+   - SHOP_LOGO_URL (link to Tokyo Drift shop logo image)
+
+3. Create database tables in Supabase (schemas defined in Section 2)
+4. Run database migrations/setup
+5. Run `bun run seed` to idempotent-seed owners, managers, trainers, mechanics
+6. Run `bun run deploy-commands` to register slash commands to GUILD_ID
+7. Run `bun run dev` to start the bot
+8. Set up with Replit's Always On or UptimeRobot ping to `/healthz` Express endpoint for continuous uptime
+
+### Commands Registration (deploy-commands.ts)
+Register all slash commands once at startup:
+- Mechanic: /order, /clock, /mysales, /saleslog
+- Manager+: /order, /timeclock, /breakdown, /analytics, /crew, /commission
+- Owner: /setup, /pay, /job, /settings
+- Buttons and modals registered implicitly via customId prefixes
+
+---
+
+## 9. Non-Negotiables
+
+1. **TypeScript**: Strict mode enforced.
+2. **Money Values**: Always stored as `numeric` in DB, formatted as `$1,234.56` in embeds.
+3. **Role Authorization**: Every owner-only or manager-only command **verifies caller role server-side** before executing.
+4. **No Pinging**: 
+   - Never use `allowed_mentions: { users: [...] }` or `<@id>` in notification embeds
+   - All payouts, approvals, rejections → clean text to #logs only
+   - Clock in/out confirmations → mechanic's personal sales channel only
+5. **Custom Emojis**: Preserve user-provided emojis (both `<:name:id>` format and unicode) verbatim in order notes, job postings, etc.
+6. **Branding**: 
+   - Name: Tokyo Drift Customs
+   - Primary Red: #E5342B
+   - Shop logo URL as embed thumbnail/author icon
+   - Consistent typography (use Discord's default fonts, bold/italic for emphasis)
+7. **Beautiful Embeds**: Every embed must follow the design guidelines in Section 4. Use color coding for status, emoji icons for clarity, and ASCII/emoji charts for analytics.
+8. **Ephemeral Messages**: Owner/sensitive operations use ephemeral replies; public announcements use persistent embeds in #logs or channel-specific channels.
+9. **Data Persistence**: All state lives in Supabase. Bot restarts don't lose data.
+10. **Scalability**: Code handles 50+ mechanics, 100s of orders per week without performance degradation.
+
+---
+
+## 10. Rich Analytics & Reporting
+
+### Dashboard Features
+- **Personal `/mysales`**: Shows mechanic's YTD stats, this week's earnings, orders completed, hours worked
+- **Manager `/breakdown`**: Multi-mechanic overview with drilldown capability per person
+- **Owner `/analytics`**: Shop-wide trends, revenue forecasts, top performers, category analysis
+- **Sales Channel**: Auto-updated daily summaries posted to each mechanic's personal channel
+
+### Calculated Metrics
+- `Labour = Total - Parts Cost`
+- `Commission = Labour × Commission Rate`
+- `Hours Worked = Sum of approved timeclock durations`
+- `Expected Payout = Commission + any bonus/incentives`
+- `YTD Totals = Summed across all weeks`
+
+### Reports (Store in DB for audit trail)
+- Weekly payroll summary (mechanic, week_start, total commission, hours, invoice count)
+- Monthly revenue report (per mechanic, per category, shop totals)
+- Performance trends (orders/day, avg order value, top items, etc.)
+
+---
+
+## 11. Future Extensibility
+
+Structure the code to easily add:
+- Bonus/incentive system (store in payouts table)
+- Customer feedback/ratings per mechanic
+- Inventory tracking (parts stock, reorder alerts)
+- Invoice generation (PDF exports to customer)
+- Integration with external invoicing/accounting systems
+- Mechanic certification/skill tags
+- Job/quote templates
+- Multi-shop support (region/location tags)
