@@ -4,13 +4,29 @@ import {
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   EmbedBuilder
 } from "discord.js";
-import { db, getSetting, rowToOrder } from "../db.js";
+import { db, getSetting, rowToOrder, setGuildRoleMapping, getGuildConfig } from "../db.js";
 import { COLORS, money } from "../lib/embeds.js";
 
 export async function handleSelect(interaction: AnySelectMenuInteraction) {
-  if (!interaction.isStringSelectMenu()) return;
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
+
+  // ── Role select menus (setup:setrole:level) ────────────
+  if (interaction.isRoleSelectMenu()) {
+    if (ns === "setup" && action === "setrole") {
+      const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic";
+      const validLevels = ["owner", "manager", "trainer", "mechanic"];
+      if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", ephemeral: true }); return; }
+      const roleId = interaction.values[0];
+      if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      await setGuildRoleMapping(interaction.guild.id, level, roleId);
+      const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
+      await interaction.reply({ content: `✅ **${levelLabel}** permission level mapped to <@&${roleId}>. Members with that role can now use ${level}-level commands.`, ephemeral: true });
+    }
+    return;
+  }
+
+  if (!interaction.isStringSelectMenu()) return;
 
   // ── Select category → show items ──────────────────────
   if (ns === "order" && action === "selectcategory") {

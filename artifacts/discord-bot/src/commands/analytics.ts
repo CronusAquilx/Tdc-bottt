@@ -43,16 +43,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     : await db.execute({ sql: "SELECT mechanic_id, total, labour FROM orders WHERE status IN ('approved','paid') AND DATE(created_at) >= ?", args: [dateFrom] });
 
   const totalRevenue = r.rows.reduce((s, row) => s + Number(row[1] ?? 0), 0);
-  const totalCommission = r.rows.reduce((s, row) => s + Number(row[2] ?? 0) * 0.4, 0);
-  const avgOrderValue = r.rows.length ? totalRevenue / r.rows.length : 0;
 
-  const mechMap: Record<string, { name: string; orders: number; revenue: number }> = {};
+  // Build per-mechanic map with their individual commission rates
+  const mechMap: Record<string, { name: string; orders: number; revenue: number; commission: number; rate: number }> = {};
   for (const row of r.rows) {
     const mid = String(row[0]);
-    if (!mechMap[mid]) { const p = await getProfile(mid); mechMap[mid] = { name: p?.display_name ?? "Unknown", orders: 0, revenue: 0 }; }
+    if (!mechMap[mid]) {
+      const p = await getProfile(mid);
+      mechMap[mid] = { name: p?.display_name ?? "Unknown", orders: 0, revenue: 0, commission: 0, rate: p?.commission_rate ?? 0.4 };
+    }
     mechMap[mid].orders++;
     mechMap[mid].revenue += Number(row[1] ?? 0);
+    mechMap[mid].commission += Number(row[2] ?? 0) * mechMap[mid].rate;
   }
+
+  const totalCommission = Object.values(mechMap).reduce((s, m) => s + m.commission, 0);
+  const avgOrderValue = r.rows.length ? totalRevenue / r.rows.length : 0;
 
   const sorted = Object.values(mechMap).sort((a, b) => b.revenue - a.revenue);
   const top = sorted[0] ?? { name: "N/A", orders: 0, revenue: 0 };

@@ -1,15 +1,15 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ChannelType, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits,
+  RoleSelectMenuBuilder
 } from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
-import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
   .setName("setup")
-  .setDescription("Configure Tokyo Drift Customs bot (owner only)")
+  .setDescription("Configure Tokyo Drift Customs bot")
   .addSubcommand(s =>
     s.setName("sales-channel")
       .setDescription("Create a personal sales channel for a mechanic")
@@ -35,14 +35,60 @@ export const data = new SlashCommandBuilder()
       .setDescription("Set or create the #archive channel")
       .addChannelOption(o => o.setName("channel").setDescription("Existing channel (leave empty to create)"))
   )
+  .addSubcommand(s => s.setName("roles").setDescription("Map Discord server roles to bot permission levels"))
   .addSubcommand(s => s.setName("status").setDescription("Show current bot configuration"));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  if (!(await requireRole(interaction, "owner"))) return;
+  // /setup is open to everyone — no role gate
   await interaction.deferReply({ ephemeral: true });
   const sub = interaction.options.getSubcommand();
   const guild = interaction.guild!;
 
+  // ── roles ──────────────────────────────────────────────
+  if (sub === "roles") {
+    const config = await getGuildConfig(guild.id);
+    const embed = new EmbedBuilder()
+      .setTitle("⚙️ Configure Role Mappings")
+      .setColor(COLORS.primary)
+      .setDescription(
+        "Use the menus below to link your **Discord server roles** to bot permission levels.\n" +
+        "Members with these roles will be recognised without needing `/crew add`.\n\n" +
+        `**Owner** → ${config?.owner_role_id ? `<@&${config.owner_role_id}>` : "_Not set_"}\n` +
+        `**Manager** → ${config?.manager_role_id ? `<@&${config.manager_role_id}>` : "_Not set_"}\n` +
+        `**Trainer** → ${config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "_Not set_"}\n` +
+        `**Mechanic** → ${config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "_Not set_"}`
+      )
+      .setFooter({ text: "Tokyo Drift Customs" })
+      .setTimestamp();
+
+    const rows = [
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId("setup:setrole:owner")
+          .setPlaceholder("👑 Select the Owner role")
+      ),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId("setup:setrole:manager")
+          .setPlaceholder("🔧 Select the Manager role")
+      ),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId("setup:setrole:trainer")
+          .setPlaceholder("📚 Select the Trainer role")
+      ),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId("setup:setrole:mechanic")
+          .setPlaceholder("🔩 Select the Mechanic role")
+      ),
+    ];
+
+    await interaction.editReply({ embeds: [embed], components: rows });
+    return;
+  }
+
+  // ── sales-channel ──────────────────────────────────────
   if (sub === "sales-channel") {
     const targetUser = interaction.options.getUser("mechanic", true);
     const profile = await getProfile(targetUser.id);
@@ -50,13 +96,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     const channelName = `sales-${profile.display_name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`;
     const managersR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
+
     const permOverwrites: any[] = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
       { id: targetUser.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
     ];
     for (const row of managersR.rows) {
-      permOverwrites.push({ id: String(row[0]), allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      const mid = String(row[0]);
+      if (mid) permOverwrites.push({ id: mid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
+
+    // Also grant access to configured Discord role mappings
+    const config = await getGuildConfig(guild.id);
+    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
+      permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    }
+
     if (guild.members.me) {
       permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks] });
     }
@@ -91,6 +146,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  // ── channel configs ────────────────────────────────────
   const channelMap: Record<string, { field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id"; name: string; topic: string }> = {
     "orders-channel": { field: "orders_channel_id", name: "orders", topic: "Tokyo Drift Customs — Order submissions" },
     "logs-channel": { field: "log_channel_id", name: "tdc-logs", topic: "Tokyo Drift Customs — System logs" },
@@ -119,6 +175,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
+  // ── status ─────────────────────────────────────────────
   if (sub === "status") {
     const config = await getGuildConfig(guild.id);
     const embed = new EmbedBuilder()
@@ -128,7 +185,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         { name: "Orders Channel", value: config?.orders_channel_id ? `<#${config.orders_channel_id}>` : "❌ Not set", inline: true },
         { name: "Jobs Channel", value: config?.jobs_channel_id ? `<#${config.jobs_channel_id}>` : "❌ Not set", inline: true },
         { name: "Logs Channel", value: config?.log_channel_id ? `<#${config.log_channel_id}>` : "❌ Not set", inline: true },
-        { name: "Archive Channel", value: config?.archive_channel_id ? `<#${config.archive_channel_id}>` : "❌ Not set", inline: true }
+        { name: "Archive Channel", value: config?.archive_channel_id ? `<#${config.archive_channel_id}>` : "❌ Not set", inline: true },
+        { name: "\u200b", value: "\u200b", inline: true },
+        { name: "\u200b", value: "\u200b", inline: true },
+        { name: "Owner Role", value: config?.owner_role_id ? `<@&${config.owner_role_id}>` : "❌ Not set", inline: true },
+        { name: "Manager Role", value: config?.manager_role_id ? `<@&${config.manager_role_id}>` : "❌ Not set", inline: true },
+        { name: "Trainer Role", value: config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "❌ Not set", inline: true },
+        { name: "Mechanic Role", value: config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "❌ Not set", inline: true }
       )
       .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
     await interaction.editReply({ embeds: [embed] });

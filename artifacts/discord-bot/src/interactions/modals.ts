@@ -62,10 +62,22 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     const updated = rowToOrder(ur.rows[0]);
     const mechanic = await getProfile(order.mechanic_id);
-    const embed = buildOrderEmbed(updated, mechanic?.display_name ?? "Unknown");
+    const commRate = mechanic?.commission_rate ?? 0.4;
+    const embed = buildOrderEmbed(updated, mechanic?.display_name ?? "Unknown", undefined, commRate);
     if (order.discord_message_id && interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      if (config?.orders_channel_id) { try { const ch = await interaction.guild.channels.fetch(config.orders_channel_id); if (ch?.isTextBased()) { const msg = await (ch as any).messages.fetch(order.discord_message_id); await msg.edit({ embeds: [embed], components: [] }); } } catch { /* ignore */ } }
+      if (config?.orders_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.orders_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).messages.fetch(order.discord_message_id);
+            const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder().setCustomId(`order:archive:${extra}`).setLabel("🗃️ Archive").setStyle(ButtonStyle.Secondary)
+            );
+            await msg.edit({ embeds: [embed], components: [archiveRow] });
+          }
+        } catch { /* ignore */ }
+      }
     }
     await interaction.editReply({ content: `❌ Order **${order.order_number}** rejected.`, embeds: [embed] });
     return;
@@ -102,7 +114,10 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.jobs_channel_id) {
-        try { const ch = await interaction.guild.channels.fetch(config.jobs_channel_id); if (ch?.isTextBased()) { const msg = await (ch as any).send({ embeds: [embed], components: [row] }); msgId = msg.id; } } catch { /* ignore */ }
+        try {
+          const ch = await interaction.guild.channels.fetch(config.jobs_channel_id);
+          if (ch?.isTextBased()) { const msg = await (ch as any).send({ embeds: [embed], components: [row] }); msgId = msg.id; }
+        } catch { /* ignore */ }
       }
     }
     await db.execute({ sql: "INSERT INTO jobs (id, posted_by, title, body, discord_message_id) VALUES (?, ?, ?, ?, ?)", args: [jobId, interaction.user.id, title, body, msgId] });
@@ -111,6 +126,61 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       content: msgId
         ? `✅ Job **${title}** posted${jobsCh ? ` to <#${jobsCh}>` : ""}!`
         : `✅ Job **${title}** saved. Configure a jobs channel with \`/setup jobs-channel\` to post it publicly.`
+    });
+    return;
+  }
+
+  // ── Job apply modal ────────────────────────────────────
+  if (ns === "job" && action === "applymodal") {
+    await interaction.deferReply({ ephemeral: true });
+    const jobId = extra;
+    const message = interaction.fields.getTextInputValue("message");
+    const experience = interaction.fields.getTextInputValue("experience");
+
+    const r = await db.execute({ sql: "SELECT title, posted_by FROM jobs WHERE id = ?", args: [jobId] });
+    if (!r.rows[0]) { await interaction.editReply({ content: "❌ This job posting no longer exists." }); return; }
+    const title = String(r.rows[0][0]);
+    const posterId = String(r.rows[0][1]);
+
+    const applicantProfile = await getProfile(interaction.user.id);
+    const applicantName = applicantProfile?.display_name ?? interaction.user.username;
+
+    const applicationEmbed = new EmbedBuilder()
+      .setTitle(`📩 New Application — ${title}`)
+      .setColor(COLORS.submitted)
+      .addFields(
+        { name: "Applicant", value: `${applicantName} (<@${interaction.user.id}>)`, inline: true },
+        { name: "Applied", value: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), inline: true },
+        { name: "\u200b", value: "\u200b", inline: true },
+        { name: "Message", value: message },
+        ...(experience ? [{ name: "Experience", value: experience }] : [])
+      )
+      .setFooter({ text: "Tokyo Drift Customs | Job Application" })
+      .setTimestamp();
+
+    // DM the job poster
+    let dmSent = false;
+    try {
+      const poster = await interaction.client.users.fetch(posterId);
+      await poster.send({ embeds: [applicationEmbed] });
+      dmSent = true;
+    } catch { /* DMs may be closed */ }
+
+    // Also post to logs channel if configured
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config?.log_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.log_channel_id);
+          if (ch?.isTextBased()) await (ch as any).send({ embeds: [applicationEmbed] });
+        } catch { /* ignore */ }
+      }
+    }
+
+    await interaction.editReply({
+      content: dmSent
+        ? `✅ Your application for **${title}** has been sent! The poster will reach out if you're a good fit.`
+        : `✅ Your application for **${title}** has been submitted and logged.`
     });
     return;
   }

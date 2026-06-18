@@ -1,3 +1,4 @@
+import http from "http";
 import {
   Client,
   GatewayIntentBits,
@@ -34,6 +35,23 @@ if (!token) {
 // Auto-detect client ID from token
 const tokenParts = token.split(".");
 const clientId = Buffer.from(tokenParts[0], "base64").toString("utf-8");
+
+// ── Health / uptime HTTP server ───────────────────────────────────────────────
+// Register the URL below in Discord Developer Portal → General Information → "Interactions Endpoint URL" (optional)
+// or use it as a keep-alive ping target:  https://<your-domain>/healthz
+const HTTP_PORT = parseInt(process.env.BOT_HTTP_PORT ?? "3001", 10);
+const httpServer = http.createServer((req, res) => {
+  if (req.url === "/healthz" || req.url === "/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", service: "Tokyo Drift Customs Bot", ts: new Date().toISOString() }));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+httpServer.listen(HTTP_PORT, () => {
+  console.log(`[TDC] 🌐 Health server listening on port ${HTTP_PORT} — /healthz`);
+});
 
 const client = new Client({
   intents: [
@@ -72,7 +90,7 @@ client.once(Events.ClientReady, async (c) => {
     const body = commandDefs.map(c => c.data.toJSON());
     const result = await rest.put(Routes.applicationCommands(clientId), { body }) as any[];
     console.log(`[TDC] ✅ Registered ${result.length} commands.`);
-    console.log(`[TDC] ✅ Tokyo Drift Customs is online — ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+    console.log(`[TDC] ✅ Online — ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
   } catch (err) {
     console.error("[TDC] ❌ Failed to register commands:", err);
   }

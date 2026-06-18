@@ -47,9 +47,13 @@ function footer(extra?: string): { text: string } {
   return { text: `Tokyo Drift Customs${extra ? ` | ${extra}` : ""}` };
 }
 
-export function buildOrderEmbed(order: Order, mechanicName: string, approverName?: string): EmbedBuilder {
+export function buildOrderEmbed(
+  order: Order,
+  mechanicName: string,
+  approverName?: string,
+  commissionRate = 0.4
+): EmbedBuilder {
   const items = Array.isArray(order.items) ? order.items : JSON.parse(order.items as unknown as string);
-  const commissionRate = 0.4;
   const commission = order.labour * commissionRate;
 
   const grouped: Record<string, string[]> = {};
@@ -104,9 +108,10 @@ export function buildPayoutEmbed(
   payout: Payout,
   mechanicName: string,
   processedBy: string,
-  weekEnd: string
+  weekEnd: string,
+  commissionRate = 0.4
 ): EmbedBuilder {
-  const labour = payout.amount / 0.4;
+  const labour = commissionRate > 0 ? payout.amount / commissionRate : 0;
 
   return new EmbedBuilder()
     .setTitle(`💸 Weekly Payout · ${mechanicName}`)
@@ -118,7 +123,7 @@ export function buildPayoutEmbed(
       { name: "Orders Completed", value: String(payout.order_count), inline: true },
       { name: "Total Revenue", value: money(labour), inline: true },
       { name: "Hours Worked", value: `${payout.hours_worked.toFixed(1)} hrs`, inline: true },
-      { name: "Commission Rate", value: "40%", inline: true },
+      { name: "Commission Rate", value: `${(commissionRate * 100).toFixed(0)}%`, inline: true },
       { name: "Commission Earned", value: money(payout.amount), inline: true },
       { name: "Invoice Count", value: String(payout.invoice_count), inline: true },
       { name: "💰 Total Payout", value: `**${money(payout.amount)}**` }

@@ -18,6 +18,10 @@ async function exec(sql: string) {
   }
 }
 
+async function safeAlter(sql: string) {
+  try { await db.execute(sql); } catch { /* column already exists */ }
+}
+
 export async function initDb() {
   await exec(`
     CREATE TABLE IF NOT EXISTS profiles (
@@ -103,6 +107,12 @@ export async function initDb() {
     )
   `);
 
+  // Safe migrations — add new columns if they don't exist yet
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN owner_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN mechanic_role_id TEXT");
+
   // Seed default settings
   const defaultCatalog = JSON.stringify({
     categories: ["Performance", "Visual & Body", "Tires", "Misc", "Upgrades", "Interior"],
@@ -159,6 +169,7 @@ export async function initDb() {
     await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [o.id, "owner"] });
   }
   for (const m of mechanics) {
+    if (!m.id) continue;
     await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name) VALUES (?, ?)", args: [m.id, m.name] });
     await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [m.id, "mechanic"] });
   }
@@ -187,6 +198,10 @@ export async function getGuildConfig(guildId: string) {
     jobs_channel_id: row[2] ? String(row[2]) : null,
     log_channel_id: row[3] ? String(row[3]) : null,
     archive_channel_id: row[4] ? String(row[4]) : null,
+    owner_role_id: row[5] ? String(row[5]) : null,
+    manager_role_id: row[6] ? String(row[6]) : null,
+    trainer_role_id: row[7] ? String(row[7]) : null,
+    mechanic_role_id: row[8] ? String(row[8]) : null,
   };
 }
 
@@ -199,6 +214,19 @@ export async function setGuildConfig(
     sql: `INSERT INTO guild_config (guild_id, ${field}) VALUES (?, ?)
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
     args: [guildId, channelId]
+  });
+}
+
+export async function setGuildRoleMapping(
+  guildId: string,
+  level: "owner" | "manager" | "trainer" | "mechanic",
+  roleId: string
+): Promise<void> {
+  const field = `${level}_role_id`;
+  await db.execute({
+    sql: `INSERT INTO guild_config (guild_id, ${field}) VALUES (?, ?)
+          ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
+    args: [guildId, roleId]
   });
 }
 
