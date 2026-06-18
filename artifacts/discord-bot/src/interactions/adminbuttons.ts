@@ -305,20 +305,27 @@ export async function postLoaPanel(channel: TextChannel) {
 
 export async function postRafflePanel(channel: TextChannel) {
   const embed = new EmbedBuilder()
-    .setTitle("🎰  RAFFLE BOARD")
+    .setTitle("🎡  RAFFLE BOARD")
     .setColor(0x9b59b6)
     .setDescription(
       "**Tokyo Drift Customs — Raffles**\n\n" +
       "This is where raffles are posted. Keep an eye out for new drops! 🍀\n\n" +
       "**How it works:**\n" +
-      "• Owners post raffles using the **Create Raffle** button in the admin panel\n" +
+      "• Owners create raffles with the **Create Raffle** button below\n" +
       "• When a raffle is live, click **Enter Raffle** to throw your name in\n" +
       "• The owner spins the wheel — winner is pinged right here"
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Good luck! 🍀" })
     .setTimestamp();
 
-  const msg = await channel.send({ embeds: [embed] });
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin:setup:createraffle")
+      .setLabel("🎡  Create Raffle")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  const msg = await channel.send({ embeds: [embed], components: [row] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }

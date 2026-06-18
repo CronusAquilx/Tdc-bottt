@@ -1,6 +1,5 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
   description: API specification
@@ -10,13 +9,14 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: raffles
+    description: Raffle operations
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +24,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /raffles:
+    get:
+      operationId: getRaffles
+      tags: [raffles]
+      summary: List recent raffles
+      responses:
+        "200":
+          description: List of raffles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [raffles]
+                properties:
+                  raffles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Raffle"
+  /raffles/{id}:
+    get:
+      operationId: getRaffle
+      tags: [raffles]
+      summary: Get a raffle by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Raffle details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [raffle]
+                properties:
+                  raffle:
+                    $ref: "#/components/schemas/Raffle"
+        "404":
+          description: Not found
+  /raffles/{id}/entries:
+    get:
+      operationId: getRaffleEntries
+      tags: [raffles]
+      summary: Get entries for a raffle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Raffle entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries, count]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: string
+                  count:
+                    type: integer
 components:
   schemas:
     HealthStatus:
@@ -33,4 +101,35 @@ components:
           type: string
       required:
         - status
-
+    Raffle:
+      type: object
+      required: [id, guild_id, channel_id, title, description, prizes, winner_count, started_by, status, winners]
+      properties:
+        id:
+          type: string
+        guild_id:
+          type: string
+        channel_id:
+          type: string
+        message_id:
+          type: ["string", "null"]
+        title:
+          type: string
+        description:
+          type: string
+        prizes:
+          type: array
+          items:
+            type: string
+        winner_count:
+          type: integer
+        ends_at:
+          type: ["string", "null"]
+        started_by:
+          type: string
+        status:
+          type: string
+        winners:
+          type: array
+          items:
+            type: string

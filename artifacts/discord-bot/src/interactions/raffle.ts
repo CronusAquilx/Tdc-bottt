@@ -140,11 +140,20 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
     const shuffled = [...entryIds].sort(() => Math.random() - 0.5);
     const winnerIds = shuffled.slice(0, winnerCount);
 
-    // Mark raffle as ended
-    await db.execute({
-      sql: "UPDATE raffles SET status = 'ended', winners = ?, ends_at = datetime('now') WHERE id = ?",
+    // Atomic status update — prevents double-spin race conditions
+    const updateResult = await db.execute({
+      sql: "UPDATE raffles SET status = 'ended', winners = ?, ends_at = datetime('now') WHERE id = ? AND status = 'active'",
       args: [JSON.stringify(winnerIds), raffleId]
     });
+
+    if (!updateResult.rowsAffected) {
+      await interaction.editReply({ content: "❌ This raffle was already spun." });
+      return true;
+    }
+
+    // Build wheel URL for the website
+    const domain = process.env.REPLIT_DEV_DOMAIN ?? "";
+    const wheelUrl = domain ? `https://${domain}/raffle/${raffleId}` : null;
 
     // --- Spinning animation ---
     if (interaction.guild) {
@@ -154,18 +163,21 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
           const msgR = raffle.message_id ? await (ch as any).messages.fetch(raffle.message_id).catch(() => null) : null;
 
           const spinFrames = [
-            "🎰 Spinning... 🎲",
-            "🎰 Who's it gonna be? 👀",
-            "🎰 Round and round... 🌀",
-            "🎰 Almost there... ⚡",
-            "🎰 Final spin... 🔥",
+            "🎡 Spinning the wheel... 🎲",
+            "🎡 Who's it gonna be? 👀",
+            "🎡 Round and round... 🌀",
+            "🎡 Almost there... ⚡",
+            "🎡 Final spin... 🔥",
           ];
 
           for (const frame of spinFrames) {
             const spinEmbed = new EmbedBuilder()
-              .setTitle("🎰  SPINNING THE WHEEL...")
+              .setTitle("🎡  SPINNING THE WHEEL...")
               .setColor(0x9b59b6)
-              .setDescription(`## ${raffle.title}\n\n${frame}\n\n*${entryCount} entries in the wheel...*`)
+              .setDescription(
+                `## ${raffle.title}\n\n${frame}\n\n*${entryCount} entries in the wheel...*` +
+                (wheelUrl ? `\n\n🌐 [Watch the wheel spin live!](${wheelUrl})` : "")
+              )
               .setFooter({ text: FOOTER });
             if (msgR) await msgR.edit({ embeds: [spinEmbed], components: [] });
             await new Promise(res => setTimeout(res, 700));
@@ -179,10 +191,13 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
             return `🏆 <@${id}> — **${prize}**`;
           }).join("\n");
 
+          const winnerDesc = `## ${raffle.title}\n\n${prizeLines}` +
+            (wheelUrl ? `\n\n🌐 [View results on the website](${wheelUrl})` : "");
+
           const winnerEmbed = new EmbedBuilder()
             .setTitle("🎉  WE HAVE A WINNER!")
             .setColor(0xffd700)
-            .setDescription(`## ${raffle.title}\n\n${prizeLines}`)
+            .setDescription(winnerDesc)
             .addFields(
               { name: "🎟️ Total Entries", value: `**${entryCount}**`,     inline: true },
               { name: "🏆 Winners",        value: `**${winnerCount}**`,    inline: true },
@@ -194,7 +209,9 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
           if (msgR) await msgR.edit({ embeds: [winnerEmbed], components: [] });
 
           // Ping the winners in the raffle channel
-          await (ch as any).send({ content: `🎉 Congratulations ${winnerMentions}! You won the **${raffle.title}** raffle! 🏆` });
+          const pingContent = `🎉 Congratulations ${winnerMentions}! You won the **${raffle.title}** raffle! 🏆` +
+            (wheelUrl ? `\n🌐 ${wheelUrl}` : "");
+          await (ch as any).send({ content: pingContent });
         }
       } catch { /* ignore */ }
     }
