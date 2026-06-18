@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   ChannelType, PermissionFlagsBits,
-  RoleSelectMenuBuilder,
+  RoleSelectMenuBuilder, UserSelectMenuBuilder,
   TextChannel
 } from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
@@ -56,28 +56,35 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   if (section === "saleschan" && action === "new") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    const modal = new ModalBuilder().setCustomId("admin:saleschan:new").setTitle("Create Sales Channel");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
-      )
+    const embed = new EmbedBuilder()
+      .setTitle("➕  Create Sales Channel")
+      .setColor(COLORS.primary)
+      .setDescription("**Pick the mechanic** this channel is for.\nThe bot will create a private channel and post their order panel.")
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:saleschan:pickmechanic:new")
+        .setPlaceholder("Select a mechanic...")
+        .setMinValues(1).setMaxValues(1)
     );
-    await interaction.showModal(modal);
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
     return true;
   }
 
   if (section === "saleschan" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    const modal = new ModalBuilder().setCustomId("admin:saleschan:existing").setTitle("Attach Existing Sales Channel");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("mechanic_id").setLabel("Mechanic's Discord User ID").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click user → Copy ID")
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("channel_id").setLabel("Channel ID to attach").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder("Right-click channel → Copy ID")
-      )
+    const embed = new EmbedBuilder()
+      .setTitle("🔗  Attach Existing Sales Channel")
+      .setColor(COLORS.primary)
+      .setDescription("**Step 1 of 2 — Pick the mechanic** this channel belongs to.")
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:saleschan:pickmechanic:existing")
+        .setPlaceholder("Select a mechanic...")
+        .setMinValues(1).setMaxValues(1)
     );
-    await interaction.showModal(modal);
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
     return true;
   }
 

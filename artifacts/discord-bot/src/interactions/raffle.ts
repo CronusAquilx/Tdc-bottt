@@ -179,7 +179,25 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
     const entryCount = await getEntryCount(raffleId);
     if (interaction.guild) await refreshRaffleMessage(raffle, interaction.guild, entryCount, "active");
 
-    await interaction.editReply({ content: `🎟️ You're in! **${entryCount}** ${entryCount === 1 ? "entry" : "entries"} so far. Good luck! 🍀` });
+    // Get display name (server nickname → global display name → username)
+    const displayName: string =
+      (interaction.member as any)?.displayName ??
+      interaction.user.displayName ??
+      interaction.user.username;
+
+    // Post public entry notification in the raffle channel
+    if (interaction.guild && raffle.channel_id) {
+      try {
+        const ch = await interaction.guild.channels.fetch(raffle.channel_id);
+        if (ch?.isTextBased()) {
+          await (ch as any).send({
+            content: `🎟️ **${displayName}** just entered the **${raffle.title}** raffle!  *(${entryCount} ${entryCount === 1 ? "entry" : "entries"} total)*`
+          });
+        }
+      } catch { /* ignore */ }
+    }
+
+    await interaction.editReply({ content: `✅ You're in, **${displayName}**! **${entryCount}** ${entryCount === 1 ? "entry" : "entries"} so far. Good luck! 🍀` });
     return true;
   }
 
@@ -236,35 +254,36 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
           // The first winner's index determines where the wheel lands
           const firstWinnerIdx = shuffled.indexOf(winnerIds[0]);
           const finalRot = winnerRotation(firstWinnerIdx, entryCount);
-          const frames = spinFrameRotations(finalRot, 5);
+          const frames = spinFrameRotations(finalRot);
 
           const spinTitles = [
             "🎡  SPINNING...",
             "🎡  ROUND AND ROUND...",
-            "🎡  WHO'S IT GONNA BE?",
-            "🎡  ALMOST THERE...",
-            "🎡  FINAL SPIN...",
+            "🎡  WHO'S IT GONNA BE? 👀",
+            "🎡  ALMOST THERE... ⚡",
+            "🎡  FINAL SPIN... 🔥",
           ];
 
-          // Send each spin frame as a wheel image
+          // Send each spin frame — unique filename per frame avoids Discord CDN caching
           for (let f = 0; f < frames.length - 1; f++) {
+            const fname = `wheel_s${f}.png`;
             const buf = drawWheelBuffer(entryCount, frames[f]);
-            const file = new AttachmentBuilder(buf, { name: "wheel.png" });
+            const file = new AttachmentBuilder(buf, { name: fname });
             const spinEmbed = new EmbedBuilder()
               .setTitle(spinTitles[f] ?? "🎡  SPINNING...")
               .setColor(COLORS.raffle)
               .setDescription(`**${raffle.title}**\n\n*${entryCount} entries in the wheel...*`)
-              .setImage("attachment://wheel.png")
+              .setImage(`attachment://${fname}`)
               .setFooter({ text: FOOTER });
 
             if (msgR) await msgR.edit({ embeds: [spinEmbed], files: [file], components: [] });
-            await new Promise(res => setTimeout(res, 900));
+            await new Promise(res => setTimeout(res, 950));
           }
 
           // Final frame — highlight all winner indices
           const winnerIndices = winnerIds.map(id => shuffled.indexOf(id));
           const finalBuf = drawWheelBuffer(entryCount, frames[frames.length - 1], winnerIndices);
-          const finalFile = new AttachmentBuilder(finalBuf, { name: "wheel.png" });
+          const finalFile = new AttachmentBuilder(finalBuf, { name: "wheel_winner.png" });
 
           const prizes = raffle.prizes.length ? raffle.prizes : [raffle.title];
 
@@ -283,7 +302,7 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
             .setTitle("🎉  WE HAVE A WINNER!")
             .setColor(0xffd700)
             .setDescription(`**${raffle.title}**\n\n${prizeLines}${multiNote}`)
-            .setImage("attachment://wheel.png")
+            .setImage("attachment://wheel_winner.png")
             .addFields(
               { name: "🎟️ Total Entries", value: `**${entryCount}**`, inline: true },
               { name: "🏆 Winners",        value: `**${winnerCount}**`, inline: true },
