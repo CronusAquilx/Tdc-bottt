@@ -5,7 +5,8 @@ import {
   EmbedBuilder, ChannelType, PermissionFlagsBits,
   TextChannel
 } from "discord.js";
-import { db, getProfile, getGuildConfig, getUserRole } from "../db.js";
+import { db, getProfile, getGuildConfig } from "../db.js";
+import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
@@ -63,13 +64,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
 
   // Close training channel button
   if (ns === "training" && action === "close") {
-    const guild = interaction.guild!;
-    const role = await getUserRole(interaction.user.id);
-    const allowed = ["owner", "manager", "trainer"];
-    if (!role || !allowed.includes(role)) {
-      await interaction.reply({ content: "❌ Only owners, managers, and trainers can close training channels.", ephemeral: true });
-      return true;
-    }
+    if (!(await requireRole(interaction, "trainer"))) return true;
     await interaction.deferUpdate();
     try {
       await interaction.channel?.delete();
@@ -85,12 +80,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     const recruitId = rest[0];
     const safeName  = rest.slice(1).join(":");
 
-    const role = await getUserRole(interaction.user.id);
-    const allowed = ["owner", "manager", "trainer"];
-    if (!role || !allowed.includes(role)) {
-      await interaction.reply({ content: "❌ Only trainers, managers, and owners can create sales channels.", ephemeral: true });
-      return true;
-    }
+    if (!(await requireRole(interaction, "trainer"))) return true;
 
     await interaction.deferReply({ ephemeral: true });
     const guild = interaction.guild!;
