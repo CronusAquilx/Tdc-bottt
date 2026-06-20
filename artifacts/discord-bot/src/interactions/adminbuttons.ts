@@ -167,8 +167,11 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `📜 Logs: ${ch(config?.log_channel_id)}\n` +
         `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
         `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
+        `⏰ Timeclock: ${ch(config?.timeclock_channel_id)}\n` +
+        `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-        `👥 Roster: ${ch(config?.roster_channel_id)}`
+        `👥 Roster: ${ch(config?.roster_channel_id)}\n` +
+        `📚 Training: ${ch((config as any)?.training_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -176,11 +179,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:jobs").setLabel("💼 Jobs").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:archive").setLabel("🗃️ Archive").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("admin:setup:loach").setLabel("🌴 LOA Ch").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:loach").setLabel("🌴 LOA").setStyle(ButtonStyle.Secondary),
     );
     const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰ Timeclock").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:rafflech").setLabel("🎰 Raffle").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:roster").setLabel("👥 Roster").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:trainingch").setLabel("📚 Training").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });
     return true;
@@ -344,7 +350,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id" | "training_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
@@ -355,6 +361,7 @@ export const CHANNEL_MAP: Record<string, {
   rafflech:    { field: "raffle_channel_id",       name: "tdc-raffle",      topic: "Tokyo Drift Customs — Raffles",              label: "Raffle"      },
   leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
   roster:      { field: "roster_channel_id",       name: "tdc-roster",      topic: "Tokyo Drift Customs — Crew Roster",          label: "Roster"      },
+  trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,6 +372,9 @@ async function postChannelPanel(channel: TextChannel, chanType: string) {
     await postLoaPanel(channel);
   } else if (chanType === "rafflech") {
     await postRafflePanel(channel);
+  } else if (chanType === "trainingch") {
+    const { postTrainingPanel } = await import("./training.js");
+    await postTrainingPanel(channel);
   }
   // orders, jobs, logs, archive — no panel needed
 }

@@ -199,6 +199,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE timeclock ADD COLUMN clock_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN leaderboard_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN roster_channel_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
@@ -275,7 +276,7 @@ export async function getGuildConfig(guildId: string) {
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id" | "training_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({

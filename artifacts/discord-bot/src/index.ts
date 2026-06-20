@@ -6,9 +6,10 @@ import {
   Events,
   REST,
   Routes,
-  ChatInputCommandInteraction
+  ChatInputCommandInteraction,
+  Message
 } from "discord.js";
-import { initDb } from "./db.js";
+import { initDb, getUserRole } from "./db.js";
 import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
 import { data as crewData,        execute as crewExecute        } from "./commands/crew.js";
 import { data as timeclockData,   execute as timeclockExecute   } from "./commands/timeclock.js";
@@ -21,17 +22,20 @@ import { data as payoutData,      execute as payoutExecute      } from "./comman
 import { data as loaData,         execute as loaExecute         } from "./commands/loa.js";
 import { data as profileData,     execute as profileExecute     } from "./commands/profile.js";
 import { data as leaderboardData, execute as leaderboardExecute } from "./commands/leaderboard.js";
-import { handleButton }       from "./interactions/buttons.js";
-import { handleDraftButton }  from "./interactions/draftbuttons.js";
-import { handleModal }        from "./interactions/modals.js";
-import { handleSelect }       from "./interactions/selects.js";
-import { handleAdminButton }  from "./interactions/adminbuttons.js";
-import { handleAdminModal }   from "./interactions/adminmodals.js";
+import { data as rosterData,      execute as rosterExecute      } from "./commands/roster.js";
+import { handleButton }        from "./interactions/buttons.js";
+import { handleDraftButton }   from "./interactions/draftbuttons.js";
+import { handleModal }         from "./interactions/modals.js";
+import { handleSelect }        from "./interactions/selects.js";
+import { handleAdminButton }   from "./interactions/adminbuttons.js";
+import { handleAdminModal }    from "./interactions/adminmodals.js";
 import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
+import { handleTrainingButton, handleTrainingModal } from "./interactions/training.js";
 import { postLoaPanel, postRafflePanel }         from "./interactions/adminbuttons.js";
-import { startRosterAutoRefresh, refreshAllRosters } from "./lib/rosterManager.js";
-import { postLeaderboard } from "./commands/leaderboard.js";
+import { startRosterAutoRefresh }                from "./lib/rosterManager.js";
+import { postLeaderboard }                       from "./commands/leaderboard.js";
+import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
 import { db } from "./db.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -87,12 +91,21 @@ const commandDefs = [
   { data: loaData,         execute: loaExecute         },
   { data: profileData,     execute: profileExecute     },
   { data: leaderboardData, execute: leaderboardExecute },
+  { data: rosterData,      execute: rosterExecute      },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
 for (const cmd of commandDefs) {
   commands.set(cmd.data.name, { execute: cmd.execute });
 }
+
+// ── Role flair emojis ──────────────────────────────────────────────────────────
+const ROLE_FLAIR: Record<string, string> = {
+  owner:    "👑",
+  manager:  "🔧",
+  trainer:  "📚",
+  mechanic: "🔩",
+};
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`[TDC] 🏁 Logged in as ${c.user.tag}`);
@@ -146,8 +159,25 @@ client.once(Events.ClientReady, async (c) => {
   // Start roster auto-refresh (every 5 min)
   startRosterAutoRefresh(c);
 
+  // Start auto clock-out monitor (every 5 min, 20 min idle threshold)
+  startAutoClockOutMonitor(c);
+
   // Weekly leaderboard auto-post — every Monday at midnight UTC
   scheduleWeeklyLeaderboard(c);
+});
+
+// ── Role flair: react with rank emoji when staff sends a message ───────────────
+client.on(Events.MessageCreate, async (message: Message) => {
+  // Ignore bots and DMs
+  if (message.author.bot || !message.guild) return;
+
+  try {
+    const role = await getUserRole(message.author.id);
+    if (!role) return;
+    const emoji = ROLE_FLAIR[role];
+    if (!emoji) return;
+    await message.react(emoji);
+  } catch { /* silently ignore — don't break the bot over a failed reaction */ }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -162,6 +192,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (await handleAdminButton(interaction)) return;
       if (await handleRaffleButton(interaction)) return;
       if (await handleLoaButton(interaction)) return;
+      if (await handleTrainingButton(interaction)) return;
       if (await handleDraftButton(interaction)) return;
       await handleButton(interaction);
       return;
@@ -171,6 +202,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (await handleAdminModal(interaction)) return;
       if (await handleRaffleModal(interaction)) return;
       if (await handleLoaModal(interaction)) return;
+      if (await handleTrainingModal(interaction)) return;
       await handleModal(interaction);
       return;
     }

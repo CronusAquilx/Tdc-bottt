@@ -8,8 +8,7 @@ export type LeaderEntry = {
   total_revenue: number;
 };
 
-const MEDALS = ["🥇", "🥈", "🥉"];
-const RANK_EMOJI: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+const PLACE_ICONS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
 function money(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -17,18 +16,22 @@ function money(n: number): string {
   return `$${n.toLocaleString("en-US")}`;
 }
 
+function buildBar(value: number, max: number, width = 12): string {
+  if (max === 0) return "░".repeat(width);
+  const filled = Math.max(1, Math.round((value / max) * width));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
 function getWeekBounds(): { start: Date; end: Date; label: string } {
   const now   = new Date();
-  const day   = now.getUTCDay(); // 0=Sun, 1=Mon
+  const day   = now.getUTCDay();
   const diff  = day === 0 ? -6 : 1 - day;
   const start = new Date(now);
   start.setUTCDate(now.getUTCDate() + diff);
   start.setUTCHours(0, 0, 0, 0);
-
   const end = new Date(start);
   end.setUTCDate(start.getUTCDate() + 6);
   end.setUTCHours(23, 59, 59, 999);
-
   const fmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   return { start, end, label: `${fmt(start)} – ${fmt(end)}` };
@@ -37,47 +40,61 @@ function getWeekBounds(): { start: Date; end: Date; label: string } {
 export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): EmbedBuilder {
   const { label } = getWeekBounds();
 
-  if (!entries.length) {
-    return new EmbedBuilder()
-      .setTitle("🏆  WEEKLY LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
-      .setColor(COLORS.gold)
-      .setDescription(
-        `**Week of ${label}**\n\n` +
-        "*No completed orders yet this week. Get to work! 🔧*"
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday" })
-      .setTimestamp(updatedAt);
-  }
-
-  const topRevenue = entries[0]?.total_revenue ?? 1;
-
-  const rows = entries.map((e, i) => {
-    const pos    = i + 1;
-    const medal  = MEDALS[i] ?? `**${pos}.**`;
-    const bar    = buildBar(e.total_revenue, topRevenue, 10);
-    return (
-      `${medal}  **${e.display_name}**\n` +
-      `\`${bar}\`  ${money(e.total_revenue)}  ·  **${e.order_count}** orders`
-    );
-  });
-
   const embed = new EmbedBuilder()
     .setTitle("🏆  WEEKLY LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
-    .setColor(COLORS.gold)
-    .setDescription(
-      `**Week of ${label}**\n\n` +
-      rows.join("\n\n")
-    );
+    .setColor(COLORS.gold);
 
-  // Leader callout
-  if (entries.length >= 1) {
-    const top = entries[0];
-    embed.addFields({
-      name: "👑  This Week's Leader",
-      value: `**${top.display_name}** is running the board with **${money(top.total_revenue)}** across **${top.order_count}** orders. Keep it up! 🔥`,
-      inline: false,
-    });
+  if (!entries.length) {
+    embed
+      .setDescription(
+        `## Week of ${label}\n\n` +
+        "```\n  No orders completed yet this week.\n  Get to work! 🔧\n```"
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
+      .setTimestamp(updatedAt);
+    return embed;
   }
+
+  const topRev = entries[0]!.total_revenue;
+
+  // Top 3 on separate lines with big callout, rest compact
+  const topSection = entries.slice(0, 3).map((e, i) => {
+    const bar   = buildBar(e.total_revenue, topRev, 14);
+    const place = PLACE_ICONS[i] ?? `${i + 1}.`;
+    return `${place}  **${e.display_name}**\n` +
+           `\`${bar}\`  **${money(e.total_revenue)}**  ·  ${e.order_count} orders`;
+  }).join("\n\n");
+
+  const restSection = entries.slice(3).map((e, i) => {
+    const bar   = buildBar(e.total_revenue, topRev, 8);
+    const place = PLACE_ICONS[i + 3] ?? `${i + 4}.`;
+    return `${place}  **${e.display_name}**  \`${bar}\`  ${money(e.total_revenue)}  ·  ${e.order_count} orders`;
+  }).join("\n");
+
+  embed.setDescription(
+    `## Week of ${label}\n\n` +
+    topSection +
+    (restSection ? `\n\n${restSection}` : "")
+  );
+
+  // Leader callout field
+  const leader = entries[0]!;
+  const runnerUp = entries[1];
+  const gap = runnerUp ? `  ·  **${money(leader.total_revenue - runnerUp.total_revenue)}** ahead of 2nd` : "";
+  embed.addFields({
+    name: "👑  CURRENT LEADER",
+    value: `**${leader.display_name}** — ${money(leader.total_revenue)} across **${leader.order_count}** orders${gap} 🔥`,
+    inline: false,
+  });
+
+  // Quick stats
+  const totalOrders = entries.reduce((s, e) => s + e.order_count, 0);
+  const totalRev    = entries.reduce((s, e) => s + e.total_revenue, 0);
+  embed.addFields(
+    { name: "📋 Total Orders", value: `**${totalOrders}**`,    inline: true },
+    { name: "💰 Total Revenue", value: `**${money(totalRev)}**`, inline: true },
+    { name: "👥 Mechanics Active", value: `**${entries.length}**`, inline: true },
+  );
 
   embed
     .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
@@ -86,12 +103,12 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
   return embed;
 }
 
-function buildBar(value: number, max: number, width: number): string {
-  const filled = Math.round((value / max) * width);
-  return "█".repeat(filled) + "░".repeat(width - filled);
-}
-
 export function getWeekStart(): string {
-  const { start } = getWeekBounds();
-  return start.toISOString().slice(0, 10);
+  const now   = new Date();
+  const day   = now.getUTCDay();
+  const diff  = day === 0 ? -6 : 1 - day;
+  const d     = new Date(now);
+  d.setUTCDate(now.getUTCDate() + diff);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 19).replace("T", " ");
 }
