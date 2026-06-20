@@ -33,7 +33,6 @@ import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js"
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
 import { handleTrainingButton, handleTrainingModal } from "./interactions/training.js";
 import { postLoaPanel, postRafflePanel }         from "./interactions/adminbuttons.js";
-import { startRosterAutoRefresh }                from "./lib/rosterManager.js";
 import { postLeaderboard }                       from "./commands/leaderboard.js";
 import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
 import { db } from "./db.js";
@@ -155,9 +154,6 @@ client.once(Events.ClientReady, async (c) => {
   } catch (err) {
     console.error("[TDC] ⚠️ Panel auto-post error:", err);
   }
-
-  // Start roster auto-refresh (every 5 min)
-  startRosterAutoRefresh(c);
 
   // Start auto clock-out monitor (every 5 min, 20 min idle threshold)
   startAutoClockOutMonitor(c);

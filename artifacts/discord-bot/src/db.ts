@@ -205,39 +205,6 @@ export async function initDb() {
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
   await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });
 
-  // Seed owners
-  const owners = [
-    { id: "198572092504014848", name: "Lu Chenzo" },
-    { id: "378293480608497664", name: "Phoenix" },
-    { id: "1363222342800511058", name: "Sierra Phoenix" }
-  ];
-  const mechanics = [
-    { id: "1179942814906327050", name: "Myx" },
-    { id: "1088337283180146758", name: "Yancy" },
-    { id: "623677968786653194", name: "Uncle Cracker" },
-    { id: "1445564490463711413", name: "Smoke" },
-    { id: "1069621699378679828", name: "Magnus" },
-    { id: "733808236293128314", name: "Louielue" },
-    { id: "727706928536616963", name: "Dayytradezz" },
-    { id: "1455587333071175755", name: "Ahmed Brown" },
-    { id: "748420441881706534", name: "Onlythegamers" },
-    { id: "1302529753739427961", name: "Dreico" },
-    { id: "466238601672392734", name: "Ron" },
-    { id: "1246285610319347754", name: "Mr Walkdown" },
-    { id: "312410738977144832", name: "Brandon Strong" },
-    { id: "463492813711999006", name: "Ab" }
-  ];
-
-  for (const o of owners) {
-    await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name) VALUES (?, ?)", args: [o.id, o.name] });
-    await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [o.id, "owner"] });
-  }
-  for (const m of mechanics) {
-    if (!m.id) continue;
-    await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [m.id, m.name] });
-    await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [m.id, "mechanic"] });
-  }
-
   console.log("[TDC] Database initialized.");
 }
 

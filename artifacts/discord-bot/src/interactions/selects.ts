@@ -279,7 +279,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const embed = new EmbedBuilder()
         .setTitle("✅  Roster Updated!")
         .setColor(COLORS.primary)
-        .setDescription("All crew members have been added to the roster. The roster channel will update shortly.")
+        .setDescription("All crew members have been added to the roster.")
         .setFooter({ text: FOOTER });
       await interaction.editReply({ embeds: [embed], components: [] });
     } else {
