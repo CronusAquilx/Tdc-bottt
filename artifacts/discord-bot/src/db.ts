@@ -200,6 +200,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN leaderboard_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN roster_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
@@ -274,7 +275,7 @@ export async function nextOrderNumber(): Promise<string> {
 }
 
 export async function getProfile(discordId: string) {
-  const r = await db.execute({ sql: "SELECT * FROM profiles WHERE discord_id = ?", args: [discordId] });
+  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id FROM profiles WHERE discord_id = ?", args: [discordId] });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
@@ -285,6 +286,7 @@ export async function getProfile(discordId: string) {
     hours_worked_this_week: Number(row[4] ?? 0),
     status:                 String(row[5] ?? "offline"),
     created_at:             String(row[6] ?? ""),
+    in_city_id:             row[7] ? String(row[7]) : null,
   };
 }
 

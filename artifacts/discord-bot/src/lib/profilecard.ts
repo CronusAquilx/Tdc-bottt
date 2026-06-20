@@ -4,6 +4,7 @@ export type CrewRank = "owner" | "manager" | "trainer" | "mechanic";
 
 interface ProfileCardData {
   displayName: string;
+  inCityId: string | null;
   rank: CrewRank;
   discordId: string;
   commissionRate: number;
@@ -189,11 +190,30 @@ export function drawProfileCard(data: ProfileCardData): Buffer {
   ctx.fillStyle = cfg.accent;
   ctx.fillRect(rx, 76 + nameSize + 6, 200, 2);
 
-  // ID line
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  ctx.font = "10px sans-serif";
-  ctx.textBaseline = "top";
-  ctx.fillText(`ID: ${data.discordId}`, rx, 76 + nameSize + 14);
+  // In-city ID tag (shown if set, otherwise Discord ID)
+  const lineY = 76 + nameSize + 14;
+  if (data.inCityId && data.inCityId !== data.displayName) {
+    // Small label
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.font = "10px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillText("IN-CITY ID", rx, lineY);
+
+    ctx.fillStyle = cfg.accent;
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillText(data.inCityId.slice(0, 28), rx, lineY + 13);
+  } else if (data.inCityId) {
+    // In-city ID matches display name — just show label
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.font = "10px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillText(`IN-CITY: ${data.inCityId.slice(0, 24)}`, rx, lineY);
+  } else {
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.font = "10px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillText(`ID: ${data.discordId}`, rx, lineY);
+  }
 
   // ── 4-stat grid ──────────────────────────────────────────────────────────────
   const stats = [

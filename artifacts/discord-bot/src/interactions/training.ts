@@ -225,11 +225,29 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
 
     const config = await getGuildConfig(guild.id);
 
+    // ── Save in-city ID to their profile (upsert) ────────────────────────────
+    await db.execute({
+      sql: `INSERT INTO profiles (discord_id, display_name, in_city_id, status)
+            VALUES (?, ?, ?, 'offline')
+            ON CONFLICT(discord_id) DO UPDATE SET in_city_id = excluded.in_city_id`,
+      args: [interaction.user.id, yourName, yourName]
+    });
+
     // ── Change the recruit's server nickname to their in-city name ─────────────
+    let nicknameSet = false;
+    let nicknameError = "";
     try {
       const member = await guild.members.fetch(interaction.user.id);
       await member.setNickname(yourName, "Training registration — in-city name set");
-    } catch { /* bot may not have permission — silently skip */ }
+      nicknameSet = true;
+    } catch (err: any) {
+      // Discord doesn't allow bots to rename the server owner
+      if (err?.code === 50013 || String(err?.message).toLowerCase().includes("owner")) {
+        nicknameError = "server owner";
+      } else {
+        nicknameError = "missing permissions";
+      }
+    }
 
     // ── Create temp training channel ──────────────────────────────────────────
     const safeName = yourName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 20);
@@ -327,6 +345,21 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     }
 
     await trainingChannel.send({ embeds: [embed], components: rows });
+
+    // ── Nickname feedback ─────────────────────────────────────────────────────
+    if (nicknameSet) {
+      await trainingChannel.send({
+        content: `✅ <@${interaction.user.id}>'s server nickname has been updated to **${yourName}**.`
+      });
+    } else if (nicknameError === "server owner") {
+      await trainingChannel.send({
+        content: `⚠️ <@${interaction.user.id}> — I couldn't update your server nickname automatically (Discord doesn't allow bots to rename server owners). Please change your nickname to **${yourName}** manually.\n> *Right-click yourself → Edit Server Profile → Nickname*`
+      });
+    } else if (nicknameError) {
+      await trainingChannel.send({
+        content: `⚠️ <@${interaction.user.id}> — I couldn't update your server nickname automatically (missing permissions). Please ask a manager to set your nickname to **${yourName}**, or change it yourself.\n> *Right-click yourself → Edit Server Profile → Nickname*`
+      });
+    }
 
     // ── Ping owners if missing items ──────────────────────────────────────────
     const missingItems: string[] = [];

@@ -38,6 +38,17 @@ export const data = new SlashCommandBuilder()
             { name: "On Break", value: "on_break" }
           )
       )
+  )
+  .addSubcommand(s =>
+    s.setName("setcityid")
+      .setDescription("Set a crew member's in-city ID (manager+)")
+      .addUserOption(o => o.setName("user").setDescription("The crew member").setRequired(true))
+      .addStringOption(o => o.setName("city_id").setDescription("Their in-city name / ID").setRequired(true).setMaxLength(40))
+  )
+  .addSubcommand(s =>
+    s.setName("mycityid")
+      .setDescription("Set your own in-city ID")
+      .addStringOption(o => o.setName("city_id").setDescription("Your in-city name / ID").setRequired(true).setMaxLength(40))
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -121,6 +132,40 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
     await db.execute({ sql: "UPDATE profiles SET status = ? WHERE discord_id = ?", args: [status, target.id] });
     await interaction.editReply({ content: `✅ **${profile.display_name}** status → ${statusEmoji(status)} **${status.replace("_", " ").toUpperCase()}**` });
+    return;
+  }
+
+  if (sub === "setcityid") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const target  = interaction.options.getUser("user", true);
+    const cityId  = interaction.options.getString("city_id", true).trim();
+    const profile = await getProfile(target.id);
+    if (!profile) { await interaction.editReply({ content: "❌ That user isn't in the crew. Add them first with `/crew add`." }); return; }
+    await db.execute({ sql: "UPDATE profiles SET in_city_id = ? WHERE discord_id = ?", args: [cityId, target.id] });
+    // Also try to update their server nickname
+    try {
+      const member = await interaction.guild!.members.fetch(target.id);
+      await member.setNickname(cityId, "In-city ID updated by manager");
+    } catch { /* owner or missing perms — ignore */ }
+    await interaction.editReply({ content: `✅ **${profile.display_name}**'s in-city ID set to **${cityId}**.` });
+    return;
+  }
+
+  if (sub === "mycityid") {
+    if (!(await requireRole(interaction, "mechanic"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const cityId  = interaction.options.getString("city_id", true).trim();
+    const profile = await getProfile(interaction.user.id);
+    if (!profile) { await interaction.editReply({ content: "❌ You're not in the crew yet." }); return; }
+    await db.execute({ sql: "UPDATE profiles SET in_city_id = ? WHERE discord_id = ?", args: [cityId, interaction.user.id] });
+    // Try to update their nickname too
+    try {
+      const member = await interaction.guild!.members.fetch(interaction.user.id);
+      await member.setNickname(cityId, "In-city ID self-updated");
+    } catch { /* owner or missing perms — ignore */ }
+    await interaction.editReply({ content: `✅ Your in-city ID has been set to **${cityId}**.` });
+    return;
   }
 }
 

@@ -44,6 +44,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const card = drawProfileCard({
     displayName:    profile.display_name,
+    inCityId:       profile.in_city_id ?? null,
     rank,
     discordId:      target.id,
     commissionRate: profile.commission_rate,
