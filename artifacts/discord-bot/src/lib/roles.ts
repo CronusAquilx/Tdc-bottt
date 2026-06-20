@@ -41,11 +41,30 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
 }
 
 export async function requireRole(interaction: AnyInteraction, minRole: string): Promise<boolean> {
+  // ── 1. DB role check ───────────────────────────────────────────────────────
   let ok = await dbHasRole(interaction.user.id, minRole);
 
-  // Fallback: check Discord server roles mapped in guild config
+  // ── 2. Fallback: Discord server roles mapped in guild config ───────────────
   if (!ok) {
     ok = await checkDiscordRoles(interaction, minRole);
+  }
+
+  // ── 3. Fallback: if no roles are configured yet, allow Discord Admins ──────
+  if (!ok && interaction.guild && interaction.inGuild()) {
+    try {
+      const config = await getGuildConfig(interaction.guild.id);
+      const noRolesConfigured =
+        !config ||
+        (!config.owner_role_id && !config.manager_role_id &&
+         !config.trainer_role_id && !config.mechanic_role_id);
+
+      if (noRolesConfigured) {
+        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (member?.permissions.has("Administrator")) {
+          ok = true;
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   if (!ok) {
