@@ -301,8 +301,11 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const rate = profile?.commission_rate ?? 0.3;
+    const allTimeTotalR = await db.execute({
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      args: [interaction.user.id]
+    });
+    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
 
     const itemSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectitem:${extra}:${category}`)
@@ -316,7 +319,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
           .setDescription(`Parts: ${money(i.cost)} | Labour: ${money(i.labour)} | Total: ${money(i.price)}`)
       ));
 
-    const embed = buildDraftEmbed(order, rate);
+    const embed = buildDraftEmbed(order, allTimeTotal);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
 
     await interaction.editReply({
@@ -372,8 +375,11 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     });
 
     const updated = rowToOrder((await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const rate = profile?.commission_rate ?? 0.3;
+    const allTimeTotalR2 = await db.execute({
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      args: [interaction.user.id]
+    });
+    const allTimeTotal2 = Number(allTimeTotalR2.rows[0]?.[0] ?? 0);
 
     const categories: string[] = catalog.categories ?? [];
     const catSelect = new StringSelectMenuBuilder()
@@ -382,7 +388,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, rate)],
+      embeds: [buildDraftEmbed(updated, allTimeTotal2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         new ActionRowBuilder<ButtonBuilder>().addComponents(

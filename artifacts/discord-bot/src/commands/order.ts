@@ -112,8 +112,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
     const mechanic = await getProfile(order.mechanic_id);
-    const commRate = mechanic?.commission_rate ?? 0.3;
-    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown", commRate);
+    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown");
     await interaction.editReply({ embeds: [embed] });
     return;
   }

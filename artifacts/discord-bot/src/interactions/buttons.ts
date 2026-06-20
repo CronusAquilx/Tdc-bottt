@@ -140,8 +140,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     const { items, total, pages } = paginate(rows, page, 10);
     const lines = await Promise.all(items.map(async o => {
       const p = await getProfile(o.mechanic_id);
-      const commission = o.labour * (p?.commission_rate ?? 0.3);
-      return `${statusEmoji(o.status)} **${o.order_number}** — ${p?.display_name ?? "?"} — ${money(o.total)} — Cut: ${money(commission)}`;
+      return `${statusEmoji(o.status)} **${o.order_number}** — ${p?.display_name ?? "?"} — ${money(o.total)}`;
     }));
     const embed = new EmbedBuilder()
       .setTitle(`🏁  Orders${status ? ` · ${status.toUpperCase()}` : ""}`)
@@ -170,9 +169,8 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
     await db.execute({ sql: "UPDATE orders SET status = 'archived' WHERE id = ?", args: [id] });
     const mechanic = await getProfile(order.mechanic_id);
-    const commRate = mechanic?.commission_rate ?? 0.3;
     const archivedOrder = { ...order, status: "archived" as any };
-    const embed = buildOrderEmbed(archivedOrder, mechanic?.display_name ?? "Unknown", commRate);
+    const embed = buildOrderEmbed(archivedOrder, mechanic?.display_name ?? "Unknown");
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.archive_channel_id) {
@@ -208,10 +206,9 @@ export async function handleButton(interaction: ButtonInteraction) {
         try {
           const ch = await interaction.guild.channels.fetch(config.archive_channel_id);
           if (ch?.isTextBased()) {
-            const commRate = profile?.commission_rate ?? 0.3;
             for (const row of r.rows) {
               const order = rowToOrder(row);
-              const embed = buildOrderEmbed({ ...order, status: "archived" as any }, profile?.display_name ?? "Unknown", commRate);
+              const embed = buildOrderEmbed({ ...order, status: "archived" as any }, profile?.display_name ?? "Unknown");
               await (ch as any).send({ embeds: [embed] });
             }
           }

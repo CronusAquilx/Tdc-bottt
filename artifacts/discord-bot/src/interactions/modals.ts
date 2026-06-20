@@ -28,8 +28,11 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     await db.execute({ sql: "UPDATE orders SET labour = ?, total = ? WHERE id = ?", args: [labour, newTotal, extra] });
 
     const updated = rowToOrder((await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] })).rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const rate = profile?.commission_rate ?? 0.3;
+    const allTimeTotalR = await db.execute({
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      args: [interaction.user.id]
+    });
+    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
 
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -46,7 +49,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     );
 
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, rate)],
+      embeds: [buildDraftEmbed(updated, allTimeTotal)],
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect), buttons]
     });
     return;

@@ -11,6 +11,14 @@ import { randomUUID } from "../lib/utils.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
+async function getAllTimeTotal(mechanicId: string): Promise<number> {
+  const r = await db.execute({
+    sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+    args: [mechanicId]
+  });
+  return Number(r.rows[0]?.[0] ?? 0);
+}
+
 export async function handleDraftButton(interaction: ButtonInteraction): Promise<boolean> {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const orderId = rest.join(":");
@@ -26,20 +34,14 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     });
 
     if (!active.rows[0]) {
-      // Show ephemeral clock-in embed with a clock-in button
       const promptEmbed = buildClockInPromptEmbed();
       const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In Now").setStyle(ButtonStyle.Success)
       );
-      await interaction.reply({
-        embeds: [promptEmbed],
-        components: [clockRow],
-        ephemeral: true
-      });
+      await interaction.reply({ embeds: [promptEmbed], components: [clockRow], ephemeral: true });
       return true;
     }
 
-    // Clocked in — go straight to draft (no notes modal)
     await interaction.deferReply({ ephemeral: true });
 
     const newOrderId = randomUUID();
@@ -51,7 +53,11 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       args: [newOrderId, orderNumber, interaction.user.id]
     });
 
-    const catalogStr = await getSetting("parts_catalog");
+    const [catalogStr, allTimeTotal, draft] = await Promise.all([
+      getSetting("parts_catalog"),
+      getAllTimeTotal(interaction.user.id),
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
+    ]);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -60,15 +66,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Pick a service category...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
-    const profile = await getProfile(interaction.user.id);
-    const rate = profile?.commission_rate ?? 0.3;
-
-    const draft = rowToOrder(
-      (await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] })).rows[0]
-    );
-
     await interaction.editReply({
-      embeds: [buildDraftEmbed(draft, rate)],
+      embeds: [buildDraftEmbed(draft, allTimeTotal)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         draftButtons(newOrderId)
@@ -82,14 +81,15 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // ── Back to categories ──────────────────────────────────────────────────────
   if (action === "backtocats") {
     await interaction.deferUpdate();
-    const catalogStr = await getSetting("parts_catalog");
-    const catalog = JSON.parse(catalogStr ?? "{}");
-    const categories: string[] = catalog.categories ?? [];
-    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    const [catalogStr, r, allTimeTotal] = await Promise.all([
+      getSetting("parts_catalog"),
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
+      getAllTimeTotal(interaction.user.id)
+    ]);
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const rate = profile?.commission_rate ?? 0.3;
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const categories: string[] = catalog.categories ?? [];
 
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${orderId}`)
@@ -97,7 +97,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
     await interaction.editReply({
-      embeds: [buildDraftEmbed(order, rate)],
+      embeds: [buildDraftEmbed(order, allTimeTotal)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         draftButtons(orderId)
@@ -143,14 +143,17 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
       args: [orderId]
     });
-    const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    const completed = rowToOrder(ur.rows[0]);
-    const profile = await getProfile(interaction.user.id);
-    const commRate = profile?.commission_rate ?? 0.3;
-    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", commRate);
-    const commission = completed.labour * commRate;
 
-    // "New Order" button to attach to the sales channel post
+    const [ur, profile, allTimeTotal] = await Promise.all([
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
+      getProfile(interaction.user.id),
+      getAllTimeTotal(interaction.user.id)
+    ]);
+    const completed = rowToOrder(ur.rows[0]);
+
+    // allTimeTotal from DB now includes this completed order
+    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", allTimeTotal);
+
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("order:newpanel")
@@ -158,7 +161,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
         .setStyle(ButtonStyle.Success)
     );
 
-    // Post to mechanic's sales channel WITH the New Order button
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {
       try {
@@ -173,8 +175,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     await interaction.editReply({
       content: postedTo
-        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>\n💵 **Commission: ${money(commission)}**`
-        : `✅ **${completed.order_number}** complete!\n💵 **Commission: ${money(commission)}**\n*Set up a sales channel to auto-post orders.*`,
+        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
+        : `✅ **${completed.order_number}** complete!\n*Set up a sales channel to auto-post orders.*`,
       embeds: [embed],
       components: []
     });

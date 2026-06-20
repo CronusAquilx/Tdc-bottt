@@ -55,10 +55,9 @@ const FOOTER_TEXT = "東京ドリフトカスタム  ·  Built Different. Driven
 export function buildOrderEmbed(
   order: Order,
   mechanicName: string,
-  commissionRate = 0.3
+  allTimeTotal = 0
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
-  const commission = order.labour * commissionRate;
 
   const statusLabel: Record<string, string> = {
     draft:     "📝 DRAFT",
@@ -89,13 +88,13 @@ export function buildOrderEmbed(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
       { name: "🔩 Parts Cost",     value: money(order.parts_cost), inline: true },
       { name: "⚙️ Labour",        value: money(order.labour),     inline: true },
-      { name: "💰 Customer Total", value: money(order.total),      inline: true }
+      { name: "💰 Order Total",    value: money(order.total),      inline: true }
     );
 
-  if (order.status !== "draft") {
+  if (allTimeTotal > 0) {
     embed.addFields({
-      name: `💵 Your Commission  ·  ${(commissionRate * 100).toFixed(0)}%`,
-      value: `**${money(commission)}**`,
+      name: "📊 All Orders Total",
+      value: `**${money(allTimeTotal)}**\n-# All orders up to this point`,
       inline: false
     });
   }
@@ -114,27 +113,35 @@ interface OrderItem {
 
 export function buildDraftEmbed(
   order: Order,
-  commissionRate = 0.3
+  allTimeTotal = 0
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
-  const commission = order.labour * commissionRate;
 
   // Clean bullet-point format — no code boxes
   const itemLines = items.length
     ? items.map(i => `• **${i.label}** — ${money(i.price)}`).join("\n")
     : "*No services yet — pick a category below*";
 
+  const fields: any[] = [
+    { name: "🛠️ Services", value: itemLines.slice(0, 1024), inline: false },
+    { name: "🔩 Parts",    value: money(order.parts_cost), inline: true },
+    { name: "⚙️ Labour",  value: money(order.labour),     inline: true },
+    { name: "💰 Total",   value: money(order.total),      inline: true },
+  ];
+
+  if (allTimeTotal > 0) {
+    fields.push({
+      name: "📊 All Orders Total",
+      value: `**${money(allTimeTotal)}**\n-# All orders up to this point`,
+      inline: false
+    });
+  }
+
   return new EmbedBuilder()
     .setTitle(`🔧  Draft Order  ·  ${order.order_number}`)
     .setColor(COLORS.draft)
     .setDescription("Pick services from the dropdown. Adjust labour if needed, then hit **Complete Order**.")
-    .addFields(
-      { name: "🛠️ Services", value: itemLines.slice(0, 1024), inline: false },
-      { name: "🔩 Parts",    value: money(order.parts_cost), inline: true },
-      { name: "⚙️ Labour",  value: money(order.labour),     inline: true },
-      { name: "💰 Total",   value: money(order.total),      inline: true },
-      { name: `💵 Est. Commission  ·  ${(commissionRate * 100).toFixed(0)}%`, value: `**${money(commission)}**`, inline: false }
-    )
+    .addFields(...fields)
     .setFooter({ text: FOOTER_TEXT })
     .setTimestamp();
 }
