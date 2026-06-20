@@ -9,16 +9,18 @@ import {
   ChatInputCommandInteraction
 } from "discord.js";
 import { initDb } from "./db.js";
-import { data as orderData,    execute as orderExecute    } from "./commands/order.js";
-import { data as crewData,     execute as crewExecute     } from "./commands/crew.js";
-import { data as timeclockData,execute as timeclockExecute} from "./commands/timeclock.js";
-import { data as mysalesData,  execute as mysalesExecute  } from "./commands/mysales.js";
-import { data as payData,      execute as payExecute      } from "./commands/pay.js";
-import { data as setupData,    execute as setupExecute    } from "./commands/setup.js";
-import { data as settingsData, execute as settingsExecute } from "./commands/settings.js";
-import { data as helpData,     execute as helpExecute     } from "./commands/help.js";
-import { data as payoutData,   execute as payoutExecute   } from "./commands/payout.js";
-import { data as loaData,      execute as loaExecute      } from "./commands/loa.js";
+import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
+import { data as crewData,        execute as crewExecute        } from "./commands/crew.js";
+import { data as timeclockData,   execute as timeclockExecute   } from "./commands/timeclock.js";
+import { data as mysalesData,     execute as mysalesExecute     } from "./commands/mysales.js";
+import { data as payData,         execute as payExecute         } from "./commands/pay.js";
+import { data as setupData,       execute as setupExecute       } from "./commands/setup.js";
+import { data as settingsData,    execute as settingsExecute    } from "./commands/settings.js";
+import { data as helpData,        execute as helpExecute        } from "./commands/help.js";
+import { data as payoutData,      execute as payoutExecute      } from "./commands/payout.js";
+import { data as loaData,         execute as loaExecute         } from "./commands/loa.js";
+import { data as profileData,     execute as profileExecute     } from "./commands/profile.js";
+import { data as leaderboardData, execute as leaderboardExecute } from "./commands/leaderboard.js";
 import { handleButton }       from "./interactions/buttons.js";
 import { handleDraftButton }  from "./interactions/draftbuttons.js";
 import { handleModal }        from "./interactions/modals.js";
@@ -28,6 +30,9 @@ import { handleAdminModal }   from "./interactions/adminmodals.js";
 import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
 import { postLoaPanel, postRafflePanel }         from "./interactions/adminbuttons.js";
+import { startRosterAutoRefresh, refreshAllRosters } from "./lib/rosterManager.js";
+import { postLeaderboard } from "./commands/leaderboard.js";
+import { db } from "./db.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -70,16 +75,18 @@ const client = new Client({
 });
 
 const commandDefs = [
-  { data: orderData,    execute: orderExecute    },
-  { data: crewData,     execute: crewExecute     },
-  { data: timeclockData,execute: timeclockExecute},
-  { data: mysalesData,  execute: mysalesExecute  },
-  { data: payData,      execute: payExecute      },
-  { data: setupData,    execute: setupExecute    },
-  { data: settingsData, execute: settingsExecute },
-  { data: helpData,     execute: helpExecute     },
-  { data: payoutData,   execute: payoutExecute   },
-  { data: loaData,      execute: loaExecute      },
+  { data: orderData,       execute: orderExecute       },
+  { data: crewData,        execute: crewExecute        },
+  { data: timeclockData,   execute: timeclockExecute   },
+  { data: mysalesData,     execute: mysalesExecute     },
+  { data: payData,         execute: payExecute         },
+  { data: setupData,       execute: setupExecute       },
+  { data: settingsData,    execute: settingsExecute    },
+  { data: helpData,        execute: helpExecute        },
+  { data: payoutData,      execute: payoutExecute      },
+  { data: loaData,         execute: loaExecute         },
+  { data: profileData,     execute: profileExecute     },
+  { data: leaderboardData, execute: leaderboardExecute },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -99,9 +106,8 @@ client.once(Events.ClientReady, async (c) => {
     console.error("[TDC] ❌ Failed to register commands:", err);
   }
 
-  // Auto-post LOA and raffle panels to configured channels that are missing them
+  // Auto-post panels to configured channels that are missing them
   try {
-    const { db } = await import("./db.js");
     const rows = await db.execute("SELECT guild_id, loa_channel_id, raffle_channel_id FROM guild_config");
     for (const row of rows.rows) {
       const guildId      = String(row[0] ?? "");
@@ -120,15 +126,12 @@ client.once(Events.ClientReady, async (c) => {
         try {
           const ch = await guild.channels.fetch(chanId);
           if (!ch?.isTextBased()) continue;
-
-          // Check recent messages — if bot already posted here, skip
           const recent = await ch.messages.fetch({ limit: 10 });
           const botAlreadyPosted = [...recent.values()].some((m: any) => m.author?.id === c.user.id);
           if (botAlreadyPosted) {
             console.log(`[TDC] ✅ ${label} panel already present in #${ch.name}`);
             continue;
           }
-
           await panelFn(ch);
           console.log(`[TDC] 📌 Posted ${label} panel to #${ch.name}`);
         } catch (err) {
@@ -139,6 +142,12 @@ client.once(Events.ClientReady, async (c) => {
   } catch (err) {
     console.error("[TDC] ⚠️ Panel auto-post error:", err);
   }
+
+  // Start roster auto-refresh (every 5 min)
+  startRosterAutoRefresh(c);
+
+  // Weekly leaderboard auto-post — every Monday at midnight UTC
+  scheduleWeeklyLeaderboard(c);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -184,6 +193,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch { /* ignore */ }
   }
 });
+
+// ── Weekly leaderboard scheduler ───────────────────────────────────────────────
+function scheduleWeeklyLeaderboard(client: Client) {
+  const tick = async () => {
+    const now = new Date();
+    // Fire on Monday UTC between 00:00–00:05
+    if (now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      try {
+        const rows = await db.execute("SELECT guild_id, leaderboard_channel_id FROM guild_config WHERE leaderboard_channel_id IS NOT NULL");
+        for (const row of rows.rows) {
+          const guildId   = String(row[0] ?? "");
+          const channelId = row[1] ? String(row[1]) : null;
+          if (!guildId || !channelId) continue;
+          try {
+            const guild = await client.guilds.fetch(guildId);
+            const ch    = await guild.channels.fetch(channelId).catch(() => null);
+            if (!ch?.isTextBased()) continue;
+            await postLeaderboard(ch as any);
+            console.log(`[TDC] 🏆 Auto-posted weekly leaderboard for guild ${guildId}`);
+          } catch (err) {
+            console.error(`[TDC] Leaderboard auto-post failed for guild ${guildId}:`, err);
+          }
+        }
+      } catch (err) {
+        console.error("[TDC] Leaderboard scheduler error:", err);
+      }
+    }
+  };
+
+  // Check every 5 minutes
+  setInterval(tick, 5 * 60 * 1000);
+  console.log("[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)");
+}
 
 initDb().then(() => {
   client.login(token!);

@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildAdminPanelEmbed, buildJobEmbed, COLORS } from "../lib/embeds.js";
+import { buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { showRaffleTypeSelector } from "./raffle.js";
@@ -121,33 +121,117 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Refresh admin panel ────────────────────────────────────────────────────
   if (section === "setup" && action === "refresh") {
     await interaction.deferUpdate();
-    const config = await getGuildConfig(guild.id);
-    const embed = buildAdminPanelEmbed(config);
-    await interaction.editReply({ embeds: [embed] });
+    // Just ack — main panel is now tab-based; no embed to update on the base msg
+    await interaction.followUp({ content: "✅ Panel refreshed.", ephemeral: true });
     return true;
   }
 
-  // ── Set Roles ──────────────────────────────────────────────────────────────
-  if (section === "setup" && action === "roles") {
+  // ── Panel tab: Staff ──────────────────────────────────────────────────────
+  if (section === "panel" && action === "staff") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("👥  STAFF MANAGEMENT")
+      .setColor(COLORS.primary)
+      .setDescription(
+        "**Crew & shift management tools.**\n\n" +
+        "• **Sales Channel** — create or attach a mechanic's personal order channel\n" +
+        "• **Job Post** — post a hiring ad to the jobs channel\n" +
+        "• **LOA** — submit a Leave of Absence request\n" +
+        "• **Timeclock** — set up the clock-in/clock-out channel"
+      )
+      .setFooter({ text: FOOTER });
+    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:saleschannel").setLabel("➕  Sales Channel").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰  Timeclock").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:setup:jobpost").setLabel("📢  Post Job Ad").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:setup:loa").setLabel("🌴  Submit LOA").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1] });
+    return true;
+  }
+
+  // ── Panel tab: Channels ───────────────────────────────────────────────────
+  if (section === "panel" && action === "channels") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const config = await getGuildConfig(guild.id);
+    const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
+    const embed = new EmbedBuilder()
+      .setTitle("📡  CHANNEL SETUP")
+      .setColor(COLORS.submitted)
+      .setDescription(
+        "**Configure bot channels.**\n\n" +
+        `📋 Orders: ${ch(config?.orders_channel_id)}\n` +
+        `💼 Jobs: ${ch(config?.jobs_channel_id)}\n` +
+        `📜 Logs: ${ch(config?.log_channel_id)}\n` +
+        `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
+        `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
+        `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
+        `👥 Roster: ${ch(config?.roster_channel_id)}`
+      )
+      .setFooter({ text: FOOTER });
+    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:orders").setLabel("📋 Orders").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:jobs").setLabel("💼 Jobs").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:archive").setLabel("🗃️ Archive").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:loach").setLabel("🌴 LOA Ch").setStyle(ButtonStyle.Secondary),
+    );
+    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:roster").setLabel("👥 Roster").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    return true;
+  }
+
+  // ── Panel tab: Raffle ─────────────────────────────────────────────────────
+  if (section === "panel" && action === "raffle") {
     if (!(await requireRole(interaction, "owner"))) return true;
     await interaction.deferReply({ ephemeral: true });
     const config = await getGuildConfig(guild.id);
+    const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
     const embed = new EmbedBuilder()
-      .setTitle("🎭  Role Configuration")
+      .setTitle("🎰  RAFFLE TOOLS")
+      .setColor(COLORS.raffle)
+      .setDescription(
+        "**Manage raffles and the raffle channel.**\n\n" +
+        `🎰 Raffle Channel: ${ch(config?.raffle_channel_id)}\n\n` +
+        "• **Create Raffle** — launch a new raffle with prizes and wheel\n" +
+        "• **Raffle Channel** — set up or attach the raffle channel"
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:createraffle").setLabel("🎡  Create Raffle").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:setup:rafflech").setLabel("🎰  Raffle Channel").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Panel tab: Config ─────────────────────────────────────────────────────
+  if (section === "panel" && action === "config") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const config = await getGuildConfig(guild.id);
+    const ro = (id: string | null | undefined) => id ? `<@&${id}>` : "`Not set`";
+    const embed = new EmbedBuilder()
+      .setTitle("⚙️  SERVER CONFIG")
       .setColor(COLORS.dark)
       .setDescription(
-        "Map your Discord roles to bot permission levels.\n\n" +
-        `👑 Owner → ${config?.owner_role_id ? `<@&${config.owner_role_id}>` : "_Not set_"}\n` +
-        `🔧 Manager → ${config?.manager_role_id ? `<@&${config.manager_role_id}>` : "_Not set_"}\n` +
-        `📚 Trainer → ${config?.trainer_role_id ? `<@&${config.trainer_role_id}>` : "_Not set_"}\n` +
-        `🔩 Mechanic → ${config?.mechanic_role_id ? `<@&${config.mechanic_role_id}>` : "_Not set_"}`
+        "**Bot permission roles + advanced configuration.**\n\n" +
+        `👑 Owner: ${ro(config?.owner_role_id)}\n` +
+        `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
+        `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
+        `🔩 Mechanic: ${ro(config?.mechanic_role_id)}`
       )
       .setFooter({ text: FOOTER });
     const rows = [
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:owner").setPlaceholder("👑 Select Owner role")),
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:manager").setPlaceholder("🔧 Select Manager role")),
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:trainer").setPlaceholder("📚 Select Trainer role")),
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:mechanic").setPlaceholder("🔩 Select Mechanic role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:owner").setPlaceholder("👑 Set Owner role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:manager").setPlaceholder("🔧 Set Manager role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:trainer").setPlaceholder("📚 Set Trainer role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:mechanic").setPlaceholder("🔩 Set Mechanic role")),
     ];
     await interaction.editReply({ embeds: [embed], components: rows });
     return true;
@@ -260,15 +344,17 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id";
   name: string; topic: string; label: string;
 }> = {
-  orders:   { field: "orders_channel_id",  name: "tdc-orders",  topic: "Tokyo Drift Customs — Order submissions",  label: "Orders"  },
-  jobs:     { field: "jobs_channel_id",     name: "tdc-jobs",    topic: "Tokyo Drift Customs — Job postings",       label: "Jobs"    },
-  logs:     { field: "log_channel_id",      name: "tdc-logs",    topic: "Tokyo Drift Customs — System logs",        label: "Logs"    },
-  archive:  { field: "archive_channel_id",  name: "tdc-archive", topic: "Tokyo Drift Customs — Archived orders",    label: "Archive" },
-  loach:    { field: "loa_channel_id",      name: "tdc-loa",     topic: "Tokyo Drift Customs — Leave of Absence",   label: "LOA"     },
-  rafflech: { field: "raffle_channel_id",   name: "tdc-raffle",  topic: "Tokyo Drift Customs — Raffles",            label: "Raffle"  },
+  orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
+  jobs:        { field: "jobs_channel_id",         name: "tdc-jobs",        topic: "Tokyo Drift Customs — Job postings",         label: "Jobs"        },
+  logs:        { field: "log_channel_id",          name: "tdc-logs",        topic: "Tokyo Drift Customs — System logs",          label: "Logs"        },
+  archive:     { field: "archive_channel_id",      name: "tdc-archive",     topic: "Tokyo Drift Customs — Archived orders",      label: "Archive"     },
+  loach:       { field: "loa_channel_id",          name: "tdc-loa",         topic: "Tokyo Drift Customs — Leave of Absence",     label: "LOA"         },
+  rafflech:    { field: "raffle_channel_id",       name: "tdc-raffle",      topic: "Tokyo Drift Customs — Raffles",              label: "Raffle"      },
+  leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
+  roster:      { field: "roster_channel_id",       name: "tdc-roster",      topic: "Tokyo Drift Customs — Crew Roster",          label: "Roster"      },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
