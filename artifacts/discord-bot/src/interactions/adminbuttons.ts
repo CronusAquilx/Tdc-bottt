@@ -170,8 +170,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `⏰ Timeclock: ${ch(config?.timeclock_channel_id)}\n` +
         `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-        `👥 Roster: ${ch(config?.roster_channel_id)}\n` +
-        `📚 Training: ${ch((config as any)?.training_channel_id)}`
+          `📚 Training: ${ch((config as any)?.training_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -185,7 +184,6 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰ Timeclock").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:rafflech").setLabel("🎰 Raffle").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("admin:setup:roster").setLabel("👥 Roster").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:trainingch").setLabel("📚 Training").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });
@@ -230,7 +228,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `👑 Owner: ${ro(config?.owner_role_id)}\n` +
         `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
         `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
-        `🔩 Mechanic: ${ro(config?.mechanic_role_id)}`
+        `🔩 Mechanic: ${ro(config?.mechanic_role_id)}\n` +
+        `🎓 Needs Training: ${ro((config as any)?.needs_training_role_id)}`
       )
       .setFooter({ text: FOOTER });
     const rows = [
@@ -238,6 +237,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:manager").setPlaceholder("🔧 Set Manager role")),
       new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:trainer").setPlaceholder("📚 Set Trainer role")),
       new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:mechanic").setPlaceholder("🔩 Set Mechanic role")),
+      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:needs_training").setPlaceholder("🎓 Set Needs Training role")),
     ];
     await interaction.editReply({ embeds: [embed], components: rows });
     return true;
@@ -350,7 +350,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id" | "training_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
@@ -360,7 +360,6 @@ export const CHANNEL_MAP: Record<string, {
   loach:       { field: "loa_channel_id",          name: "tdc-loa",         topic: "Tokyo Drift Customs — Leave of Absence",     label: "LOA"         },
   rafflech:    { field: "raffle_channel_id",       name: "tdc-raffle",      topic: "Tokyo Drift Customs — Raffles",              label: "Raffle"      },
   leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
-  roster:      { field: "roster_channel_id",       name: "tdc-roster",      topic: "Tokyo Drift Customs — Crew Roster",          label: "Roster"      },
   trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
 };
 

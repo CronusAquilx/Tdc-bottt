@@ -3,15 +3,12 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder, EmbedBuilder,
-  ChannelType, PermissionFlagsBits, TextChannel
+  ChannelType, PermissionFlagsBits, TextChannel,
 } from "discord.js";
 import { db, getProfile, getSetting, rowToOrder, setGuildRoleMapping, getGuildConfig } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
-
-// Pending roster additions: userId → list of picked member IDs
-const pendingRosterAdds = new Map<string, string[]>();
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -36,50 +33,6 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── User select menus ──────────────────────────────────────────────────────
   if (interaction.isUserSelectMenu()) {
-    // ── Roster: pick members ──────────────────────────────────────────────────
-    if (ns === "roster" && action === "addmembers") {
-      if (!(await requireRole(interaction, "manager"))) return;
-      const pickedIds = interaction.values;
-      // Store in pending map keyed by the invoker
-      pendingRosterAdds.set(interaction.user.id, pickedIds);
-
-      // Build a role picker for each person
-      // Discord only allows 5 action rows, and each select uses 1 row.
-      // We batch up to 5 at once; if more, we'll handle first 5 then prompt for next batch.
-      const batch = pickedIds.slice(0, 5);
-      const rows = batch.map((uid) => {
-        return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId(`roster:assignrole:${uid}`)
-            .setPlaceholder(`Assign role for <@${uid}>`)
-            .addOptions(
-              new StringSelectMenuOptionBuilder().setLabel("👑 Owner").setValue(`owner:${uid}`).setEmoji("👑"),
-              new StringSelectMenuOptionBuilder().setLabel("🔧 Manager").setValue(`manager:${uid}`).setEmoji("🔧"),
-              new StringSelectMenuOptionBuilder().setLabel("📚 Trainer").setValue(`trainer:${uid}`).setEmoji("📚"),
-              new StringSelectMenuOptionBuilder().setLabel("🔩 Mechanic").setValue(`mechanic:${uid}`).setEmoji("🔩"),
-            )
-        );
-      });
-
-      const embed = new EmbedBuilder()
-        .setTitle("👥  Assign Roles")
-        .setColor(COLORS.primary)
-        .setDescription(
-          `**Step 2 of 2 — Assign a rank to each crew member.**\n\n` +
-          batch.map(uid => `<@${uid}>`).join("\n") +
-          (pickedIds.length > 5 ? `\n\n*(+ ${pickedIds.length - 5} more — they'll be added as Mechanic by default)*` : "")
-        )
-        .setFooter({ text: FOOTER });
-
-      await interaction.update({ embeds: [embed], components: rows });
-      return;
-    }
-
-    // ── Roster: assign role (string select on a user) ─────────────────────────
-    if (ns === "roster" && action === "assignrole") {
-      // This is a string select — handled below in the string select block
-    }
-
     // admin:saleschan:pickmechanic:new  OR  admin:saleschan:pickmechanic:existing
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickmechanic") {
       const type = rest[1]; // "new" | "existing"
@@ -219,82 +172,6 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   }
 
   if (!interaction.isStringSelectMenu()) return;
-
-  // ── Roster: assign role to a picked member ────────────────────────────────
-  if (ns === "roster" && action === "assignrole") {
-    if (!(await requireRole(interaction, "manager"))) return;
-    const targetId = rest.join(":");
-    const [roleName, memberId] = interaction.values[0].split(":");
-
-    await interaction.deferUpdate();
-
-    const validRoles = ["owner", "manager", "trainer", "mechanic"];
-    if (!validRoles.includes(roleName)) {
-      await interaction.followUp({ content: "❌ Invalid role.", ephemeral: true });
-      return;
-    }
-
-    // Fetch display name from Discord if not in DB yet
-    let displayName = memberId;
-    try {
-      const member = await interaction.guild!.members.fetch(memberId);
-      displayName = member.displayName;
-    } catch { /* use id as fallback */ }
-
-    // Upsert into user_roles
-    await db.execute({
-      sql: "INSERT OR REPLACE INTO user_roles (discord_id, role) VALUES (?, ?)",
-      args: [memberId, roleName]
-    });
-
-    // Upsert into profiles (commission rate defaults by role)
-    const commRate = roleName === "owner" ? 1.0 : roleName === "manager" ? 0.5 : roleName === "trainer" ? 0.4 : 0.3;
-    await db.execute({
-      sql: `INSERT INTO profiles (discord_id, display_name, commission_rate, status)
-            VALUES (?, ?, ?, 'offline')
-            ON CONFLICT(discord_id) DO UPDATE SET
-              display_name = COALESCE(NULLIF(excluded.display_name,''), display_name),
-              commission_rate = CASE WHEN commission_rate = 0.3 AND excluded.commission_rate != 0.3 THEN excluded.commission_rate ELSE commission_rate END`,
-      args: [memberId, displayName, commRate]
-    });
-
-    // Disable the select that was just used, update remaining ones
-    const currentComponents: any[] = (interaction.message as any).components ?? [];
-    const updatedRows = currentComponents.map((row: any) => {
-      const comp = row.components[0];
-      if (!comp) return row;
-      if (comp.customId === interaction.customId) {
-        // This is the one that was just filled — replace with done label
-        const rankLabels: Record<string, string> = { owner: "👑 Owner", manager: "🔧 Manager", trainer: "📚 Trainer", mechanic: "🔩 Mechanic" };
-        return new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`roster:done:${memberId}`)
-            .setLabel(`✅ ${rankLabels[roleName] ?? roleName} — <@${memberId}>`)
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(true)
-        );
-      }
-      return row;
-    });
-
-    // Check if all have been assigned
-    const allDone = updatedRows.every((row: any) => {
-      const comp = row.components[0];
-      return comp?.data?.disabled === true || comp?.disabled === true;
-    });
-
-    if (allDone) {
-      const embed = new EmbedBuilder()
-        .setTitle("✅  Roster Updated!")
-        .setColor(COLORS.primary)
-        .setDescription("All crew members have been added to the roster.")
-        .setFooter({ text: FOOTER });
-      await interaction.editReply({ embeds: [embed], components: [] });
-    } else {
-      await interaction.editReply({ components: updatedRows });
-    }
-    return;
-  }
 
   // ── Select category → show items ───────────────────────────────────────────
   if (ns === "order" && action === "selectcategory") {

@@ -78,15 +78,15 @@ function buildStatusEmbed(config: any) {
           `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
           `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
           `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
-          `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-          `👥 Roster: ${ch(config?.roster_channel_id)}`,
+          `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}`,
         inline: true
       },
       { name: "🎭 Roles", value:
           `👑 Owner: ${ro(config?.owner_role_id)}\n` +
           `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
           `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
-          `🔩 Mechanic: ${ro(config?.mechanic_role_id)}`,
+          `🔩 Mechanic: ${ro(config?.mechanic_role_id)}\n` +
+          `🎓 Needs Training: ${ro((config as any)?.needs_training_role_id)}`,
         inline: true
       }
     )

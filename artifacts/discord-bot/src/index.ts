@@ -22,7 +22,6 @@ import { data as payoutData,      execute as payoutExecute      } from "./comman
 import { data as loaData,         execute as loaExecute         } from "./commands/loa.js";
 import { data as profileData,     execute as profileExecute     } from "./commands/profile.js";
 import { data as leaderboardData, execute as leaderboardExecute } from "./commands/leaderboard.js";
-import { data as rosterData,      execute as rosterExecute      } from "./commands/roster.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -90,7 +89,6 @@ const commandDefs = [
   { data: loaData,         execute: loaExecute         },
   { data: profileData,     execute: profileExecute     },
   { data: leaderboardData, execute: leaderboardExecute },
-  { data: rosterData,      execute: rosterExecute      },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();

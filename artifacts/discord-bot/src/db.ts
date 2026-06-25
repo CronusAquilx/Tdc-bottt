@@ -198,8 +198,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE timeclock ADD COLUMN clock_message_id TEXT");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN clock_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN leaderboard_channel_id TEXT");
-  await safeAlter("ALTER TABLE guild_config ADD COLUMN roster_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN needs_training_role_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
 
   // Seed / update catalog
@@ -238,13 +238,14 @@ export async function getGuildConfig(guildId: string) {
     loa_channel_id:     row[10] ? String(row[10]) : null,
     raffle_channel_id:       row[11] ? String(row[11]) : null,
     leaderboard_channel_id:  row[12] ? String(row[12]) : null,
-    roster_channel_id:       row[13] ? String(row[13]) : null,
+    training_channel_id:     row[13] ? String(row[13]) : null,
+    needs_training_role_id:  row[14] ? String(row[14]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "roster_channel_id" | "training_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
@@ -256,7 +257,7 @@ export async function setGuildConfig(
 
 export async function setGuildRoleMapping(
   guildId: string,
-  level: "owner" | "manager" | "trainer" | "mechanic",
+  level: "owner" | "manager" | "trainer" | "mechanic" | "needs_training",
   roleId: string
 ): Promise<void> {
   const field = `${level}_role_id`;
