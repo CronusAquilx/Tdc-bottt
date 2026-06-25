@@ -316,7 +316,18 @@ function scheduleWeeklyLeaderboard(client: Client) {
 }
 
 // ── Timeclock panel repost scheduler ───────────────────────────────────────────
+// Module-level timer guard — prevents duplicate intervals if the Ready event
+// fires more than once (Discord.js reconnects).
+let timeclockRepostTimer: ReturnType<typeof setInterval> | null = null;
+const TIMECLOCK_PANEL_TITLE = "⏰  SHIFT LOG  ·  MANAGEMENT ONLY";
+
 async function scheduleTimeclockPanelRepost(client: Client) {
+  // Clear any existing timer so reconnects don't stack intervals
+  if (timeclockRepostTimer) {
+    clearInterval(timeclockRepostTimer);
+    timeclockRepostTimer = null;
+  }
+
   const repost = async () => {
     try {
       const rows = await db.execute("SELECT guild_id, timeclock_channel_id FROM guild_config WHERE timeclock_channel_id IS NOT NULL");
@@ -329,16 +340,24 @@ async function scheduleTimeclockPanelRepost(client: Client) {
           const ch    = await guild.channels.fetch(channelId).catch(() => null);
           if (!ch?.isTextBased()) continue;
 
-          // Only delete previous timeclock PANEL messages (Clock In / Clock Out buttons), not individual shift records
+          // Detect previous timeclock HEADER panels by their embed title.
+          // Do NOT check button customIds — the timeclock panel has no buttons.
+          // Do NOT delete shift-record messages (they have different embed titles).
           const recent = await (ch as any).messages.fetch({ limit: 50 });
           const panelMsgs = [...recent.values()].filter((m: any) => {
             if (m.author?.id !== client.user?.id) return false;
-            return m.components?.some((row: any) =>
-              row.components?.some((c: any) =>
-                c.customId === "clockin:panel" || c.customId === "clockout:panel"
-              )
-            );
+            return m.embeds?.some((e: any) => e.title === TIMECLOCK_PANEL_TITLE);
           });
+
+          // If a panel already exists and was posted within the last 2.5 hours,
+          // skip the repost — nothing has changed.
+          const newest = panelMsgs.sort((a: any, b: any) => b.createdTimestamp - a.createdTimestamp)[0];
+          const twoAndHalfHoursMs = 2.5 * 60 * 60 * 1000;
+          if (newest && (Date.now() - newest.createdTimestamp) < twoAndHalfHoursMs) {
+            continue;
+          }
+
+          // Delete old header panels (not shift records)
           for (const m of panelMsgs) {
             try { await (m as any).delete(); } catch { /* ignore */ }
           }
@@ -355,7 +374,7 @@ async function scheduleTimeclockPanelRepost(client: Client) {
   };
 
   // Run every 3 hours
-  setInterval(repost, 3 * 60 * 60 * 1000);
+  timeclockRepostTimer = setInterval(repost, 3 * 60 * 60 * 1000);
   console.log("[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)");
 }
 

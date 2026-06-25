@@ -18,28 +18,30 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "clockwarn" && action === "stayin") {
     await interaction.deferReply({ ephemeral: true });
     const tcId = id;
-    const warnInfo = warnedMechanics.get(tcId);
-    if (!warnInfo) {
-      await interaction.editReply({ content: "ℹ️ No active warning found — you're good!" });
+
+    // Verify this timeclock entry exists and belongs to the user clicking
+    const tcR = await db.execute({ sql: "SELECT mechanic_id FROM timeclock WHERE id = ?", args: [tcId] });
+    if (!tcR.rows[0]) {
+      // Entry doesn't exist — remove buttons from the warning message so it can't be clicked again
+      try { await interaction.message.edit({ content: "ℹ️ This warning is no longer active.", components: [] }); } catch { /* ignore */ }
+      await interaction.editReply({ content: "ℹ️ That shift no longer exists." });
       return;
     }
-    // Check it's the right user
-    if (warnInfo.mechanicId !== interaction.user.id) {
+    const ownerId = String(tcR.rows[0][0] ?? "");
+    if (ownerId !== interaction.user.id) {
       await interaction.editReply({ content: "❌ This warning isn't for you." });
       return;
     }
+
+    // Clear warn state — both in-memory and in DB
     warnedMechanics.delete(tcId);
     stayedIn.set(interaction.user.id, Date.now());
-    // Disable the warning message buttons
-    try {
-      if (warnInfo.msgId && warnInfo.chanId && interaction.guild) {
-        const ch = await interaction.guild.channels.fetch(warnInfo.chanId);
-        if (ch?.isTextBased()) {
-          const msg = await (ch as any).messages.fetch(warnInfo.msgId).catch(() => null);
-          if (msg) await msg.edit({ content: `✅ <@${interaction.user.id}> stayed clocked in.`, components: [] });
-        }
-      }
-    } catch { /* ignore */ }
+    await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
+
+    // Disable the warning message buttons using interaction.message directly
+    // (works even after a bot restart when warnedMechanics is empty)
+    try { await interaction.message.edit({ content: `✅ <@${interaction.user.id}> stayed clocked in.`, components: [] }); } catch { /* ignore */ }
+
     await interaction.editReply({ content: "✅ Got it — you're still clocked in! Keep up the good work." });
     return;
   }
@@ -48,30 +50,32 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "clockwarn" && action === "clockout") {
     await interaction.deferReply({ ephemeral: true });
     const tcId = id;
-    const warnInfo = warnedMechanics.get(tcId);
 
     // Find the timeclock entry
     const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
-    if (!tcR.rows[0]) { await interaction.editReply({ content: "❌ Timeclock entry not found." }); return; }
+    if (!tcR.rows[0]) {
+      try { await interaction.message.edit({ content: "ℹ️ This warning is no longer active.", components: [] }); } catch { /* ignore */ }
+      await interaction.editReply({ content: "ℹ️ That shift no longer exists." });
+      return;
+    }
     const entry = rowToTimeclock(tcR.rows[0]);
 
-    if (entry.clock_out_time) { await interaction.editReply({ content: "ℹ️ Already clocked out." }); return; }
+    if (entry.clock_out_time) {
+      // Already clocked out — just kill the buttons so user stops seeing them
+      try { await interaction.message.edit({ content: "✅ Already clocked out.", components: [] }); } catch { /* ignore */ }
+      await interaction.editReply({ content: "ℹ️ You're already clocked out." });
+      return;
+    }
     if (entry.mechanic_id !== interaction.user.id) {
       await interaction.editReply({ content: "❌ This isn't your timeclock entry." }); return;
     }
 
+    // Clear warn state — both in-memory and in DB
     warnedMechanics.delete(tcId);
+    await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
 
-    // Disable warning message
-    try {
-      if (warnInfo?.msgId && warnInfo?.chanId && interaction.guild) {
-        const ch = await interaction.guild.channels.fetch(warnInfo.chanId);
-        if (ch?.isTextBased()) {
-          const msg = await (ch as any).messages.fetch(warnInfo.msgId).catch(() => null);
-          if (msg) await msg.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] });
-        }
-      }
-    } catch { /* ignore */ }
+    // Disable warning message buttons using interaction.message directly
+    try { await interaction.message.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] }); } catch { /* ignore */ }
 
     await autoClockOut(
       interaction.client,
