@@ -1,8 +1,10 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
 import { db, getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildDashboardEmbed } from "../lib/embeds.js";
+import { buildDashboardEmbed, money, COLORS } from "../lib/embeds.js";
 import { todayDate, weekStart } from "../lib/utils.js";
+
+const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export const data = new SlashCommandBuilder()
   .setName("mysales")
@@ -39,8 +41,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }), { total: 0, labour: 0 });
 
   const periodTotals = sum(periodR.rows);
-  const todayTotals = sum(todayR.rows);
-  const ytdTotals = sum(ytdR.rows);
+  const todayTotals  = sum(todayR.rows);
+  const ytdTotals    = sum(ytdR.rows);
 
   const rate = profile.commission_rate;
 
@@ -53,5 +55,51 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     ytdR.rows.length, ytdTotals.total,
     ytdTotals.labour * rate
   );
+
+  // ── Manager commission section ───────────────────────────────────────────────
+  // Check if this user has any mechanics assigned to them as manager
+  const mechanicsR = await db.execute({
+    sql: "SELECT discord_id, display_name, commission_rate FROM profiles WHERE manager_id = ?",
+    args: [interaction.user.id]
+  });
+
+  if (mechanicsR.rows.length > 0) {
+    // For each mechanic, fetch their orders for the period
+    let totalManagerCut = 0;
+    const breakdownLines: string[] = [];
+
+    for (const mRow of mechanicsR.rows) {
+      const mId   = String(mRow[0] ?? "");
+      const mName = String(mRow[1] ?? "Unknown");
+      const mRate = Number(mRow[2] ?? 0.3);
+
+      const ordersR = await db.execute({
+        sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",
+        args: [mId, periodStart]
+      });
+
+      const mLabour     = ordersR.rows.reduce((s, r) => s + Number(r[0] ?? 0), 0);
+      const mCommission = mLabour * mRate;
+      const managerCut  = mCommission * 0.20;
+      totalManagerCut  += managerCut;
+
+      if (managerCut > 0) {
+        breakdownLines.push(`> **${mName}** — ${money(mCommission)} commission → your cut: **${money(managerCut)}**`);
+      } else {
+        breakdownLines.push(`> **${mName}** — no orders this ${period === "month" ? "month" : "week"}`);
+      }
+    }
+
+    const periodLabel = period === "month" ? "Month" : "Week";
+    embed.addFields({
+      name: `👔 Manager Commission (This ${periodLabel})`,
+      value:
+        breakdownLines.join("\n") +
+        `\n\n💵 **Total manager cut: ${money(totalManagerCut)}**\n` +
+        `*You earn 20% of each assigned mechanic's commission*`,
+      inline: false
+    });
+  }
+
   await interaction.editReply({ embeds: [embed] });
 }

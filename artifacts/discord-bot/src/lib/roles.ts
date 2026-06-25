@@ -3,7 +3,7 @@ import {
   ModalSubmitInteraction, AnySelectMenuInteraction,
   PermissionFlagsBits
 } from "discord.js";
-import { hasRole as dbHasRole, getProfile, getUserRole as dbGetUserRole, getGuildConfig } from "../db.js";
+import { hasRole as dbHasRole, getProfile, getUserRole as dbGetUserRole, getGuildConfig, splitRoleIds } from "../db.js";
 
 type AnyInteraction =
   | ChatInputCommandInteraction
@@ -33,15 +33,15 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
     const minLevel = HIERARCHY[minRole] ?? 0;
 
     const mappings = [
-      { level: 4, roleId: config.owner_role_id },
-      { level: 3, roleId: config.manager_role_id },
-      { level: 2, roleId: config.trainer_role_id },
-      { level: 1, roleId: config.mechanic_role_id },
-      { level: 1, roleId: (config as any).needs_training_role_id },
+      { level: 4, roleIds: splitRoleIds(config.owner_role_id) },
+      { level: 3, roleIds: splitRoleIds(config.manager_role_id) },
+      { level: 2, roleIds: splitRoleIds(config.trainer_role_id) },
+      { level: 1, roleIds: splitRoleIds(config.mechanic_role_id) },
+      { level: 1, roleIds: splitRoleIds((config as any).needs_training_role_id) },
     ];
 
     const userLevel = mappings
-      .filter(m => m.roleId && memberRoleIds.has(m.roleId))
+      .filter(m => m.roleIds.some(rid => memberRoleIds.has(rid)))
       .reduce((best, m) => Math.max(best, m.level), 0);
 
     return userLevel >= minLevel;

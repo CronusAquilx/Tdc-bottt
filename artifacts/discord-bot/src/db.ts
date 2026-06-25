@@ -205,6 +205,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN needs_training_role_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN manager_id TEXT");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
@@ -272,14 +273,20 @@ export async function setGuildConfig(
 export async function setGuildRoleMapping(
   guildId: string,
   level: "owner" | "manager" | "trainer" | "mechanic" | "needs_training",
-  roleId: string
+  roleIds: string[]
 ): Promise<void> {
   const field = `${level}_role_id`;
+  const value = roleIds.filter(Boolean).join(",");
   await db.execute({
     sql: `INSERT INTO guild_config (guild_id, ${field}) VALUES (?, ?)
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
-    args: [guildId, roleId]
+    args: [guildId, value]
   });
+}
+
+/** Split a comma-separated role ID string into an array of IDs */
+export function splitRoleIds(s: string | null | undefined): string[] {
+  return (s ?? "").split(",").map(r => r.trim()).filter(Boolean);
 }
 
 export async function nextOrderNumber(): Promise<string> {

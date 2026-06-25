@@ -2,10 +2,10 @@ import {
   AnySelectMenuInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
-  ChannelSelectMenuBuilder, EmbedBuilder,
+  ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
   ChannelType, PermissionFlagsBits, TextChannel,
 } from "discord.js";
-import { db, getProfile, getSetting, rowToOrder, setGuildRoleMapping, getGuildConfig } from "../db.js";
+import { db, getProfile, getSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
@@ -23,11 +23,12 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
       const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
       if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", ephemeral: true }); return; }
-      const roleId = interaction.values[0];
+      const roleIds = interaction.values;
       if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
-      await setGuildRoleMapping(interaction.guild.id, level, roleId);
+      await setGuildRoleMapping(interaction.guild.id, level, roleIds);
       const levelLabel = level.charAt(0).toUpperCase() + level.slice(1).replace(/_/g, " ");
-      await interaction.reply({ content: `✅ **${levelLabel}** mapped to <@&${roleId}>. Members with this role can now use ${level}-level commands.`, ephemeral: true });
+      const mentions = roleIds.map(id => `<@&${id}>`).join(", ");
+      await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, ephemeral: true });
     }
     return;
   }
@@ -66,8 +67,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
           id: mechanicId,
           allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
         });
-        for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
-          permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+        for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
+          permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
         }
         const managersR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
         for (const row of managersR.rows) {
@@ -149,6 +150,54 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       );
       await interaction.showModal(modal);
     }
+
+    // ── Admin: assign manager — step 1, picked mechanic → pick manager ────────
+    if (ns === "admin" && action === "assign" && rest[0] === "pickmechanic") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      const mechanicId = interaction.values[0];
+      const profile = await getProfile(mechanicId);
+      if (!profile) {
+        await interaction.update({ content: "❌ That user isn't in the crew.", embeds: [], components: [] });
+        return;
+      }
+      const { UserSelectMenuBuilder: USM } = await import("discord.js");
+      const embed = new EmbedBuilder()
+        .setTitle("👤  Assign Manager — Step 2 of 2")
+        .setColor(COLORS.primary)
+        .setDescription(`Now pick the **manager** for **${profile.display_name}**.\nThe manager will earn **20% of this mechanic's commission** on each order.`)
+        .setFooter({ text: FOOTER });
+      const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+        new USM()
+          .setCustomId(`admin:assign:pickmanager:${mechanicId}`)
+          .setPlaceholder("Pick a manager...")
+          .setMinValues(1).setMaxValues(1)
+      );
+      await interaction.update({ embeds: [embed], components: [sel] });
+    }
+
+    // ── Admin: assign manager — step 2, picked manager → save ────────────────
+    if (ns === "admin" && action === "assign" && rest[0] === "pickmanager") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      const mechanicId = rest[1];
+      const managerId  = interaction.values[0];
+      const [mechanicProfile, managerProfile] = await Promise.all([
+        getProfile(mechanicId), getProfile(managerId)
+      ]);
+      if (!mechanicProfile) {
+        await interaction.update({ content: "❌ Mechanic not found.", embeds: [], components: [] });
+        return;
+      }
+      if (!managerProfile) {
+        await interaction.update({ content: "❌ Manager not found — they need to be added via `/crew add` first.", embeds: [], components: [] });
+        return;
+      }
+      await db.execute({ sql: "UPDATE profiles SET manager_id = ? WHERE discord_id = ?", args: [managerId, mechanicId] });
+      await interaction.update({
+        content: `✅ **${mechanicProfile.display_name}** is now assigned to manager **${managerProfile.display_name}**.\n💰 ${managerProfile.display_name} will earn 20% of ${mechanicProfile.display_name}'s commission on each order.`,
+        embeds: [], components: []
+      });
+    }
+
     return;
   }
 

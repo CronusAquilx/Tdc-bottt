@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
 } from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
@@ -89,6 +89,16 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
 
     await interaction.editReply({ embeds: [embed] });
 
+    // Refresh the mechanic's order panel live so commission shows immediately
+    if (profile.sales_channel_id) {
+      try {
+        const salesCh = await guild.channels.fetch(profile.sales_channel_id);
+        if (salesCh?.isTextBased()) {
+          await postOrderPanel(salesCh as TextChannel, mechanicId, profile.display_name, rate);
+        }
+      } catch { /* ignore — channel may not exist */ }
+    }
+
     try {
       const config = await getGuildConfig(guild.id);
       if (config?.log_channel_id) {
@@ -127,8 +137,8 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
       id: mechanicId,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
     });
-    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
-      permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
+      permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
 
     const managersR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");

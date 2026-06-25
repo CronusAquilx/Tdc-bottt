@@ -6,7 +6,7 @@ import {
   RoleSelectMenuBuilder, UserSelectMenuBuilder,
   TextChannel
 } from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
@@ -219,17 +219,21 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     if (!(await requireRole(interaction, "owner"))) return true;
     await interaction.deferReply({ ephemeral: true });
     const config = await getGuildConfig(guild.id);
-    const ro = (id: string | null | undefined) => id ? `<@&${id}>` : "`Not set`";
+    const roMany = (s: string | null | undefined) => {
+      const ids = splitRoleIds(s);
+      return ids.length ? ids.map(id => `<@&${id}>`).join(", ") : "`Not set`";
+    };
     const embed = new EmbedBuilder()
       .setTitle("⚙️  SERVER CONFIG")
       .setColor(COLORS.dark)
       .setDescription(
-        "**Configure role assignments and commission rates.**\n\n" +
-        `👑 Owner: ${ro(config?.owner_role_id)}\n` +
-        `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
-        `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
-        `🔩 Mechanic: ${ro(config?.mechanic_role_id)}\n` +
-        `🎓 Needs Training: ${ro((config as any)?.needs_training_role_id)}\n\n` +
+        "**Configure role assignments and commission rates.**\n" +
+        "*You can assign multiple roles per level — all selected roles will be accepted.*\n\n" +
+        `👑 Owner: ${roMany(config?.owner_role_id)}\n` +
+        `🔧 Manager: ${roMany(config?.manager_role_id)}\n` +
+        `📚 Trainer: ${roMany(config?.trainer_role_id)}\n` +
+        `🔩 Mechanic: ${roMany(config?.mechanic_role_id)}\n` +
+        `🎓 Needs Training: ${roMany((config as any)?.needs_training_role_id)}\n\n` +
         "*Members with **Administrator** permission can always use all commands regardless of role.*"
       )
       .setFooter({ text: FOOTER });
@@ -243,7 +247,10 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:roles:set:needs_training").setLabel("🎓 Needs Training").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:commission:pick").setLabel("💰 Set Commission").setStyle(ButtonStyle.Primary),
     );
-    await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2] });
+    const roleRow3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:assign:manager").setLabel("👤 Assign Manager").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2, roleRow3] });
     return true;
   }
 
@@ -264,8 +271,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     const roleSelect = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
       new RSM()
         .setCustomId(`setup:setrole:${level}`)
-        .setPlaceholder(`Pick the ${level} role...`)
-        .setMinValues(1).setMaxValues(1)
+        .setPlaceholder(`Pick all roles for ${level} access (replaces current list)...`)
+        .setMinValues(1).setMaxValues(10)
     );
     await interaction.reply({ ephemeral: true, embeds: [embed], components: [roleSelect] });
     return true;
@@ -287,6 +294,25 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setMinValues(1).setMaxValues(1)
     );
     await interaction.reply({ ephemeral: true, embeds: [embed], components: [userSelect] });
+    return true;
+  }
+
+  // ── Config: assign mechanic → manager (step 1: pick mechanic) ─────────────
+  if (section === "assign" && action === "manager") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const embed = new EmbedBuilder()
+      .setTitle("👤  Assign Manager — Step 1 of 2")
+      .setColor(COLORS.dark)
+      .setDescription("Select the **mechanic** you want to assign a manager to.")
+      .setFooter({ text: FOOTER });
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new USM()
+        .setCustomId("admin:assign:pickmechanic")
+        .setPlaceholder("Pick a mechanic...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
     return true;
   }
 
@@ -338,8 +364,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       if (guild.members.me) {
         permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
       }
-      for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id, config?.mechanic_role_id].filter(Boolean)) {
-        permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
+      for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id), ...splitRoleIds(config?.mechanic_role_id)]) {
+        permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
       }
       const ch = await guild.channels.create({
         name: "tdc-timeclock",

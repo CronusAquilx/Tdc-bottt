@@ -251,13 +251,17 @@ async function scheduleTimeclockPanelRepost(client: Client) {
           const ch    = await guild.channels.fetch(channelId).catch(() => null);
           if (!ch?.isTextBased()) continue;
 
-          // Delete recent bot panel messages (last 50) then repost fresh
+          // Only delete previous timeclock PANEL messages (Clock In / Clock Out buttons), not individual shift records
           const recent = await (ch as any).messages.fetch({ limit: 50 });
-          const botMsgs = [...recent.values()].filter((m: any) =>
-            m.author?.id === client.user?.id &&
-            m.components?.length > 0
-          );
-          for (const m of botMsgs) {
+          const panelMsgs = [...recent.values()].filter((m: any) => {
+            if (m.author?.id !== client.user?.id) return false;
+            return m.components?.some((row: any) =>
+              row.components?.some((c: any) =>
+                c.customId === "clockin:panel" || c.customId === "clockout:panel"
+              )
+            );
+          });
+          for (const m of panelMsgs) {
             try { await (m as any).delete(); } catch { /* ignore */ }
           }
 
@@ -272,9 +276,9 @@ async function scheduleTimeclockPanelRepost(client: Client) {
     }
   };
 
-  // Run every 45 minutes
-  setInterval(repost, 45 * 60 * 1000);
-  console.log("[TDC] ⏰ Timeclock panel repost scheduler started (every 45 min)");
+  // Run every 3 hours
+  setInterval(repost, 3 * 60 * 60 * 1000);
+  console.log("[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)");
 }
 
 initDb().then(() => {
