@@ -20,11 +20,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
   if (sub === "in") {
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     const active = await db.execute({ sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1", args: [interaction.user.id] });
     if (active.rows[0]) {
-      await interaction.editReply({ content: "⚠️ You're already clocked in. Use `/clock out` or the **Clock Out** button in the timeclock channel." });
+      await interaction.editReply({ content: `⚠️ <@${interaction.user.id}> You're already clocked in. Use \`/clock out\` or the **Clock Out** button.` });
       return;
     }
     const id = randomUUID();
@@ -34,8 +33,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const profile = await getProfile(interaction.user.id);
     const embed = buildClockInEmbed(profile?.display_name ?? interaction.user.username, entry.clock_in_time);
 
-    // Post to timeclock channel if configured
-    let channelMention = "";
+    // Post to timeclock channel if configured, reply publicly
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.timeclock_channel_id) {
@@ -44,23 +42,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [embed] });
             await db.execute({ sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?", args: [msg.id, ch.id, id] });
-            channelMention = ` Session posted in <#${ch.id}>.`;
           }
         } catch { /* ignore */ }
       }
     }
 
-    await interaction.editReply({ content: `✅ Clocked in!${channelMention}`, embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 
   if (sub === "out") {
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     const notes = interaction.options.getString("notes");
     const active = await db.execute({ sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1", args: [interaction.user.id] });
     if (!active.rows[0]) {
-      await interaction.editReply({ content: "❌ You're not clocked in." });
+      await interaction.editReply({ content: `❌ <@${interaction.user.id}> You're not clocked in.` });
       return;
     }
     const entry = rowToTimeclock(active.rows[0]);
@@ -72,7 +68,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const profile = await getProfile(interaction.user.id);
     const embed = buildClockOutEmbed(profile?.display_name ?? interaction.user.username, updated.clock_in_time, updated.clock_out_time!, mins);
 
-    // Update the clock-in message if stored
+    // Edit the original clock-in message in the timeclock channel
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -83,8 +79,6 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       } catch { /* ignore */ }
     }
 
-    const hrs = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
-    await interaction.editReply({ content: `✅ Clocked out! Session: **${hrs}h ${m}m**`, embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 }

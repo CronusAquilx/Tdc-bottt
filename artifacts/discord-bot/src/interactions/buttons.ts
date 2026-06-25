@@ -13,15 +13,14 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
 
     const active = await db.execute({
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
     });
     if (active.rows[0]) {
-      await interaction.editReply({ content: "⚠️ You're already clocked in! Hit **Clock Out** first." });
+      await interaction.editReply({ content: `⚠️ <@${interaction.user.id}> You're already clocked in! Hit **Clock Out** first.` });
       return;
     }
 
@@ -35,38 +34,28 @@ export async function handleButton(interaction: ButtonInteraction) {
     const profile = await getProfile(interaction.user.id);
     const embed = buildClockInEmbed(profile?.display_name ?? interaction.user.username, entry.clock_in_time);
 
-    // Post to timeclock channel — but restrict visibility to only this mechanic + owner/manager roles
-    if (interaction.guild) {
-      const config = await getGuildConfig(interaction.guild.id);
-      if (config?.timeclock_channel_id) {
-        try {
-          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).send({ embeds: [embed] });
-            await db.execute({
-              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
-              args: [msg.id, ch.id, tcId]
-            });
-          }
-        } catch { /* ignore */ }
-      }
-    }
+    const msg = await interaction.editReply({ embeds: [embed] });
 
-    await interaction.editReply({ content: "✅ You're clocked in! Your session is live in the timeclock channel." });
+    // Store the message ID so clock-out can update it
+    try {
+      await db.execute({
+        sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+        args: [msg.id, interaction.channelId, tcId]
+      });
+    } catch { /* ignore */ }
     return;
   }
 
   // ── Clock Out from panel ───────────────────────────────────────────────────
   if (ns === "clockout" && action === "panel") {
-    if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
 
     const active = await db.execute({
       sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
       args: [interaction.user.id]
     });
     if (!active.rows[0]) {
-      await interaction.editReply({ content: "❌ You're not clocked in!" });
+      await interaction.editReply({ content: `❌ <@${interaction.user.id}> You're not clocked in!` });
       return;
     }
 
@@ -83,10 +72,9 @@ export async function handleButton(interaction: ButtonInteraction) {
     });
 
     // Count orders completed during this shift
-    const clockInIso = entry.clock_in_time;
     const ordersThisShift = await db.execute({
       sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status != 'draft' AND created_at >= ?",
-      args: [interaction.user.id, clockInIso]
+      args: [interaction.user.id, entry.clock_in_time]
     });
     const orderCount = Number(ordersThisShift.rows[0]?.[0] ?? 0);
 
@@ -101,7 +89,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       orderCount
     );
 
-    // Edit the original clock-in message with the final clock-out embed
+    // Edit the original clock-in message in the channel if we stored it
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -112,11 +100,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       } catch { /* ignore */ }
     }
 
-    const hrs = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
-    await interaction.editReply({
-      content: `✅ Clocked out!\n⏱️ **Shift:** ${hrs}h ${m}m\n📋 **Orders this shift:** ${orderCount}`
-    });
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 

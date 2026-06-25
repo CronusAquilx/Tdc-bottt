@@ -31,7 +31,7 @@ import { handleAdminModal }    from "./interactions/adminmodals.js";
 import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
 import { handleTrainingButton, handleTrainingModal } from "./interactions/training.js";
-import { postLoaPanel, postRafflePanel }         from "./interactions/adminbuttons.js";
+import { postLoaPanel, postRafflePanel, postTimeclockPanel } from "./interactions/adminbuttons.js";
 import { postLeaderboard }                       from "./commands/leaderboard.js";
 import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
 import { db } from "./db.js";
@@ -158,6 +158,9 @@ client.once(Events.ClientReady, async (c) => {
 
   // Weekly leaderboard auto-post — every Monday at midnight UTC
   scheduleWeeklyLeaderboard(c);
+
+  // Timeclock panel repost — every 45 minutes
+  scheduleTimeclockPanelRepost(c);
 });
 
 // ── Role flair: react with rank emoji when staff sends a message ───────────────
@@ -251,6 +254,46 @@ function scheduleWeeklyLeaderboard(client: Client) {
   // Check every 5 minutes
   setInterval(tick, 5 * 60 * 1000);
   console.log("[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)");
+}
+
+// ── Timeclock panel repost scheduler ───────────────────────────────────────────
+async function scheduleTimeclockPanelRepost(client: Client) {
+  const repost = async () => {
+    try {
+      const rows = await db.execute("SELECT guild_id, timeclock_channel_id FROM guild_config WHERE timeclock_channel_id IS NOT NULL");
+      for (const row of rows.rows) {
+        const guildId   = String(row[0] ?? "");
+        const channelId = row[1] ? String(row[1]) : null;
+        if (!guildId || !channelId) continue;
+        try {
+          const guild = await client.guilds.fetch(guildId);
+          const ch    = await guild.channels.fetch(channelId).catch(() => null);
+          if (!ch?.isTextBased()) continue;
+
+          // Delete recent bot panel messages (last 50) then repost fresh
+          const recent = await (ch as any).messages.fetch({ limit: 50 });
+          const botMsgs = [...recent.values()].filter((m: any) =>
+            m.author?.id === client.user?.id &&
+            m.components?.length > 0
+          );
+          for (const m of botMsgs) {
+            try { await (m as any).delete(); } catch { /* ignore */ }
+          }
+
+          await postTimeclockPanel(ch as any);
+          console.log(`[TDC] ⏰ Reposted timeclock panel in #${(ch as any).name}`);
+        } catch (err) {
+          console.error(`[TDC] Timeclock repost failed for guild ${guildId}:`, err);
+        }
+      }
+    } catch (err) {
+      console.error("[TDC] Timeclock repost scheduler error:", err);
+    }
+  };
+
+  // Run every 45 minutes
+  setInterval(repost, 45 * 60 * 1000);
+  console.log("[TDC] ⏰ Timeclock panel repost scheduler started (every 45 min)");
 }
 
 initDb().then(() => {

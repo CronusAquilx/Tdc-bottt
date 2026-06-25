@@ -439,8 +439,7 @@ export async function postTimeclockPanel(channel: TextChannel) {
     .setDescription(
       "**Tokyo Drift Customs — Shift Tracker**\n\n" +
       "Click **Clock In** when your shift starts.\n" +
-      "Click **Clock Out** when you're done — it'll log your total time and orders completed.\n\n" +
-      "*Only mechanics and above can use these buttons.*"
+      "Click **Clock Out** when you're done — it'll log your total time and orders completed."
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
     .setTimestamp();
