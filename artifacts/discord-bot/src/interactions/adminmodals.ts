@@ -144,10 +144,18 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     }
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channelId, mechanicId] });
-    await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+
+    let panelPosted = true;
+    try {
+      await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+    } catch {
+      panelPosted = false;
+    }
 
     await interaction.editReply({
-      content: `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel and posted the order panel.`
+      content: panelPosted
+        ? `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel and posted the order panel.`
+        : `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel.\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then run the setup again.`
     });
     return true;
   }
