@@ -1,9 +1,9 @@
 import { Client, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
-import { warnedMechanics, stayedIn } from "./warnState.js";
+import { warnedMechanics } from "./warnState.js";
 
-const WARN_AFTER_MINS         = 30;
+const WARN_AFTER_MINS         = 45;
 const AUTO_OUT_AFTER_WARN_MINS = 10;
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -17,7 +17,7 @@ export function startAutoClockOutMonitor(client: Client) {
 async function checkIdleMechanics(client: Client) {
   try {
     const active = await db.execute(
-      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at
+      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at, stayed_in_at
        FROM timeclock
        WHERE clock_out_time IS NULL`
     );
@@ -29,11 +29,15 @@ async function checkIdleMechanics(client: Client) {
       const msgId       = row[3] ? String(row[3]) : null;
       const chanId      = row[4] ? String(row[4]) : null;
       const warnedAtDb  = row[5] ? String(row[5]) : null;
+      const stayedInDb  = row[6] ? String(row[6]) : null;
 
-      const clockInMs = new Date(clockInTime).getTime();
-      const minsClocked = (Date.now() - clockInMs) / 60000;
+      // Use the later of clock-in or last stay-in as the effective idle start
+      const clockInMs   = new Date(clockInTime).getTime();
+      const stayedInMs  = stayedInDb ? new Date(stayedInDb).getTime() : 0;
+      const idleStartMs = Math.max(clockInMs, stayedInMs);
+      const minsIdle    = (Date.now() - idleStartMs) / 60000;
 
-      if (minsClocked < WARN_AFTER_MINS) continue;
+      if (minsIdle < WARN_AFTER_MINS) continue;
 
       // Resolve guild
       let guild: any = null;
@@ -48,16 +52,14 @@ async function checkIdleMechanics(client: Client) {
         }
       }
 
-      // Last real activity
-      const cutoffWarn = new Date(Date.now() - WARN_AFTER_MINS * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+      // Last real activity: completed orders since idle start
+      const cutoffWarn = new Date(idleStartMs).toISOString().replace("T", " ").slice(0, 19);
       const recentOrders = await db.execute({
         sql: `SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?`,
         args: [mechanicId, cutoffWarn]
       });
       const recentCount = Number(recentOrders.rows[0]?.[0] ?? 0);
-      const lastStay    = stayedIn.get(mechanicId) ?? 0;
-      const lastStayMinsAgo = (Date.now() - lastStay) / 60000;
-      const hadRecentActivity = recentCount > 0 || lastStayMinsAgo < WARN_AFTER_MINS;
+      const hadRecentActivity = recentCount > 0;
 
       // Check warn state from BOTH in-memory map AND the DB column.
       // The DB column persists across bot restarts — this is the fix for repeated pings.
@@ -164,7 +166,7 @@ export async function autoClockOut(
   const mins = (Date.now() - clockInMs) / 60000;
 
   await db.execute({
-    sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL WHERE id = ?",
+    sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?",
     args: [mins, tcId]
   });
   await db.execute({

@@ -6,7 +6,7 @@ import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock
 import { requireRole } from "../lib/roles.js";
 import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
-import { warnedMechanics, stayedIn } from "../lib/warnState.js";
+import { warnedMechanics } from "../lib/warnState.js";
 import { autoClockOut } from "../lib/autoClockOut.js";
 import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
 
@@ -33,10 +33,12 @@ export async function handleButton(interaction: ButtonInteraction) {
       return;
     }
 
-    // Clear warn state — both in-memory and in DB
+    // Clear warn state and record stay-in time — persisted to DB so it survives restarts
     warnedMechanics.delete(tcId);
-    stayedIn.set(interaction.user.id, Date.now());
-    await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
+    await db.execute({
+      sql: "UPDATE timeclock SET warned_at = NULL, stayed_in_at = datetime('now') WHERE id = ?",
+      args: [tcId]
+    }).catch(() => {});
 
     // Disable the warning message buttons using interaction.message directly
     // (works even after a bot restart when warnedMechanics is empty)
