@@ -109,6 +109,54 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     return true;
   }
 
+  // ── Commission: set manager override rate ─────────────────────────────────
+  if (section === "commission" && action === "setoverride") {
+    const managerId = parts[3];
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+
+    const rateStr = interaction.fields.getTextInputValue("override_rate").replace(/%/g, "").trim();
+    const pct = parseFloat(rateStr);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      await interaction.editReply({ content: "❌ Invalid rate — enter a number between 0 and 100 (e.g. `20` for 20%)." });
+      return true;
+    }
+    const rate = pct / 100;
+
+    const [profile, caller] = await Promise.all([getProfile(managerId), getProfile(interaction.user.id)]);
+    if (!profile) { await interaction.editReply({ content: "❌ Manager not found." }); return true; }
+
+    await db.execute({ sql: "UPDATE profiles SET manager_override_rate = ? WHERE discord_id = ?", args: [rate, managerId] });
+
+    // Count how many mechanics are assigned to this manager
+    const mechanicsR = await db.execute({ sql: "SELECT COUNT(*) FROM profiles WHERE manager_id = ?", args: [managerId] });
+    const mechanicCount = Number(mechanicsR.rows[0]?.[0] ?? 0);
+
+    const embed = new EmbedBuilder()
+      .setTitle("💼 Manager Override Rate Updated")
+      .setColor(COLORS.approved)
+      .addFields(
+        { name: "Manager",       value: profile.display_name,                                   inline: true },
+        { name: "Old Cut",       value: `${((profile.manager_override_rate ?? 0.20) * 100).toFixed(0)}%`, inline: true },
+        { name: "New Cut",       value: `${pct.toFixed(0)}%`,                                   inline: true },
+        { name: "Mechanics",     value: `${mechanicCount} assigned`,                             inline: true },
+        { name: "Updated By",    value: caller?.display_name ?? interaction.user.username,       inline: true }
+      )
+      .setDescription(`**${profile.display_name}** will now earn **${pct.toFixed(0)}%** of each assigned mechanic's commission on every completed order.`)
+      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+    try {
+      const config = await getGuildConfig(guild.id);
+      if (config?.log_channel_id) {
+        const ch = await guild.channels.fetch(config.log_channel_id);
+        if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+      }
+    } catch { /* ignore */ }
+    return true;
+  }
+
   // ── Sales Channel: Create New ──────────────────────────────────────────────
   if (section === "saleschan" && action === "new") {
     if (!(await requireRole(interaction, "manager"))) return true;

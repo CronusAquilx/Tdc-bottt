@@ -151,6 +151,33 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       await interaction.showModal(modal);
     }
 
+    // ── Admin: pick manager to set override rate → open modal ────────────────
+    if (ns === "admin" && action === "commission" && rest[0] === "pickmanageroverride") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      const managerId = interaction.values[0];
+      const profile = await getProfile(managerId);
+      if (!profile) {
+        await interaction.update({ content: "❌ That user isn't in the crew.", embeds: [], components: [] });
+        return;
+      }
+      const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
+      const modal = new ModalBuilder()
+        .setCustomId(`admin:commission:setoverride:${managerId}`)
+        .setTitle(`Manager Override Cut — ${profile.display_name}`);
+      modal.addComponents(
+        new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("override_rate")
+            .setLabel("Override cut % (0–100, e.g. 20 = 20%)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(String(Math.round((profile.manager_override_rate ?? 0.20) * 100)))
+            .setPlaceholder("Enter percentage, e.g. 20")
+        )
+      );
+      await interaction.showModal(modal);
+    }
+
     // ── Admin: assign manager — step 1, picked mechanic → pick manager ────────
     if (ns === "admin" && action === "assign" && rest[0] === "pickmechanic") {
       if (!(await requireRole(interaction, "owner"))) return;

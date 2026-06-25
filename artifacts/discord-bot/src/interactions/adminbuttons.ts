@@ -249,6 +249,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     );
     const roleRow3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:assign:manager").setLabel("👤 Assign Manager").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:commission:pickoverride").setLabel("💼 Manager Cut %").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2, roleRow3] });
     return true;
@@ -294,6 +295,29 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setMinValues(1).setMaxValues(1)
     );
     await interaction.reply({ ephemeral: true, embeds: [embed], components: [userSelect] });
+    return true;
+  }
+
+  // ── Config: set manager override rate (pick manager) ─────────────────────
+  if (section === "commission" && action === "pickoverride") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const embed = new EmbedBuilder()
+      .setTitle("💼  Set Manager Override Rate")
+      .setColor(COLORS.primary)
+      .setDescription(
+        "Pick the **manager** whose override cut % you want to set.\n\n" +
+        "The override cut is the % of commission the manager earns from every mechanic assigned to them.\n" +
+        "*Default is 20%. Their own order commission is set separately via 💰 Set Commission.*"
+      )
+      .setFooter({ text: FOOTER });
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new USM()
+        .setCustomId("admin:commission:pickmanageroverride")
+        .setPlaceholder("Pick a manager...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
     return true;
   }
 

@@ -80,7 +80,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
       const mLabour     = ordersR.rows.reduce((s, r) => s + Number(r[0] ?? 0), 0);
       const mCommission = mLabour * mRate;
-      const managerCut  = mCommission * 0.20;
+      const managerCut  = mCommission * (profile.manager_override_rate ?? 0.20);
       totalManagerCut  += managerCut;
 
       if (managerCut > 0) {

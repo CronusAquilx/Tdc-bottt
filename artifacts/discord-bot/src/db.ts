@@ -206,6 +206,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN needs_training_role_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_id TEXT");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN manager_override_rate REAL DEFAULT 0.20");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
@@ -297,7 +298,7 @@ export async function nextOrderNumber(): Promise<string> {
 }
 
 export async function getProfile(discordId: string) {
-  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id FROM profiles WHERE discord_id = ?", args: [discordId] });
+  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate FROM profiles WHERE discord_id = ?", args: [discordId] });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
@@ -309,6 +310,8 @@ export async function getProfile(discordId: string) {
     status:                 String(row[5] ?? "offline"),
     created_at:             String(row[6] ?? ""),
     in_city_id:             row[7] ? String(row[7]) : null,
+    manager_id:             row[8] ? String(row[8]) : null,
+    manager_override_rate:  Number(row[9] ?? 0.20),
   };
 }
 
