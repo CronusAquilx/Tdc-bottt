@@ -36,7 +36,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const buttons: ButtonBuilder[] = [];
 
   for (const row of mechanicRows) {
-    const [discordId, displayName, commRate, hoursWeek, status] = [String(row[0]), String(row[1]), Number(row[2] ?? 0.4), Number(row[3] ?? 0), String(row[4] ?? "offline")];
+    const [discordId, displayName, commRate, hoursWeek, status] = [String(row[0]), String(row[1]), Number(row[2] ?? 0.3), Number(row[3] ?? 0), String(row[4] ?? "offline")];
     const [allR, weekR, completedR] = await Promise.all([
       db.execute({ sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ?", args: [discordId] }),
       db.execute({ sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('approved','paid') AND DATE(created_at) >= ?", args: [discordId, ws] }),

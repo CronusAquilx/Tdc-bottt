@@ -27,7 +27,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       .setTitle("⚙️ Shop Settings — Tokyo Drift Customs")
       .setColor(COLORS.dark)
       .addFields(
-        { name: "Default Commission Rate", value: `${(parseFloat(commDefault ?? "0.4") * 100).toFixed(0)}%`, inline: true },
+        { name: "Default Commission Rate", value: `${(parseFloat(commDefault ?? "0.3") * 100).toFixed(0)}%`, inline: true },
         { name: "Categories", value: categories.join(", ") || "None" },
         { name: "Parts Catalog", value: `${items.length} items across ${categories.length} categories` }
       )

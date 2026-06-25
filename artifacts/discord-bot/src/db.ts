@@ -201,6 +201,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN needs_training_role_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
+  // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
+  await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });

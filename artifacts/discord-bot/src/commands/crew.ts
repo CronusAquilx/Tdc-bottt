@@ -115,7 +115,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       });
       if (!r.rows.length) continue;
       const lines = r.rows.map(row =>
-        `${statusEmoji(String(row[4] ?? "offline"))} **${String(row[1])}** (<@${String(row[0])}>) · ${(Number(row[2] ?? 0.4) * 100).toFixed(0)}% · ${Number(row[3] ?? 0).toFixed(1)} hrs/wk`
+        `${statusEmoji(String(row[4] ?? "offline"))} **${String(row[1])}** (<@${String(row[0])}>) · ${(Number(row[2] ?? 0.3) * 100).toFixed(0)}% · ${Number(row[3] ?? 0).toFixed(1)} hrs/wk`
       );
       embed.addFields({ name: `${role.charAt(0).toUpperCase() + role.slice(1)}s (${r.rows.length})`, value: lines.join("\n").slice(0, 1024) });
     }

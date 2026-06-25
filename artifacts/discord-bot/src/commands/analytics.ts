@@ -51,7 +51,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const mid = String(row[0]);
     if (!mechMap[mid]) {
       const p = await getProfile(mid);
-      mechMap[mid] = { name: p?.display_name ?? "Unknown", orders: 0, revenue: 0, commission: 0, rate: p?.commission_rate ?? 0.4 };
+      mechMap[mid] = { name: p?.display_name ?? "Unknown", orders: 0, revenue: 0, commission: 0, rate: p?.commission_rate ?? 0.3 };
     }
     mechMap[mid].orders++;
     mechMap[mid].revenue += Number(row[1] ?? 0);
