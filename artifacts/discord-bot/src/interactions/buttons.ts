@@ -216,6 +216,57 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
+  // ── New Week: confirm ─────────────────────────────────────────────────────
+  if (ns === "newweek" && action === "confirm") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferUpdate();
+
+    let sent = 0;
+    let failed = 0;
+    try {
+      const profiles = await db.execute(
+        "SELECT discord_id, sales_channel_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''"
+      );
+      for (const row of profiles.rows) {
+        const salesChanId = row[1] ? String(row[1]) : null;
+        if (!salesChanId || !interaction.guild) continue;
+        try {
+          const ch = await interaction.guild.channels.fetch(salesChanId).catch(() => null);
+          if (!ch?.isTextBased()) { failed++; continue; }
+          await (ch as any).send({
+            content:
+              "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+              "> 💪 **Fresh start. New money. New orders.**\n" +
+              "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+              "> 📈 Make this week your best one yet.\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          });
+          sent++;
+        } catch { failed++; }
+      }
+    } catch { /* ignore */ }
+
+    const embed = new EmbedBuilder()
+      .setTitle("📅  NEW WEEK Message Sent")
+      .setColor(COLORS.approved)
+      .setDescription(
+        `✅ Posted to **${sent}** sales channel(s).\n` +
+        (failed > 0 ? `⚠️ ${failed} channel(s) skipped (bot may lack access).\n` : "") +
+        "\nMechanics will see the NEW WEEK message in their channels."
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  if (ns === "newweek" && action === "cancel") {
+    await interaction.update({ content: "❌ Cancelled.", embeds: [], components: [] });
+    return;
+  }
+
   // ── Clear: confirm all ────────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "all") {
     if (!(await requireRole(interaction, "manager"))) return;

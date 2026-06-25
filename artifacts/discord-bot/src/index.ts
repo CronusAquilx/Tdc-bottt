@@ -25,6 +25,7 @@ import { data as leaderboardData, execute as leaderboardExecute } from "./comman
 import { data as setrankData,     execute as setrankExecute     } from "./commands/setrank.js";
 import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { data as clearData,       execute as clearExecute       } from "./commands/clear.js";
+import { data as newweekData,     execute as newweekExecute     } from "./commands/newweek.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -96,6 +97,7 @@ const commandDefs = [
   { data: setrankData,     execute: setrankExecute     },
   { data: managerData,     execute: managerExecute     },
   { data: clearData,       execute: clearExecute       },
+  { data: newweekData,     execute: newweekExecute     },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -106,12 +108,19 @@ for (const cmd of commandDefs) {
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`[TDC] 🏁 Logged in as ${c.user.tag}`);
-  console.log(`[TDC] 🔧 Registering ${commandDefs.length} slash commands globally...`);
+  const guildId = process.env.DISCORD_GUILD_ID?.trim();
+  const body = commandDefs.map(c => c.data.toJSON());
   try {
     const rest = new REST().setToken(token!);
-    const body = commandDefs.map(c => c.data.toJSON());
-    const result = await rest.put(Routes.applicationCommands(clientId), { body }) as any[];
-    console.log(`[TDC] ✅ Registered ${result.length} commands: ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+    if (guildId) {
+      console.log(`[TDC] ⚡ Registering ${commandDefs.length} commands to guild ${guildId} (instant)...`);
+      const result = await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body }) as any[];
+      console.log(`[TDC] ✅ Guild commands registered instantly (${result.length}): ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+    } else {
+      console.log(`[TDC] 🔧 Registering ${commandDefs.length} slash commands globally (up to 1hr propagation)...`);
+      const result = await rest.put(Routes.applicationCommands(clientId), { body }) as any[];
+      console.log(`[TDC] ✅ Registered ${result.length} commands: ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+    }
   } catch (err) {
     console.error("[TDC] ❌ Failed to register commands:", err);
   }
