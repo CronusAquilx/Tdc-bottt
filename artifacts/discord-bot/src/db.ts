@@ -66,6 +66,10 @@ const TDC_CATALOG = JSON.stringify({
 });
 
 export async function initDb() {
+  // Enable WAL mode + busy timeout so concurrent reads/writes don't deadlock
+  await db.execute("PRAGMA journal_mode=WAL");
+  await db.execute("PRAGMA busy_timeout=5000");
+
   await exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       discord_id TEXT PRIMARY KEY,

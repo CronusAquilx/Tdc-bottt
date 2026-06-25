@@ -19,8 +19,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   // ── Role select menus (setup:setrole:level) ────────────────────────────────
   if (interaction.isRoleSelectMenu()) {
     if (ns === "setup" && action === "setrole") {
-      const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic";
-      const validLevels = ["owner", "manager", "trainer", "mechanic"];
+      const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
+      const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
       if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", ephemeral: true }); return; }
       const roleId = interaction.values[0];
       if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
