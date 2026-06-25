@@ -55,8 +55,9 @@ const FOOTER_TEXT = "東京ドリフトカスタム  ·  Built Different. Driven
 export function buildOrderEmbed(
   order: Order,
   mechanicName: string,
-  allTimeTotal = 0,
-  commissionRate = 0.3
+  weekCommission = 0,
+  commissionRate = 0.3,
+  managerCutThisWeek = 0
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -70,13 +71,14 @@ export function buildOrderEmbed(
     archived:  "🗃️ ARCHIVED"
   };
 
-  // Clean bullet-point format — no code boxes
   const itemLines = items.length
     ? items.map(i => `• **${i.label}** — ${money(i.price)}`).join("\n")
     : "*No services added*";
 
   const dateTs = Math.floor(new Date(order.created_at).getTime() / 1000);
   const noteBlock = order.notes ? `\n\n📋 **Notes:** ${order.notes.slice(0, 300)}` : "";
+
+  const thisOrderCommission = Math.round(order.labour * commissionRate);
 
   const embed = new EmbedBuilder()
     .setTitle(`🏁  Tokyo Drift Customs — Invoice`)
@@ -86,17 +88,26 @@ export function buildOrderEmbed(
       `Mechanic: **${mechanicName}**  ·  <t:${dateTs}:D>${noteBlock}`
     )
     .addFields(
-      { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
-      { name: "🔩 Parts Cost",     value: money(order.parts_cost),                       inline: true },
-      { name: "⚙️ Labour",        value: money(order.labour),                           inline: true },
-      { name: "💰 Order Total",    value: money(order.total),                            inline: true },
-      { name: "💵 Your Commission", value: `**${money(Math.round(order.labour * commissionRate))}** *(${(commissionRate * 100).toFixed(0)}% of labour)*`, inline: false }
+      { name: "🔧 Services",    value: itemLines.slice(0, 1024), inline: false },
+      { name: "🔩 Parts Cost",  value: money(order.parts_cost),  inline: true  },
+      { name: "⚙️ Labour",     value: money(order.labour),       inline: true  },
+      { name: "💰 Order Total", value: money(order.total),        inline: true  },
+      {
+        name:  "💵 This Order Commission",
+        value: `**${money(thisOrderCommission)}** *(${(commissionRate * 100).toFixed(0)}% of labour)*`,
+        inline: true
+      },
+      {
+        name:  "📊 Week Commission Total",
+        value: `**${money(Math.round(weekCommission))}** *(all orders this pay period)*`,
+        inline: true
+      }
     );
 
-  if (allTimeTotal > 0) {
+  if (managerCutThisWeek > 0) {
     embed.addFields({
-      name: "📊 All Orders Total",
-      value: `**${money(allTimeTotal)}**\n-# All orders up to this point`,
+      name:  "👔 Your Crew Cut This Week",
+      value: `**${money(Math.round(managerCutThisWeek))}** *(your % of the crew commission pool)*`,
       inline: false
     });
   }

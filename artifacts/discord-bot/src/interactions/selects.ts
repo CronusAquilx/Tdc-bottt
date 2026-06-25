@@ -298,7 +298,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR.rows[0]);
     const allTimeTotalR = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
     const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
@@ -336,7 +336,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
     const allTimeTotalR = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
     const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
@@ -409,7 +409,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     const updated = rowToOrder((await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]);
     const allTimeTotalR2 = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
     const allTimeTotal2 = Number(allTimeTotalR2.rows[0]?.[0] ?? 0);

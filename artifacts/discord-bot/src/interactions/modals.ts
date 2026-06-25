@@ -18,7 +18,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const [catalogStr, r, allTimeTotalR] = await Promise.all([
       getSetting("parts_catalog"),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [ordId] }),
-      db.execute({ sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'", args: [interaction.user.id] })
+      db.execute({ sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')", args: [interaction.user.id] })
     ]);
     const order = rowToOrder(r.rows[0]);
     const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
