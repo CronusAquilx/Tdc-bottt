@@ -48,26 +48,6 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
   }
 }
 
-export async function requireRole(interaction: AnyInteraction, minRole: string): Promise<boolean> {
-  // Role checks disabled — only owner/manager restrictions remain via config
-  if (minRole === "owner" || minRole === "manager") {
-    let ok = await dbHasRole(interaction.user.id, minRole);
-    if (!ok) ok = await checkDiscordRoles(interaction, minRole);
-
-    if (!ok) {
-      const msg = {
-        content: `❌ **Access Denied** — This action requires the **${minRole}** role.`,
-        ephemeral: true as const
-      };
-      try {
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(msg);
-        } else {
-          await (interaction as any).reply(msg);
-        }
-      } catch { /* ignore */ }
-      return false;
-    }
-  }
+export async function requireRole(_interaction: AnyInteraction, _minRole: string): Promise<boolean> {
   return true;
 }

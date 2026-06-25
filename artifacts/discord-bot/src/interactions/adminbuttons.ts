@@ -224,16 +224,10 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setTitle("⚙️  SERVER CONFIG")
       .setColor(COLORS.dark)
       .setDescription(
-        "**Admin permission roles — only Owner and Manager are required.**\n\n" +
-        `👑 Owner: ${ro(config?.owner_role_id)}\n` +
-        `🔧 Manager: ${ro(config?.manager_role_id)}`
+        "**Server configuration — channels and settings below.**"
       )
       .setFooter({ text: FOOTER });
-    const rows = [
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:owner").setPlaceholder("👑 Set Owner role")),
-      new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(new RoleSelectMenuBuilder().setCustomId("setup:setrole:manager").setPlaceholder("🔧 Set Manager role")),
-    ];
-    await interaction.editReply({ embeds: [embed], components: rows });
+    await interaction.editReply({ embeds: [embed], components: [] });
     return true;
   }
 
