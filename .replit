@@ -58,3 +58,8 @@ externalPort = 3000
 [[ports]]
 localPort = 22058
 externalPort = 3002
+
+[userenv]
+
+[userenv.shared]
+DISCORD_GUILD_ID = "1503609933365514393"
