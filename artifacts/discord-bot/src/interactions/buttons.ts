@@ -216,6 +216,166 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
+  // ── Clear: confirm all ────────────────────────────────────────────────────
+  if (ns === "clear" && action === "confirm" && rest[0] === "all") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferUpdate();
+    const guildId = interaction.guildId ?? "";
+    const { setSetting } = await import("../db.js");
+    const r = await db.execute({
+      sql: "UPDATE orders SET status = 'cleared' WHERE status = 'complete' AND (guild_id = ? OR guild_id = '')",
+      args: [guildId]
+    });
+    await db.execute({
+      sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id IN (SELECT DISTINCT mechanic_id FROM orders WHERE guild_id = ? OR guild_id = '')",
+      args: [guildId]
+    });
+    await setSetting("order_number_reset_ts", new Date().toISOString());
+    const count = Number(r.rowsAffected ?? 0);
+    const embed = new EmbedBuilder()
+      .setTitle("🗑️  WEEK CLEARED — ALL CREW")
+      .setColor(COLORS.warning)
+      .setDescription(
+        `Cleared **${count} order(s)** for all mechanics.\n\n` +
+        "**Current stats:**\n" +
+        "• Orders ➜ **0**\n" +
+        "• Revenue ➜ **$0**\n" +
+        "• Commissions ➜ **$0**\n" +
+        "• Hours ➜ **0**\n\n" +
+        "*Orders are archived, not deleted — use `/payall` to pay and clear simultaneously.*"
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+      .setTimestamp();
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  // ── Clear: confirm player ─────────────────────────────────────────────────
+  if (ns === "clear" && action === "confirm" && rest[0] === "player") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferUpdate();
+    const mechId = rest.slice(1).join(":");
+    const guildId = interaction.guildId ?? "";
+    const profile = await getProfile(mechId);
+    const r = await db.execute({
+      sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status = 'complete' AND (guild_id = ? OR guild_id = '')",
+      args: [mechId, guildId]
+    });
+    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id = ?", args: [mechId] });
+    const count = Number(r.rowsAffected ?? 0);
+    const embed = new EmbedBuilder()
+      .setTitle("🗑️  PLAYER STATS CLEARED")
+      .setColor(COLORS.warning)
+      .setDescription(
+        `Cleared **${count} order(s)** for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
+        "**Current stats:**\n" +
+        "• Orders ➜ **0**\n" +
+        "• Revenue ➜ **$0**\n" +
+        "• Commission ➜ **$0**\n" +
+        "• Hours ➜ **0**\n\n" +
+        "*Other mechanics' stats are unchanged.*"
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+      .setTimestamp();
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  // ── Clear: cancel ─────────────────────────────────────────────────────────
+  if (ns === "clear" && action === "cancel") {
+    await interaction.update({ content: "❌ Clear cancelled.", embeds: [], components: [] });
+    return;
+  }
+
+  // ── Order Pay: start (manager+ pay button on order embed) ─────────────────
+  if (ns === "orderpay" && action === "start") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const mechId = id;
+    const profile = await getProfile(mechId);
+    if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
+    const ws = weekStart();
+    const r = await db.execute({
+      sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
+      args: [mechId, ws]
+    });
+    if (!r.rows.length) {
+      await interaction.editReply({ content: `❌ No completed unpaid orders for **${profile.display_name}** this week.` });
+      return;
+    }
+    const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const totalRevenue = r.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const commission = totalLabour * profile.commission_rate;
+    const confirmEmbed = new EmbedBuilder()
+      .setTitle(`💸  Confirm Payout  ·  ${profile.display_name}`)
+      .setColor(COLORS.primary)
+      .addFields(
+        { name: "Orders to Pay",  value: String(r.rows.length), inline: true },
+        { name: "Total Revenue",  value: money(totalRevenue),   inline: true },
+        { name: "Total Labour",   value: money(totalLabour),    inline: true },
+        { name: `Commission (${(profile.commission_rate * 100).toFixed(0)}%)`, value: `**${money(commission)}**`, inline: false }
+      )
+      .setDescription("Click **Confirm** to process this payout and mark all orders as paid.")
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`orderpay:confirm:${mechId}`).setLabel("✅ Confirm Payout").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("pay:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+    );
+    await interaction.editReply({ embeds: [confirmEmbed], components: [row] });
+    return;
+  }
+
+  // ── Order Pay: confirm (manager+ — separate from /pay which is owner-only) ─
+  if (ns === "orderpay" && action === "confirm") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferUpdate();
+    const profile = await getProfile(id);
+    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", ephemeral: true }); return; }
+    const ws = weekStart();
+    const r = await db.execute({
+      sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
+      args: [id, ws]
+    });
+    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", ephemeral: true }); return; }
+    const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const commission = totalLabour * profile.commission_rate;
+    const payoutId = randomUUID();
+    const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
+    await db.execute({
+      sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
+      args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
+    });
+    await db.execute({
+      sql: "UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
+      args: [id, ws]
+    });
+    const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
+    const payRow = payR.rows[0] as unknown as Record<number, unknown>;
+    const payout = {
+      id: String(payRow[0]), mechanic_id: String(payRow[1]), week_start: String(payRow[2]),
+      amount: Number(payRow[3]), order_count: Number(payRow[4]), hours_worked: Number(payRow[5]),
+      invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
+      created_at: String(payRow[9] ?? "")
+    };
+    const { buildPayoutEmbed } = await import("../lib/embeds.js");
+    const approver = await getProfile(interaction.user.id);
+    const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Manager", weekEnd, profile.commission_rate);
+    const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:archivepaid:${id}:${ws}`).setLabel("🗃️ Archive Paid Orders").setStyle(ButtonStyle.Secondary)
+    );
+    await interaction.editReply({ embeds: [embed], components: [archiveRow] });
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config?.log_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.log_channel_id);
+          if (ch?.isTextBased()) await (ch as any).send({ content: `💸 **${profile.display_name}** paid **${money(commission)}** for ${r.rows.length} orders — week of ${ws} (processed by <@${interaction.user.id}>)`, embeds: [embed] });
+        } catch { /* ignore */ }
+      }
+    }
+    return;
+  }
+
   // ── Order list pagination ─────────────────────────────────────────────────
   if (ns === "order" && action === "list") {
     await interaction.deferUpdate();

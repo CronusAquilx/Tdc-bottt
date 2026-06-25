@@ -5,7 +5,7 @@ import {
   ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
   ChannelType, PermissionFlagsBits, TextChannel,
 } from "discord.js";
-import { db, getProfile, getSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
+import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
@@ -17,8 +17,9 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
 
-  // ── Role select menus (setup:setrole:level) ────────────────────────────────
+  // ── Role select menus ─────────────────────────────────────────────────────
   if (interaction.isRoleSelectMenu()) {
+    // setup:setrole:level
     if (ns === "setup" && action === "setrole") {
       const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
       const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
@@ -30,11 +31,99 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const mentions = roleIds.map(id => `<@&${id}>`).join(", ");
       await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, ephemeral: true });
     }
+
+    // admin:assignbyrole:pickrole — pick role → fetch members with that role → show multi-select
+    if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickrole") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      const guild = interaction.guild;
+      if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      await interaction.deferUpdate();
+
+      const roleId = interaction.values[0];
+      let members: { id: string; displayName: string }[] = [];
+      try {
+        await guild.members.fetch();
+        const role = await guild.roles.fetch(roleId);
+        if (role) {
+          members = [...role.members.values()].map(m => ({ id: m.id, displayName: m.displayName }));
+        }
+      } catch { /* ignore */ }
+
+      if (!members.length) {
+        await interaction.editReply({ content: `❌ No members found with that role.`, embeds: [], components: [] });
+        return;
+      }
+
+      const limited = members.slice(0, 25);
+      const embed = new EmbedBuilder()
+        .setTitle("🔩  Assign by Role — Step 2")
+        .setColor(COLORS.dark)
+        .setDescription(
+          `Found **${members.length}** member(s) with that role.\n` +
+          (members.length > 25 ? "*(Showing first 25)*\n" : "") +
+          "\nSelect which mechanics you want to assign to a manager.\nYou can select multiple."
+        )
+        .setFooter({ text: FOOTER });
+
+      const memberSelect = new StringSelectMenuBuilder()
+        .setCustomId("admin:assignbyrole:pickmembers")
+        .setPlaceholder("Select mechanics to assign...")
+        .setMinValues(1)
+        .setMaxValues(Math.min(limited.length, 25))
+        .addOptions(limited.map(m =>
+          new StringSelectMenuOptionBuilder().setLabel(m.displayName.slice(0, 100)).setValue(m.id)
+        ));
+
+      await interaction.editReply({
+        embeds: [embed],
+        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(memberSelect)]
+      });
+    }
+
     return;
   }
 
   // ── User select menus ──────────────────────────────────────────────────────
   if (interaction.isUserSelectMenu()) {
+    // admin:assignbyrole:pickmanager — after bulk mechanic selection, pick manager
+    if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickmanager") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      await interaction.deferUpdate();
+      const managerId = interaction.values[0];
+      const managerProfile = await getProfile(managerId);
+      if (!managerProfile) {
+        await interaction.editReply({ content: "❌ Manager not found — add them via `/crew add` first.", embeds: [], components: [] });
+        return;
+      }
+      const pendingKey = `pending_bulk_assign_${interaction.user.id}`;
+      const pendingStr = await getSetting(pendingKey);
+      if (!pendingStr) {
+        await interaction.editReply({ content: "❌ Session expired. Please start over.", embeds: [], components: [] });
+        return;
+      }
+      const mechIds = pendingStr.split(",").filter(Boolean);
+      let assigned = 0;
+      const failedNames: string[] = [];
+      for (const mechId of mechIds) {
+        const mechProfile = await getProfile(mechId);
+        if (!mechProfile) { failedNames.push(`<@${mechId}>`); continue; }
+        await db.execute({ sql: "UPDATE profiles SET manager_id = ? WHERE discord_id = ?", args: [managerId, mechId] });
+        assigned++;
+      }
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingKey] });
+      const embed = new EmbedBuilder()
+        .setTitle("✅  Bulk Manager Assignment Complete")
+        .setColor(COLORS.approved)
+        .setDescription(
+          `**${assigned}** mechanic(s) are now assigned to **${managerProfile.display_name}**.\n` +
+          `💰 ${managerProfile.display_name} will earn **${Math.round((managerProfile.manager_override_rate ?? 0.20) * 100)}%** of each mechanic's commission per order.\n\n` +
+          (failedNames.length ? `⚠️ Not found in crew (use \`/crew add\` first): ${failedNames.join(", ")}` : "")
+        )
+        .setFooter({ text: FOOTER });
+      await interaction.editReply({ embeds: [embed], components: [] });
+      return;
+    }
+
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickmechanic") {
       const type = rest[1];
       if (!(await requireRole(interaction, "manager"))) return;
@@ -273,6 +362,37 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   }
 
   if (!interaction.isStringSelectMenu()) return;
+
+  // ── Bulk assign by role: mechanic multi-select → pick manager ─────────────
+  if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickmembers") {
+    if (!(await requireRole(interaction, "owner"))) return;
+    await interaction.deferUpdate();
+    const selectedIds = interaction.values;
+    const pendingKey = `pending_bulk_assign_${interaction.user.id}`;
+    await setSetting(pendingKey, selectedIds.join(","));
+
+    const names = (await Promise.all(selectedIds.map(id => getProfile(id))))
+      .map((p, i) => p?.display_name ?? `<@${selectedIds[i]}>`)
+      .join(", ");
+
+    const embed = new EmbedBuilder()
+      .setTitle("🔩  Assign by Role — Step 3")
+      .setColor(COLORS.dark)
+      .setDescription(
+        `**${selectedIds.length}** mechanic(s) selected:\n${names}\n\n` +
+        "Now pick the **manager** to assign them all to."
+      )
+      .setFooter({ text: FOOTER });
+
+    const managerSelect = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:assignbyrole:pickmanager")
+        .setPlaceholder("Pick a manager...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.editReply({ embeds: [embed], components: [managerSelect] });
+    return;
+  }
 
   // ── Remove item from order ─────────────────────────────────────────────────
   if (ns === "order" && action === "removeitem") {

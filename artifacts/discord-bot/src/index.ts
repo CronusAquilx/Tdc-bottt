@@ -160,6 +160,9 @@ client.once(Events.ClientReady, async (c) => {
   // Weekly auto-payday — every Monday at midnight UTC
   scheduleWeeklyPayday(c);
 
+  // Weekly NEW WEEK message — every Monday to all sales channels
+  scheduleNewWeekMessage(c);
+
   // Timeclock panel repost — every 45 minutes
   scheduleTimeclockPanelRepost(c);
 });
@@ -313,6 +316,57 @@ function scheduleWeeklyLeaderboard(client: Client) {
   // Check every 5 minutes
   setInterval(tick, 5 * 60 * 1000);
   console.log("[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)");
+}
+
+// ── Monday NEW WEEK message scheduler ──────────────────────────────────────────
+function scheduleNewWeekMessage(client: Client) {
+  let firedThisWeek = false;
+
+  const tick = async () => {
+    const now = new Date();
+    if (now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      if (firedThisWeek) return;
+      firedThisWeek = true;
+      console.log("[TDC] 📅 Sending NEW WEEK messages to all sales channels...");
+      try {
+        const profiles = await db.execute("SELECT discord_id, sales_channel_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''");
+        for (const row of profiles.rows) {
+          const salesChanId = row[1] ? String(row[1]) : null;
+          if (!salesChanId) continue;
+          try {
+            const guilds = await db.execute("SELECT DISTINCT guild_id FROM guild_config");
+            for (const gRow of guilds.rows) {
+              const guildId = String(gRow[0] ?? "");
+              if (!guildId) continue;
+              try {
+                const guild = await client.guilds.fetch(guildId);
+                const ch = await guild.channels.fetch(salesChanId).catch(() => null);
+                if (!ch?.isTextBased()) continue;
+                await (ch as any).send({
+                  content:
+                    "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                    "> 💪 **Fresh start. New money. New orders.**\n" +
+                    "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+                    "> 📈 Make this week your best one yet.\n" +
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                });
+                break;
+              } catch { /* guild or channel not accessible */ }
+            }
+          } catch { /* ignore */ }
+        }
+        console.log("[TDC] 📅 NEW WEEK messages sent.");
+      } catch (err) {
+        console.error("[TDC] NEW WEEK scheduler error:", err);
+      }
+    } else {
+      firedThisWeek = false;
+    }
+  };
+
+  setInterval(tick, 5 * 60 * 1000);
+  console.log("[TDC] 📅 NEW WEEK scheduler started (fires every Monday midnight UTC)");
 }
 
 // ── Timeclock panel repost scheduler ───────────────────────────────────────────

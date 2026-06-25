@@ -109,9 +109,10 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const { nextOrderNumber } = await import("../db.js");
     const orderNumber = await nextOrderNumber();
 
+    const guildId = interaction.guildId ?? "";
     await db.execute({
-      sql: "INSERT INTO orders (id, order_number, mechanic_id, status, items, parts_cost, total, labour, notes) VALUES (?, ?, ?, 'draft', '[]', 0, 0, 0, '')",
-      args: [newOrderId, orderNumber, interaction.user.id]
+      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '')",
+      args: [newOrderId, orderNumber, interaction.user.id, guildId]
     });
 
     const [catalogStr, weekRevenue, draft] = await Promise.all([
@@ -287,6 +288,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", weekCommission, rate, managerCut);
 
+    const mechanicId = interaction.user.id;
+
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("order:newpanel")
@@ -298,12 +301,19 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
         .setStyle(ButtonStyle.Danger)
     );
 
+    const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`orderpay:start:${mechanicId}`)
+        .setLabel("💸  Pay")
+        .setStyle(ButtonStyle.Primary)
+    );
+
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {
       try {
         const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
         if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow, payRow] });
           postedTo = profile.sales_channel_id;
           await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
         }

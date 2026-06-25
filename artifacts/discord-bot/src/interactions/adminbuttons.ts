@@ -347,6 +347,46 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     if (!(await requireRole(interaction, "owner"))) return true;
     const { UserSelectMenuBuilder: USM } = await import("discord.js");
     const embed = new EmbedBuilder()
+      .setTitle("👤  Assign Manager")
+      .setColor(COLORS.dark)
+      .setDescription(
+        "**How do you want to pick mechanics to assign?**\n\n" +
+        "👤 **Pick User** — select one mechanic manually\n" +
+        "🔩 **By Role** — pick a role and multi-select everyone with that role"
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:assign:pickmechanic:manual").setLabel("👤 Pick User").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:assign:byrolepicker").setLabel("🔩 By Role").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Config: assign by role — show role picker ─────────────────────────────
+  if (section === "assign" && action === "byrolepicker") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { RoleSelectMenuBuilder: RSM } = await import("discord.js");
+    const embed = new EmbedBuilder()
+      .setTitle("🔩  Assign by Role — Step 1")
+      .setColor(COLORS.dark)
+      .setDescription("Pick the **role** whose members you want to assign to a manager.\nThe bot will then show all members with that role for multi-select.")
+      .setFooter({ text: FOOTER });
+    const roleRow = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+      new RSM()
+        .setCustomId("admin:assignbyrole:pickrole")
+        .setPlaceholder("Select the mechanic role...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [roleRow] });
+    return true;
+  }
+
+  // ── Config: assign mechanic → manager (manual, step 1: pick mechanic) ──────
+  if (section === "assign" && action === "pickmechanic" && parts[3] === "manual") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const embed = new EmbedBuilder()
       .setTitle("👤  Assign Manager — Step 1 of 2")
       .setColor(COLORS.dark)
       .setDescription("Select the **mechanic** you want to assign a manager to.")
