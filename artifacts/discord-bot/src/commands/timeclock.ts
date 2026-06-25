@@ -37,7 +37,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ?? interaction.user.username;
     const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
-    // Post to timeclock channel if configured, reply publicly
+    // Post to timeclock channel — reply with short ack to avoid double-posting
+    let postedTo = "";
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
       if (config?.timeclock_channel_id) {
@@ -46,12 +47,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [embed] });
             await db.execute({ sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?", args: [msg.id, ch.id, id] });
+            postedTo = ch.id;
           }
         } catch { /* ignore */ }
       }
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ content: postedTo ? `✅ Clocked in! Check <#${postedTo}>.` : "✅ Clocked in!" });
     return;
   }
 

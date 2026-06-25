@@ -13,7 +13,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
 
     const active = await db.execute({
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
@@ -38,28 +38,39 @@ export async function handleButton(interaction: ButtonInteraction) {
       ?? interaction.user.username;
     const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
-    const msg = await interaction.editReply({ embeds: [embed] });
+    // Always post to the configured timeclock channel
+    let posted = false;
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config?.timeclock_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({ embeds: [embed] });
+            await db.execute({
+              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+              args: [msg.id, ch.id, tcId]
+            });
+            posted = true;
+          }
+        } catch { /* ignore */ }
+      }
+    }
 
-    // Store the message ID so clock-out can update it
-    try {
-      await db.execute({
-        sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
-        args: [msg.id, interaction.channelId, tcId]
-      });
-    } catch { /* ignore */ }
+    await interaction.editReply({ content: posted ? "✅ Clocked in!" : "✅ Clocked in! (no timeclock channel configured)", ephemeral: true } as any);
     return;
   }
 
   // ── Clock Out from panel ───────────────────────────────────────────────────
   if (ns === "clockout" && action === "panel") {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
 
     const active = await db.execute({
       sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
       args: [interaction.user.id]
     });
     if (!active.rows[0]) {
-      await interaction.editReply({ content: `❌ <@${interaction.user.id}> You're not clocked in!` });
+      await interaction.editReply({ content: `❌ You're not clocked in!` });
       return;
     }
 
@@ -75,7 +86,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [mins / 60, entry.mechanic_id]
     });
 
-    // Count orders completed during this shift
     const ordersThisShift = await db.execute({
       sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status != 'draft' AND created_at >= ?",
       args: [interaction.user.id, entry.clock_in_time]
@@ -85,15 +95,19 @@ export async function handleButton(interaction: ButtonInteraction) {
     const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
     const updated = rowToTimeclock(ur.rows[0]);
     const profile = await getProfile(interaction.user.id);
+    const clockOutDisplayName = profile?.display_name
+      ?? (interaction.member as any)?.displayName
+      ?? interaction.user.globalName
+      ?? interaction.user.username;
     const embed = buildClockOutEmbed(
-      profile?.display_name ?? interaction.user.username,
+      clockOutDisplayName,
       updated.clock_in_time,
       updated.clock_out_time!,
       mins,
       orderCount
     );
 
-    // Edit the original clock-in message in the channel if we stored it
+    // Edit the original clock-in message in the timeclock channel
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -101,10 +115,21 @@ export async function handleButton(interaction: ButtonInteraction) {
           const msg = await (ch as any).messages.fetch(updated.clock_message_id);
           await msg.edit({ embeds: [embed] });
         }
-      } catch { /* ignore */ }
+      } catch {
+        // If original message not found, post a new clock-out to the timeclock channel
+        try {
+          const config = await getGuildConfig(interaction.guild.id);
+          if (config?.timeclock_channel_id) {
+            const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+            if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+          }
+        } catch { /* ignore */ }
+      }
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    const hrs = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
     return;
   }
 
