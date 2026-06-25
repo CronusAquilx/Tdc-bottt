@@ -404,11 +404,15 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const currentItems: any[] = order.items ?? [];
 
     const indicesToRemove = new Set(interaction.values.map(v => parseInt(v, 10)));
+    const removed   = currentItems.filter((_: any, idx: number) => indicesToRemove.has(idx));
     const remaining = currentItems.filter((_: any, idx: number) => !indicesToRemove.has(idx));
 
-    const newPartsCost = remaining.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
-    const newLabour    = remaining.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
-    const newTotal     = remaining.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
+    // Use delta approach so any manual labour adjustment is preserved
+    const removedPartsCost = removed.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
+    const removedLabour    = removed.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
+    const newPartsCost = Math.max(0, order.parts_cost - removedPartsCost);
+    const newLabour    = Math.max(0, order.labour    - removedLabour);
+    const newTotal     = newPartsCost + newLabour;
 
     await db.execute({
       sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
@@ -514,13 +518,17 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     }).filter(Boolean);
 
     if (!newItems.length) {
-      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove items.", ephemeral: true });
+      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", ephemeral: true });
+      return;
     }
 
     const merged = [...currentItems, ...newItems];
-    const newPartsCost = merged.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
-    const newLabour    = merged.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
-    const newTotal     = merged.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
+    // Use delta approach so any manual labour adjustment (from ✏️ Labour modal) is preserved
+    const addedPartsCost = (newItems as any[]).reduce((s, i) => s + (i.cost ?? 0), 0);
+    const addedLabour    = (newItems as any[]).reduce((s, i) => s + (i.labour ?? 0), 0);
+    const newPartsCost = order.parts_cost + addedPartsCost;
+    const newLabour    = order.labour + addedLabour;
+    const newTotal     = newPartsCost + newLabour;
 
     await db.execute({
       sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
@@ -540,7 +548,9 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
+    const addedNames = (newItems as any[]).map(i => i.label).join(", ");
     await interaction.editReply({
+      content: `✅ Added: **${addedNames}**`,
       embeds: [buildDraftEmbed(updated, allTimeTotal2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
