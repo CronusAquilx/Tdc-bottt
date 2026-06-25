@@ -227,21 +227,29 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 export async function getGuildConfig(guildId: string) {
-  const r = await db.execute({ sql: "SELECT * FROM guild_config WHERE guild_id = ?", args: [guildId] });
+  const r = await db.execute({
+    sql: `SELECT guild_id,
+                 orders_channel_id, jobs_channel_id, log_channel_id, archive_channel_id,
+                 owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
+                 timeclock_channel_id, loa_channel_id, raffle_channel_id,
+                 leaderboard_channel_id, training_channel_id, needs_training_role_id
+          FROM guild_config WHERE guild_id = ?`,
+    args: [guildId]
+  });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
-    guild_id:           String(row[0]  ?? ""),
-    orders_channel_id:  row[1]  ? String(row[1])  : null,
-    jobs_channel_id:    row[2]  ? String(row[2])  : null,
-    log_channel_id:     row[3]  ? String(row[3])  : null,
-    archive_channel_id: row[4]  ? String(row[4])  : null,
-    owner_role_id:      row[5]  ? String(row[5])  : null,
-    manager_role_id:    row[6]  ? String(row[6])  : null,
-    trainer_role_id:    row[7]  ? String(row[7])  : null,
-    mechanic_role_id:   row[8]  ? String(row[8])  : null,
-    timeclock_channel_id: row[9]  ? String(row[9])  : null,
-    loa_channel_id:     row[10] ? String(row[10]) : null,
+    guild_id:                String(row[0]  ?? ""),
+    orders_channel_id:       row[1]  ? String(row[1])  : null,
+    jobs_channel_id:         row[2]  ? String(row[2])  : null,
+    log_channel_id:          row[3]  ? String(row[3])  : null,
+    archive_channel_id:      row[4]  ? String(row[4])  : null,
+    owner_role_id:           row[5]  ? String(row[5])  : null,
+    manager_role_id:         row[6]  ? String(row[6])  : null,
+    trainer_role_id:         row[7]  ? String(row[7])  : null,
+    mechanic_role_id:        row[8]  ? String(row[8])  : null,
+    timeclock_channel_id:    row[9]  ? String(row[9])  : null,
+    loa_channel_id:          row[10] ? String(row[10]) : null,
     raffle_channel_id:       row[11] ? String(row[11]) : null,
     leaderboard_channel_id:  row[12] ? String(row[12]) : null,
     training_channel_id:     row[13] ? String(row[13]) : null,

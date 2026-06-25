@@ -17,10 +17,17 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
     const config = await getGuildConfig(interaction.guild.id);
     if (!config) return false;
 
-    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    // Use interaction.member directly — roles are already populated, no API fetch needed
+    const member = interaction.member;
     if (!member) return false;
 
-    const memberRoleIds = new Set(member.roles.cache.keys());
+    // member.roles is either a string[] (API member) or a GuildMemberRoleManager (cached member)
+    const memberRoleIds: Set<string> = new Set(
+      Array.isArray(member.roles)
+        ? member.roles
+        : [...(member.roles as any).cache.keys()]
+    );
+
     const minLevel = HIERARCHY[minRole] ?? 0;
 
     const mappings = [
@@ -28,6 +35,7 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
       { level: 3, roleId: config.manager_role_id },
       { level: 2, roleId: config.trainer_role_id },
       { level: 1, roleId: config.mechanic_role_id },
+      { level: 1, roleId: (config as any).needs_training_role_id },
     ];
 
     const userLevel = mappings
