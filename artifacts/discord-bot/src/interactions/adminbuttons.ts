@@ -214,6 +214,27 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
+  // ── Panel tab: Payroll ────────────────────────────────────────────────────
+  if (section === "panel" && action === "payroll") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("💸  PAYROLL")
+      .setColor(0xffd700)
+      .setDescription(
+        "**Manage crew pay and payday schedule.**\n\n" +
+        "• **Schedule Pay Day** — run payday right now: pay all crew, post announcement, reset weekly stats & order numbers\n" +
+        "• Payday runs **automatically every Monday** at midnight UTC\n\n" +
+        "💡 *You can also use `/payall` or `/pay @user` commands directly.*"
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅  Schedule Pay Day").setStyle(ButtonStyle.Success),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
   // ── Panel tab: Config ─────────────────────────────────────────────────────
   if (section === "panel" && action === "config") {
     if (!(await requireRole(interaction, "owner"))) return true;

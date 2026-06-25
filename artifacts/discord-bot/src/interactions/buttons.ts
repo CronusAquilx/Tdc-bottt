@@ -8,6 +8,7 @@ import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, COLORS, money }
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 import { autoClockOut } from "../lib/autoClockOut.js";
+import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
 
 export async function handleButton(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
@@ -363,6 +364,98 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   if (ns === "pay" && action === "cancel") {
     await interaction.update({ content: "❌ Payout cancelled.", embeds: [], components: [] });
+    return;
+  }
+
+  // ── Pay All confirm ───────────────────────────────────────────────────────
+  if (ns === "payall" && action === "confirm") {
+    if (!(await requireRole(interaction, "owner"))) return;
+    await interaction.deferUpdate();
+
+    const ws = weekStart();
+    const result = await processPayall(interaction.guild, ws, interaction.user.id);
+
+    if (!result) {
+      await interaction.followUp({ content: "❌ No unpaid orders found to process.", ephemeral: true });
+      return;
+    }
+
+    const { grandCommission, totalRevenue, mechanicCount, totalToBill } = result;
+
+    // Post big payday announcement
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      const announceChanId = config?.payday_channel_id ?? config?.log_channel_id ?? config?.orders_channel_id;
+      if (announceChanId) {
+        try {
+          const ch = await interaction.guild.channels.fetch(announceChanId);
+          if (ch?.isTextBased()) {
+            const paydayEmbed = new EmbedBuilder()
+              .setTitle("💸  IT'S PAYDAY! — NEW WEEK STARTS NOW")
+              .setColor(0xffd700)
+              .setDescription(
+                "# 🎉  PAYDAY IS HERE!\n\n" +
+                "All crew have been paid for this week's work.\n" +
+                "**Order numbers have been reset — fresh start for everyone!**\n\n" +
+                "> 💪 Keep grinding. New week, new money.\n" +
+                "> 📅 **Payday is every Monday** — stay clocked in, stay stacking."
+              )
+              .addFields(
+                { name: "👥 Crew Paid",           value: String(mechanicCount),    inline: true },
+                { name: "💵 Total Revenue",        value: money(totalRevenue),      inline: true },
+                { name: "💰 Total Commissions Out",value: money(grandCommission),   inline: true },
+                { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: false }
+              )
+              .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+              .setTimestamp();
+
+            await (ch as any).send({
+              content: "@everyone",
+              embeds: [paydayEmbed]
+            });
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    const summaryEmbed = new EmbedBuilder()
+      .setTitle("✅  PAYROLL PROCESSED")
+      .setColor(COLORS.paid)
+      .setDescription(
+        `**${mechanicCount}** crew members paid for week of \`${ws}\`\n` +
+        `Total billed to company: **${money(totalToBill)}**\n\n` +
+        "• All completed orders marked as **paid**\n" +
+        "• Weekly stats reset to **zero**\n" +
+        "• Order numbers reset to **TDC-0001**\n" +
+        "• Payday announcement posted ✅"
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [summaryEmbed], components: [] });
+    return;
+  }
+
+  if (ns === "payall" && action === "cancel") {
+    await interaction.update({ content: "❌ Payall cancelled.", embeds: [], components: [] });
+    return;
+  }
+
+  // ── Schedule Payday now ────────────────────────────────────────────────────
+  if (ns === "payall" && action === "schedulenow") {
+    if (!(await requireRole(interaction, "owner"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const ws = weekStart();
+    const embed = await buildPayallSummaryEmbed(ws, interaction.guild ?? undefined);
+    if (!embed) {
+      await interaction.editReply({ content: "❌ No unpaid completed orders this week." });
+      return;
+    }
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("payall:confirm").setLabel("✅ Process All Payouts + Announce Payday").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("payall:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+    );
+    await interaction.editReply({ embeds: [embed], components: [row] });
     return;
   }
 

@@ -96,14 +96,6 @@ async function sendIdleWarning(
   client: Client, guild: any, tcId: string, mechanicId: string, tcChanId: string | null
 ) {
   try {
-    if (!guild) return;
-    const config  = await getGuildConfig(guild.id);
-    const chanId  = config?.timeclock_channel_id ?? tcChanId;
-    if (!chanId) return;
-
-    const ch = await guild.channels.fetch(chanId).catch(() => null);
-    if (!ch?.isTextBased()) return;
-
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`clockwarn:stayin:${tcId}`)
@@ -115,15 +107,41 @@ async function sendIdleWarning(
         .setStyle(ButtonStyle.Danger)
     );
 
-    const msg = await (ch as any).send({
-      content:
-        `⚠️ <@${mechanicId}> — You've been idle for **${WARN_AFTER_MINS} minutes**.\n` +
-        `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
-      components: [row]
-    });
+    // Send as a DM to the mechanic privately
+    let dmSent = false;
+    try {
+      const user = await client.users.fetch(mechanicId);
+      const dm = await user.createDM();
+      const msg = await dm.send({
+        content:
+          `⚠️ **Tokyo Drift Customs — Idle Warning**\n\n` +
+          `You've been clocked in but idle for **${WARN_AFTER_MINS} minutes**.\n` +
+          `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
+        components: [row]
+      });
+      warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: dm.id, mechanicId });
+      dmSent = true;
+    } catch { /* DMs closed */ }
 
-    warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
-    console.log(`[TDC] ⚠️ Sent idle warning to ${mechanicId}`);
+    // Fallback: post in timeclock channel if DM fails
+    if (!dmSent && guild) {
+      const config = await getGuildConfig(guild.id);
+      const chanId = config?.timeclock_channel_id ?? tcChanId;
+      if (chanId) {
+        const ch = await guild.channels.fetch(chanId).catch(() => null);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).send({
+            content:
+              `⚠️ <@${mechanicId}> — You've been idle for **${WARN_AFTER_MINS} minutes**.\n` +
+              `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
+            components: [row]
+          });
+          warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
+        }
+      }
+    }
+
+    console.log(`[TDC] ⚠️ Sent idle warning to ${mechanicId} (DM: ${dmSent})`);
   } catch (err) {
     console.error(`[TDC] Failed to send idle warning to ${mechanicId}:`, err);
   }

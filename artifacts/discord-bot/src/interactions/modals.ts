@@ -95,13 +95,13 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     return;
   }
 
-  // ── Extras ─────────────────────────────────────────────────────────────────
+  // ── Body Parts ──────────────────────────────────────────────────────────────
   if (ns === "order" && action === "addextras") {
     await interaction.deferReply({ ephemeral: true });
     const qtyStr = interaction.fields.getTextInputValue("quantity").trim();
     const qty = parseInt(qtyStr, 10);
     if (isNaN(qty) || qty <= 0) {
-      await interaction.editReply({ content: "❌ Enter a valid number of extras (e.g. `3`)." });
+      await interaction.editReply({ content: "❌ Enter a valid number of body parts (e.g. `3`)." });
       return;
     }
 
@@ -110,9 +110,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const order = rowToOrder(r.rows[0]);
 
     const extrasPrice = qty * 500;
-    // Remove existing extras line if present, add fresh
+    // Remove existing body parts line if present, add fresh
     const items: any[] = (order.items ?? []).filter((i: any) => i.category !== "__extras__");
-    items.push({ label: `Extras ×${qty}`, price: extrasPrice, cost: 0, labour: extrasPrice, category: "__extras__" });
+    items.push({ label: `Body Parts ×${qty}`, price: extrasPrice, cost: 0, labour: extrasPrice, category: "__extras__" });
 
     const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
     const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);

@@ -115,7 +115,7 @@ export async function postAdminPanel(channel: TextChannel, guildId: string) {
     new ButtonBuilder().setCustomId("admin:panel:channels").setLabel("📡  Channels").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("admin:panel:raffle").setLabel("🎰  Raffle").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("admin:panel:config").setLabel("⚙️  Config").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("admin:setup:refresh").setLabel("🔄  Refresh").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("admin:panel:payroll").setLabel("💸  Payroll").setStyle(ButtonStyle.Success),
   );
 
   const msg = await channel.send({ embeds: [headerEmbed], components: [tabRow] });

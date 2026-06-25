@@ -14,6 +14,7 @@ import { data as crewData,        execute as crewExecute        } from "./comman
 import { data as timeclockData,   execute as timeclockExecute   } from "./commands/timeclock.js";
 import { data as mysalesData,     execute as mysalesExecute     } from "./commands/mysales.js";
 import { data as payData,         execute as payExecute         } from "./commands/pay.js";
+import { data as payallData,      execute as payallExecute      } from "./commands/payall.js";
 import { data as setupData,       execute as setupExecute       } from "./commands/setup.js";
 import { data as settingsData,    execute as settingsExecute    } from "./commands/settings.js";
 import { data as helpData,        execute as helpExecute        } from "./commands/help.js";
@@ -82,6 +83,7 @@ const commandDefs = [
   { data: timeclockData,   execute: timeclockExecute   },
   { data: mysalesData,     execute: mysalesExecute     },
   { data: payData,         execute: payExecute         },
+  { data: payallData,      execute: payallExecute      },
   { data: setupData,       execute: setupExecute       },
   { data: settingsData,    execute: settingsExecute    },
   { data: helpData,        execute: helpExecute        },
@@ -153,6 +155,9 @@ client.once(Events.ClientReady, async (c) => {
   // Weekly leaderboard auto-post — every Monday at midnight UTC
   scheduleWeeklyLeaderboard(c);
 
+  // Weekly auto-payday — every Monday at midnight UTC
+  scheduleWeeklyPayday(c);
+
   // Timeclock panel repost — every 45 minutes
   scheduleTimeclockPanelRepost(c);
 });
@@ -203,6 +208,77 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch { /* ignore */ }
   }
 });
+
+// ── Weekly payday scheduler ─────────────────────────────────────────────────────
+function scheduleWeeklyPayday(client: Client) {
+  let firedThisWeek = false;
+
+  const tick = async () => {
+    const now = new Date();
+    // Fire on Monday UTC between 00:00–00:05
+    if (now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      if (firedThisWeek) return;
+      firedThisWeek = true;
+      console.log("[TDC] 💸 Running automatic Monday payday...");
+      try {
+        const { processPayall } = await import("./commands/payall.js");
+        const { weekStart } = await import("./lib/utils.js");
+        const ws = weekStart();
+
+        const rows = await db.execute("SELECT guild_id, payday_channel_id, log_channel_id, orders_channel_id FROM guild_config");
+        for (const row of rows.rows) {
+          const guildId = String(row[0] ?? "");
+          if (!guildId) continue;
+          try {
+            const guild = await client.guilds.fetch(guildId);
+            const result = await processPayall(guild as any, ws, client.user!.id);
+            if (!result) { console.log(`[TDC] 💸 No unpaid orders for guild ${guildId}`); continue; }
+
+            const { grandCommission, totalRevenue, mechanicCount, totalToBill } = result;
+            const { money } = await import("./lib/embeds.js");
+            const { EmbedBuilder } = await import("discord.js");
+
+            const announceChanId = (row[1] ?? row[2] ?? row[3]) ? String(row[1] ?? row[2] ?? row[3]) : null;
+            if (announceChanId) {
+              const ch = await guild.channels.fetch(announceChanId).catch(() => null);
+              if (ch?.isTextBased()) {
+                const paydayEmbed = new EmbedBuilder()
+                  .setTitle("💸  IT'S PAYDAY! — NEW WEEK STARTS NOW")
+                  .setColor(0xffd700)
+                  .setDescription(
+                    "# 🎉  PAYDAY IS HERE!\n\n" +
+                    "All crew have been paid for this week's work.\n" +
+                    "**Order numbers have been reset — fresh start for everyone!**\n\n" +
+                    "> 💪 Keep grinding. New week, new money.\n" +
+                    "> 📅 **Payday is every Monday** — stay clocked in, stay stacking."
+                  )
+                  .addFields(
+                    { name: "👥 Crew Paid",              value: String(mechanicCount), inline: true },
+                    { name: "💵 Total Revenue",           value: money(totalRevenue),   inline: true },
+                    { name: "💰 Total Commissions Out",   value: money(grandCommission),inline: true },
+                    { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: false }
+                  )
+                  .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+                  .setTimestamp();
+                await (ch as any).send({ content: "@everyone", embeds: [paydayEmbed] });
+              }
+            }
+            console.log(`[TDC] 💸 Auto-payday complete for guild ${guildId} — ${mechanicCount} crew, $${totalToBill.toFixed(0)} billed`);
+          } catch (err) {
+            console.error(`[TDC] Payday auto-run failed for guild ${guildId}:`, err);
+          }
+        }
+      } catch (err) {
+        console.error("[TDC] Payday scheduler error:", err);
+      }
+    } else {
+      firedThisWeek = false; // Reset so it fires again next Monday
+    }
+  };
+
+  setInterval(tick, 5 * 60 * 1000);
+  console.log("[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)");
+}
 
 // ── Weekly leaderboard scheduler ───────────────────────────────────────────────
 function scheduleWeeklyLeaderboard(client: Client) {

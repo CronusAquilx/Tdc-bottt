@@ -113,18 +113,6 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
       permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
-    try {
-      const staffR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
-      for (const row of staffR.rows) {
-        const sid = String(row[0] ?? "");
-        if (!sid || sid === recruitId) continue;
-        try {
-          await guild.members.fetch(sid);
-          permOverwrites.push({ id: sid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-        } catch { /* not in server */ }
-      }
-    } catch { /* skip */ }
-
     let salesChannel: TextChannel;
     try {
       salesChannel = await guild.channels.create({
@@ -265,19 +253,6 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
       permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
-    // Also add individual owners/trainers from DB
-    try {
-      const staffR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
-      for (const row of staffR.rows) {
-        const sid = String(row[0] ?? "");
-        if (!sid || sid === interaction.user.id) continue;
-        try {
-          await guild.members.fetch(sid);
-          permOverwrites.push({ id: sid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-        } catch { /* not in server */ }
-      }
-    } catch { /* skip */ }
-
     let trainingChannel: TextChannel;
     try {
       trainingChannel = await guild.channels.create({

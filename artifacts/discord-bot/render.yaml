@@ -1,0 +1,14 @@
+services:
+  - type: worker
+    name: tdc-discord-bot
+    runtime: node
+    rootDir: .
+    buildCommand: pnpm install && pnpm run build
+    startCommand: node --enable-source-maps dist/index.js
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: BOT_HTTP_PORT
+        value: 10000
+    autoDeploy: true
+    healthCheckPath: /healthz

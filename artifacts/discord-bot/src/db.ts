@@ -294,7 +294,20 @@ export function splitRoleIds(s: string | null | undefined): string[] {
 }
 
 export async function nextOrderNumber(): Promise<string> {
-  const r = await db.execute("SELECT order_number FROM orders ORDER BY rowid DESC LIMIT 1");
+  // Respect weekly reset — only count orders created after the last payday reset
+  const resetR = await db.execute("SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'");
+  const resetTs = resetR.rows[0] ? String(resetR.rows[0][0]) : null;
+
+  let r;
+  if (resetTs) {
+    r = await db.execute({
+      sql: "SELECT order_number FROM orders WHERE created_at >= ? ORDER BY rowid DESC LIMIT 1",
+      args: [resetTs]
+    });
+  } else {
+    r = await db.execute("SELECT order_number FROM orders ORDER BY rowid DESC LIMIT 1");
+  }
+
   if (!r.rows[0]) return "TDC-0001";
   const num = parseInt(String(r.rows[0][0]).replace("TDC-", ""), 10) + 1;
   return `TDC-${String(num).padStart(4, "0")}`;

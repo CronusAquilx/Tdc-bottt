@@ -26,7 +26,7 @@ function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[]
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Performance").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🎁 Extras").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🩸 Body Parts").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -182,16 +182,16 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Extras modal ────────────────────────────────────────────────────────────
+  // ── Body Parts modal ────────────────────────────────────────────────────────
   if (action === "extras") {
     const modal = new ModalBuilder()
       .setCustomId(`order:addextras:${orderId}`)
-      .setTitle("🎁 Add Extras");
+      .setTitle("🩸 Add Body Parts");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("quantity")
-          .setLabel("How many extras? (each = $500)")
+          .setLabel("How many body parts? (each = $500)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setPlaceholder("e.g. 3")
