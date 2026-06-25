@@ -96,6 +96,144 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
+  // ── Clock In from order embed (toggles to Clock Out) ─────────────────────
+  if (ns === "clockin" && action === "order") {
+    await interaction.deferUpdate();
+
+    // Duplicate check
+    const active = await db.execute({
+      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      args: [interaction.user.id]
+    });
+    if (active.rows[0]) {
+      await interaction.followUp({ content: "⚠️ You're already clocked in!", ephemeral: true });
+      return;
+    }
+
+    // Clock in
+    const tcId = randomUUID();
+    await db.execute({
+      sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))",
+      args: [tcId, interaction.user.id]
+    });
+
+    // Post to timeclock channel
+    const profile = await getProfile(interaction.user.id);
+    const displayName = profile?.display_name
+      ?? (interaction.member as any)?.displayName
+      ?? interaction.user.globalName
+      ?? interaction.user.username;
+    const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
+    const entry = rowToTimeclock(tcR.rows[0]);
+    const clockEmbed = buildClockInEmbed(displayName, entry.clock_in_time);
+
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config?.timeclock_channel_id) {
+        try {
+          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({ embeds: [clockEmbed] });
+            await db.execute({
+              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+              args: [msg.id, ch.id, tcId]
+            });
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Toggle button to Clock Out, preserve Pay row
+    const clockOutRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
+    );
+    const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`orderpay:start:${interaction.user.id}`)
+        .setLabel("💸  Pay")
+        .setStyle(ButtonStyle.Primary)
+    );
+    await interaction.message.edit({ components: [clockOutRow, payRow] });
+    await interaction.followUp({ content: "✅ Clocked in!", ephemeral: true });
+    return;
+  }
+
+  // ── Clock Out from order embed (toggles to Clock In) ─────────────────────
+  if (ns === "clockout" && action === "order") {
+    await interaction.deferUpdate();
+
+    const active = await db.execute({
+      sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
+      args: [interaction.user.id]
+    });
+    if (!active.rows[0]) {
+      await interaction.followUp({ content: "❌ You're not clocked in!", ephemeral: true });
+      const clockInRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
+      );
+      const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`orderpay:start:${interaction.user.id}`)
+          .setLabel("💸  Pay")
+          .setStyle(ButtonStyle.Primary)
+      );
+      await interaction.message.edit({ components: [clockInRow, payRow] });
+      return;
+    }
+
+    const entry = rowToTimeclock(active.rows[0]);
+    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+
+    await db.execute({
+      sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', stayed_in_at = NULL, warned_at = NULL WHERE id = ?",
+      args: [mins, entry.id]
+    });
+    await db.execute({
+      sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
+      args: [mins / 60, entry.mechanic_id]
+    });
+
+    // Edit original clock-in message or post new clock-out
+    const profile = await getProfile(interaction.user.id);
+    const displayName = profile?.display_name
+      ?? (interaction.member as any)?.displayName
+      ?? interaction.user.globalName
+      ?? interaction.user.username;
+    const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
+    const updated = rowToTimeclock(ur.rows[0]);
+    const clockEmbed = buildClockOutEmbed(displayName, updated.clock_in_time, updated.clock_out_time!, mins, 0);
+
+    if (interaction.guild && updated.clock_message_id && updated.clock_channel_id) {
+      try {
+        const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).messages.fetch(updated.clock_message_id).catch(() => null);
+          if (msg) await msg.edit({ embeds: [clockEmbed] });
+          else await (ch as any).send({ embeds: [clockEmbed] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Toggle button to Clock In, preserve Pay row
+    const hrs = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    const clockInRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
+    );
+    const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`orderpay:start:${interaction.user.id}`)
+        .setLabel("💸  Pay")
+        .setStyle(ButtonStyle.Primary)
+    );
+    await interaction.message.edit({ components: [clockInRow, payRow] });
+    await interaction.followUp({ content: `✅ Clocked out! **${hrs}h ${m}m**`, ephemeral: true });
+    return;
+  }
+
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {
     await interaction.deferReply({ ephemeral: true });

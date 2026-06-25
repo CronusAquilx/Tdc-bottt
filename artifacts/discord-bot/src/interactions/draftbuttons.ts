@@ -15,10 +15,12 @@ const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard
 const SINCE_RESET_SQL =
   `created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')`;
 
+const DONE_STATUSES = `status IN ('complete', 'approved', 'paid')`;
+
 /** Total revenue from completed orders since last payday reset (for draft embed running total) */
 async function getWeekRevenue(mechanicId: string): Promise<number> {
   const r = await db.execute({
-    sql: `SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND ${SINCE_RESET_SQL}`,
+    sql: `SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
     args: [mechanicId]
   });
   return Number(r.rows[0]?.[0] ?? 0);
@@ -27,7 +29,7 @@ async function getWeekRevenue(mechanicId: string): Promise<number> {
 /** Total commission earned since last payday reset = SUM(labour) × rate */
 async function getWeekCommission(mechanicId: string, rate: number): Promise<number> {
   const r = await db.execute({
-    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND ${SINCE_RESET_SQL}`,
+    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
     args: [mechanicId]
   });
   return Number(r.rows[0]?.[0] ?? 0) * rate;
@@ -46,7 +48,7 @@ async function getManagerCutThisWeek(managerId: string): Promise<number> {
   const poolR = await db.execute({
     sql: `SELECT o.labour, p.commission_rate
           FROM orders o JOIN profiles p ON o.mechanic_id = p.discord_id
-          WHERE o.status = 'complete' AND o.${SINCE_RESET_SQL}`,
+          WHERE o.${DONE_STATUSES} AND o.${SINCE_RESET_SQL}`,
     args: []
   });
   const pool = poolR.rows.reduce((s, row) => s + Number(row[0] ?? 0) * Number(row[1] ?? 0.3), 0);
@@ -290,15 +292,21 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const mechanicId = interaction.user.id;
 
+    // Check if mechanic is currently clocked in to show the right toggle button
+    const activeTC = await db.execute({
+      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      args: [mechanicId]
+    });
+    const isClockedIn = !!activeTC.rows[0];
+
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("order:newpanel")
         .setLabel("📋  New Order")
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId("clockout:panel")
-        .setLabel("🔴  Clock Out")
-        .setStyle(ButtonStyle.Danger)
+      isClockedIn
+        ? new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
+        : new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
     );
 
     const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
