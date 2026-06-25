@@ -31,7 +31,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [id] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
-    const embed = buildClockInEmbed(profile?.display_name ?? interaction.user.username, entry.clock_in_time);
+    const displayName = profile?.display_name
+      ?? (interaction.member as any)?.displayName
+      ?? interaction.user.globalName
+      ?? interaction.user.username;
+    const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
     // Post to timeclock channel if configured, reply publicly
     if (interaction.guild) {
