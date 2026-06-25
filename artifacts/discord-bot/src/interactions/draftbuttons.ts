@@ -152,7 +152,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const completed = rowToOrder(ur.rows[0]);
 
     // allTimeTotal from DB now includes this completed order
-    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", allTimeTotal);
+    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", allTimeTotal, profile?.commission_rate ?? 0.3);
 
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()

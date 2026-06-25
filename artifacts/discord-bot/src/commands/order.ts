@@ -112,7 +112,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
     const mechanic = await getProfile(order.mechanic_id);
-    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown");
+    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown", 0, mechanic?.commission_rate ?? 0.3);
     await interaction.editReply({ embeds: [embed] });
     return;
   }

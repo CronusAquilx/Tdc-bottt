@@ -55,7 +55,8 @@ const FOOTER_TEXT = "東京ドリフトカスタム  ·  Built Different. Driven
 export function buildOrderEmbed(
   order: Order,
   mechanicName: string,
-  allTimeTotal = 0
+  allTimeTotal = 0,
+  commissionRate = 0.3
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -86,9 +87,10 @@ export function buildOrderEmbed(
     )
     .addFields(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
-      { name: "🔩 Parts Cost",     value: money(order.parts_cost), inline: true },
-      { name: "⚙️ Labour",        value: money(order.labour),     inline: true },
-      { name: "💰 Order Total",    value: money(order.total),      inline: true }
+      { name: "🔩 Parts Cost",     value: money(order.parts_cost),                       inline: true },
+      { name: "⚙️ Labour",        value: money(order.labour),                           inline: true },
+      { name: "💰 Order Total",    value: money(order.total),                            inline: true },
+      { name: "💵 Your Commission", value: `**${money(Math.round(order.labour * commissionRate))}** *(${(commissionRate * 100).toFixed(0)}% of labour)*`, inline: false }
     );
 
   if (allTimeTotal > 0) {
