@@ -9,6 +9,7 @@ import { db, getProfile, getSetting, rowToOrder, setGuildRoleMapping, getGuildCo
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
+import { mainDraftButtonRows, categoryViewButtonRow } from "./draftbuttons.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -25,7 +26,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const roleId = interaction.values[0];
       if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
       await setGuildRoleMapping(interaction.guild.id, level, roleId);
-      const levelLabel = level.charAt(0).toUpperCase() + level.slice(1);
+      const levelLabel = level.charAt(0).toUpperCase() + level.slice(1).replace(/_/g, " ");
       await interaction.reply({ content: `✅ **${levelLabel}** mapped to <@&${roleId}>. Members with this role can now use ${level}-level commands.`, ephemeral: true });
     }
     return;
@@ -33,16 +34,14 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── User select menus ──────────────────────────────────────────────────────
   if (interaction.isUserSelectMenu()) {
-    // admin:saleschan:pickmechanic:new  OR  admin:saleschan:pickmechanic:existing
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickmechanic") {
-      const type = rest[1]; // "new" | "existing"
+      const type = rest[1];
       if (!(await requireRole(interaction, "manager"))) return;
 
       const mechanicId = interaction.values[0];
       const guild = interaction.guild!;
 
       if (type === "new") {
-        // Immediately create the channel
         await interaction.deferUpdate();
 
         const profile = await getProfile(mechanicId);
@@ -102,7 +101,6 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         });
 
       } else {
-        // "existing" — step 2: ask which channel to attach
         const profile = await getProfile(mechanicId);
         const displayName = profile?.display_name ?? `<@${mechanicId}>`;
 
@@ -123,12 +121,39 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         await interaction.update({ embeds: [embed], components: [chanRow] });
       }
     }
+
+    // ── Admin: commission pick mechanic ─────────────────────────────────────
+    if (ns === "admin" && action === "commission" && rest[0] === "pickmechanic") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      const mechanicId = interaction.values[0];
+      const profile = await getProfile(mechanicId);
+      if (!profile) {
+        await interaction.update({ content: "❌ That user isn't in the crew.", embeds: [], components: [] });
+        return;
+      }
+
+      const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
+      const modal = new ModalBuilder()
+        .setCustomId(`admin:commission:set:${mechanicId}`)
+        .setTitle(`Set Commission — ${profile.display_name}`);
+      modal.addComponents(
+        new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("rate")
+            .setLabel("Commission rate (0–100, e.g. 30 = 30%)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(String(Math.round(profile.commission_rate * 100)))
+            .setPlaceholder("Enter percentage, e.g. 30")
+        )
+      );
+      await interaction.showModal(modal);
+    }
     return;
   }
 
   // ── Channel select menus ───────────────────────────────────────────────────
   if (interaction.isChannelSelectMenu()) {
-    // admin:saleschan:pickchan:{mechanicId}
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickchan") {
       if (!(await requireRole(interaction, "manager"))) return;
       const mechanicId = rest[1];
@@ -173,6 +198,54 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   if (!interaction.isStringSelectMenu()) return;
 
+  // ── Remove item from order ─────────────────────────────────────────────────
+  if (ns === "order" && action === "removeitem") {
+    await interaction.deferUpdate();
+    const orderId = extra;
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) return;
+    const order = rowToOrder(r.rows[0]);
+    const currentItems: any[] = order.items ?? [];
+
+    const indicesToRemove = new Set(interaction.values.map(v => parseInt(v, 10)));
+    const remaining = currentItems.filter((_: any, idx: number) => !indicesToRemove.has(idx));
+
+    const newPartsCost = remaining.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
+    const newLabour    = remaining.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
+    const newTotal     = remaining.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
+
+    await db.execute({
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      args: [JSON.stringify(remaining), newPartsCost, newLabour, newTotal, orderId]
+    });
+
+    const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    const updated = rowToOrder(updatedR.rows[0]);
+    const allTimeTotalR = await db.execute({
+      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status = 'complete'",
+      args: [interaction.user.id]
+    });
+    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
+
+    const catalogStr = await getSetting("parts_catalog");
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const categories: string[] = catalog.categories ?? [];
+    const catSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${orderId}`)
+      .setPlaceholder("Add more services...")
+      .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
+
+    await interaction.editReply({
+      content: `✅ Removed ${indicesToRemove.size} item(s) from the order.`,
+      embeds: [buildDraftEmbed(updated, allTimeTotal)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        ...mainDraftButtonRows(orderId)
+      ]
+    });
+    return;
+  }
+
   // ── Select category → show items ───────────────────────────────────────────
   if (ns === "order" && action === "selectcategory") {
     await interaction.deferUpdate();
@@ -192,17 +265,21 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     });
     const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
 
+    // Mark already-added items so user can see what's on the order
+    const existingLabels = new Set((order.items ?? []).map((i: any) => `${i.category}::${i.label}`));
+
     const itemSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectitem:${extra}:${category}`)
       .setPlaceholder(`Select from ${category}...`)
       .setMinValues(1)
       .setMaxValues(Math.min(catItems.length, 10))
-      .addOptions(catItems.map(i =>
-        new StringSelectMenuOptionBuilder()
-          .setLabel(i.label)
+      .addOptions(catItems.map(i => {
+        const alreadyAdded = existingLabels.has(`${i.category}::${i.label}`);
+        return new StringSelectMenuOptionBuilder()
+          .setLabel(alreadyAdded ? `✓ ${i.label}` : i.label)
           .setValue(i.label)
-          .setDescription(`Parts: ${money(i.cost)} | Labour: ${money(i.labour)} | Total: ${money(i.price)}`)
-      ));
+          .setDescription(`Parts: ${money(i.cost)} | Labour: ${money(i.labour)} | Total: ${money(i.price)}${alreadyAdded ? " · already added" : ""}`);
+      }));
 
     const embed = buildDraftEmbed(order, allTimeTotal);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
@@ -211,12 +288,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       embeds: [embed],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(itemSelect),
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(`order:backtocats:${extra}`).setLabel("← Back").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`order:editlabour:${extra}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`order:submit:${extra}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`order:cancel:${extra}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
-        )
+        categoryViewButtonRow(extra)
       ]
     });
     return;
@@ -246,7 +318,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     }).filter(Boolean);
 
     if (!newItems.length) {
-      await interaction.followUp({ content: "⚠️ All selected items are already on this order.", ephemeral: true });
+      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove items.", ephemeral: true });
     }
 
     const merged = [...currentItems, ...newItems];
@@ -276,11 +348,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       embeds: [buildDraftEmbed(updated, allTimeTotal2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
-        )
+        ...mainDraftButtonRows(orderId)
       ]
     });
     return;

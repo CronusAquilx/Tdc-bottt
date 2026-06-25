@@ -1,21 +1,21 @@
-import { Client, TextChannel } from "discord.js";
+import { Client, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
+import { warnedMechanics, stayedIn } from "./warnState.js";
 
-const IDLE_MINUTES = 20;
+const WARN_AFTER_MINS   = 30;  // send warning after 30 min of inactivity
+const AUTO_OUT_AFTER_WARN_MINS = 10; // auto clock-out 10 min after warning if no response
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startAutoClockOutMonitor(client: Client) {
   if (timer) clearInterval(timer);
-  // Check every 5 minutes
   timer = setInterval(() => checkIdleMechanics(client), 5 * 60 * 1000);
-  console.log("[TDC] ⏱️ Auto clock-out monitor started (idle threshold: 20 min)");
+  console.log("[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)");
 }
 
 async function checkIdleMechanics(client: Client) {
   try {
-    // Find all clocked-in mechanics
     const active = await db.execute(
       `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id
        FROM timeclock
@@ -29,94 +29,156 @@ async function checkIdleMechanics(client: Client) {
       const msgId       = row[3] ? String(row[3]) : null;
       const chanId      = row[4] ? String(row[4]) : null;
 
-      // Check if they've completed any order in the last IDLE_MINUTES
-      const cutoff = new Date(Date.now() - IDLE_MINUTES * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-      const recent = await db.execute({
-        sql: `SELECT COUNT(*) FROM orders
-              WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?`,
-        args: [mechanicId, cutoff]
-      });
-      const recentCount = Number(recent.rows[0]?.[0] ?? 0);
-      if (recentCount > 0) continue; // Active — skip
-
-      // Also check if they clocked in less than IDLE_MINUTES ago (grace period)
       const clockInMs = new Date(clockInTime).getTime();
-      if (Date.now() - clockInMs < IDLE_MINUTES * 60 * 1000) continue;
 
-      // Auto clock out
-      const mins = (Date.now() - clockInMs) / 60000;
-      await db.execute({
-        sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?",
-        args: [mins, tcId]
-      });
-      await db.execute({
-        sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
-        args: [mins / 60, mechanicId]
-      });
-
-      const profile = await getProfile(mechanicId);
-      const name    = profile?.display_name ?? mechanicId;
-      const clockNow = new Date().toISOString().replace("T", " ").slice(0, 19);
-      const embed = buildClockOutEmbed(name, clockInTime, clockNow, mins, 0);
-
-      // Edit original clock-in message in timeclock channel
-      try {
-        // Find guild from timeclock channel
-        let guild: any = null;
-        if (chanId) {
-          for (const g of client.guilds.cache.values()) {
-            try {
-              const ch = await g.channels.fetch(chanId).catch(() => null);
-              if (ch) { guild = g; break; }
-            } catch { /* skip */ }
-          }
+      // Resolve guild
+      let guild: any = null;
+      if (chanId) {
+        for (const g of client.guilds.cache.values()) {
+          try { const ch = await g.channels.fetch(chanId).catch(() => null); if (ch) { guild = g; break; } } catch { /* skip */ }
         }
-        if (!guild) {
-          // fallback: find first guild the bot shares with this user
-          for (const g of client.guilds.cache.values()) {
-            try {
-              await g.members.fetch(mechanicId);
-              guild = g;
-              break;
-            } catch { /* skip */ }
-          }
+      }
+      if (!guild) {
+        for (const g of client.guilds.cache.values()) {
+          try { await g.members.fetch(mechanicId); guild = g; break; } catch { /* skip */ }
         }
-
-        if (guild && msgId && chanId) {
-          try {
-            const ch = await guild.channels.fetch(chanId);
-            if (ch?.isTextBased()) {
-              const msg = await (ch as any).messages.fetch(msgId);
-              await msg.edit({ embeds: [embed] });
-            }
-          } catch { /* ignore */ }
-        }
-
-        // Ping in their sales channel
-        if (guild) {
-          const config = await getGuildConfig(guild.id);
-          const salesChanId = profile?.sales_channel_id;
-          if (salesChanId) {
-            try {
-              const ch = await guild.channels.fetch(salesChanId);
-              if (ch?.isTextBased()) {
-                await (ch as any).send({
-                  content:
-                    `⏰ <@${mechanicId}> — You've been **automatically clocked out** after ${IDLE_MINUTES} minutes of inactivity.\n` +
-                    `**Shift:** ${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m\n` +
-                    `If this was a mistake, clock back in from the timeclock channel.`,
-                });
-              }
-            } catch { /* ignore */ }
-          }
-        }
-      } catch (err) {
-        console.error(`[TDC] Auto clock-out notification failed for ${mechanicId}:`, err);
       }
 
-      console.log(`[TDC] ⏱️ Auto clocked out ${name} after ${Math.round(mins)}min of inactivity`);
+      // Last real activity: most recent completed order OR last "stay in" click
+      const cutoffWarn   = new Date(Date.now() - WARN_AFTER_MINS   * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+      const recentOrders = await db.execute({
+        sql: `SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?`,
+        args: [mechanicId, cutoffWarn]
+      });
+      const recentCount = Number(recentOrders.rows[0]?.[0] ?? 0);
+      const lastStay    = stayedIn.get(mechanicId) ?? 0;
+      const lastStayMinsAgo = (Date.now() - lastStay) / 60000;
+      const hadRecentActivity = recentCount > 0 || lastStayMinsAgo < WARN_AFTER_MINS;
+      const minsClocked = (Date.now() - clockInMs) / 60000;
+
+      // Grace period: don't touch people clocked in < WARN_AFTER_MINS ago
+      if (minsClocked < WARN_AFTER_MINS) {
+        continue;
+      }
+
+      const alreadyWarned = warnedMechanics.get(tcId);
+
+      // ── If already warned ──────────────────────────────────────────────────
+      if (alreadyWarned) {
+        const minsSinceWarn = (Date.now() - alreadyWarned.warnedAt) / 60000;
+
+        // Had activity after warning → cancel warning
+        if (hadRecentActivity) {
+          warnedMechanics.delete(tcId);
+          continue;
+        }
+
+        // No response in AUTO_OUT_AFTER_WARN_MINS → auto clock out
+        if (minsSinceWarn >= AUTO_OUT_AFTER_WARN_MINS) {
+          await autoClockOut(client, guild, tcId, mechanicId, clockInTime, msgId, chanId);
+          warnedMechanics.delete(tcId);
+        }
+        continue;
+      }
+
+      // ── Not yet warned ─────────────────────────────────────────────────────
+      if (hadRecentActivity) continue; // still active
+
+      // Send warning
+      await sendIdleWarning(client, guild, tcId, mechanicId, chanId);
     }
   } catch (err) {
     console.error("[TDC] Auto clock-out monitor error:", err);
   }
+}
+
+async function sendIdleWarning(
+  client: Client, guild: any, tcId: string, mechanicId: string, tcChanId: string | null
+) {
+  try {
+    if (!guild) return;
+    const config  = await getGuildConfig(guild.id);
+    const chanId  = config?.timeclock_channel_id ?? tcChanId;
+    if (!chanId) return;
+
+    const ch = await guild.channels.fetch(chanId).catch(() => null);
+    if (!ch?.isTextBased()) return;
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`clockwarn:stayin:${tcId}`)
+        .setLabel("✅  Stay Clocked In")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`clockwarn:clockout:${tcId}`)
+        .setLabel("🔴  Clock Out Now")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+    const msg = await (ch as any).send({
+      content:
+        `⚠️ <@${mechanicId}> — You've been idle for **${WARN_AFTER_MINS} minutes**.\n` +
+        `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
+      components: [row]
+    });
+
+    warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
+    console.log(`[TDC] ⚠️ Sent idle warning to ${mechanicId}`);
+  } catch (err) {
+    console.error(`[TDC] Failed to send idle warning to ${mechanicId}:`, err);
+  }
+}
+
+export async function autoClockOut(
+  client: Client, guild: any, tcId: string, mechanicId: string,
+  clockInTime: string, msgId: string | null, chanId: string | null
+) {
+  const clockInMs = new Date(clockInTime).getTime();
+  const mins = (Date.now() - clockInMs) / 60000;
+
+  await db.execute({
+    sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?",
+    args: [mins, tcId]
+  });
+  await db.execute({
+    sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
+    args: [mins / 60, mechanicId]
+  });
+
+  const profile = await getProfile(mechanicId);
+  const name    = profile?.display_name ?? mechanicId;
+  const clockNow = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const embed   = buildClockOutEmbed(name, clockInTime, clockNow, mins, 0);
+
+  // Edit original clock-in message
+  if (guild && msgId && chanId) {
+    try {
+      const ch = await guild.channels.fetch(chanId).catch(() => null);
+      if (ch?.isTextBased()) {
+        const m = await (ch as any).messages.fetch(msgId).catch(() => null);
+        if (m) await m.edit({ embeds: [embed] });
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Notify in timeclock channel
+  if (guild) {
+    try {
+      const config    = await getGuildConfig(guild.id);
+      const notifChan = config?.timeclock_channel_id;
+      if (notifChan) {
+        const ch = await guild.channels.fetch(notifChan).catch(() => null);
+        if (ch?.isTextBased()) {
+          await (ch as any).send({
+            content:
+              `⏰ <@${mechanicId}> — You've been **automatically clocked out** after ${Math.round(WARN_AFTER_MINS + AUTO_OUT_AFTER_WARN_MINS)} minutes of inactivity.\n` +
+              `**Shift:** ${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`,
+            embeds: [embed]
+          });
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  console.log(`[TDC] ⏱️ Auto clocked out ${name} after ${Math.round(mins)}min`);
 }

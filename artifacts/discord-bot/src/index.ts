@@ -6,10 +6,9 @@ import {
   Events,
   REST,
   Routes,
-  ChatInputCommandInteraction,
-  Message
+  ChatInputCommandInteraction
 } from "discord.js";
-import { initDb, getUserRole } from "./db.js";
+import { initDb } from "./db.js";
 import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
 import { data as crewData,        execute as crewExecute        } from "./commands/crew.js";
 import { data as timeclockData,   execute as timeclockExecute   } from "./commands/timeclock.js";
@@ -98,13 +97,6 @@ for (const cmd of commandDefs) {
   commands.set(cmd.data.name, { execute: cmd.execute });
 }
 
-// ── Role flair emojis ──────────────────────────────────────────────────────────
-const ROLE_FLAIR: Record<string, string> = {
-  owner:    "👑",
-  manager:  "🔧",
-  trainer:  "📚",
-  mechanic: "🔩",
-};
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`[TDC] 🏁 Logged in as ${c.user.tag}`);
@@ -165,19 +157,6 @@ client.once(Events.ClientReady, async (c) => {
   scheduleTimeclockPanelRepost(c);
 });
 
-// ── Role flair: react with rank emoji when staff sends a message ───────────────
-client.on(Events.MessageCreate, async (message: Message) => {
-  // Ignore bots and DMs
-  if (message.author.bot || !message.guild) return;
-
-  try {
-    const role = await getUserRole(message.author.id);
-    if (!role) return;
-    const emoji = ROLE_FLAIR[role];
-    if (!emoji) return;
-    await message.react(emoji);
-  } catch { /* silently ignore — don't break the bot over a failed reaction */ }
-});
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {

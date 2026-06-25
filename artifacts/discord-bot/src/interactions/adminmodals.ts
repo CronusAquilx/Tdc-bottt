@@ -1,11 +1,11 @@
 import {
   ModalSubmitInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  ChannelType, PermissionFlagsBits, TextChannel
+  ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
 } from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildJobEmbed } from "../lib/embeds.js";
+import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { postTimeclockPanel, postLoaPanel, postRafflePanel, CHANNEL_MAP } from "./adminbuttons.js";
@@ -54,6 +54,48 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
         ? `✅ Job **${title}** posted to <#${config?.jobs_channel_id}>!`
         : `✅ Job **${title}** saved — configure a jobs channel first to post it publicly.`
     });
+    return true;
+  }
+
+  // ── Commission: set rate ───────────────────────────────────────────────────
+  if (section === "commission" && action === "set") {
+    const mechanicId = parts[3];
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+
+    const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
+    const pct = parseFloat(rateStr);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      await interaction.editReply({ content: "❌ Invalid rate — enter a number between 0 and 100 (e.g. `30` for 30%)." });
+      return true;
+    }
+    const rate = pct / 100;
+
+    const [profile, caller] = await Promise.all([getProfile(mechanicId), getProfile(interaction.user.id)]);
+    if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return true; }
+
+    await db.execute({ sql: "UPDATE profiles SET commission_rate = ? WHERE discord_id = ?", args: [rate, mechanicId] });
+
+    const embed = new EmbedBuilder()
+      .setTitle("💰 Commission Rate Updated")
+      .setColor(COLORS.approved)
+      .addFields(
+        { name: "Mechanic",  value: profile.display_name,                              inline: true },
+        { name: "Old Rate",  value: `${(profile.commission_rate * 100).toFixed(0)}%`,  inline: true },
+        { name: "New Rate",  value: `${pct.toFixed(0)}%`,                              inline: true },
+        { name: "Updated By", value: caller?.display_name ?? interaction.user.username, inline: true }
+      )
+      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+    try {
+      const config = await getGuildConfig(guild.id);
+      if (config?.log_channel_id) {
+        const ch = await guild.channels.fetch(config.log_channel_id);
+        if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+      }
+    } catch { /* ignore */ }
     return true;
   }
 
@@ -201,7 +243,6 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
 
     await setGuildConfig(guild.id, cfg.field, channelId);
 
-    // Post the panel embed for LOA and raffle channels
     if (chanType === "loach") {
       await postLoaPanel(ch as TextChannel);
     } else if (chanType === "rafflech") {

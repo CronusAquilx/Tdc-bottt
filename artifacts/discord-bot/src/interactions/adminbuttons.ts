@@ -224,10 +224,69 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setTitle("⚙️  SERVER CONFIG")
       .setColor(COLORS.dark)
       .setDescription(
-        "**Server configuration — channels and settings below.**"
+        "**Configure role assignments and commission rates.**\n\n" +
+        `👑 Owner: ${ro(config?.owner_role_id)}\n` +
+        `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
+        `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
+        `🔩 Mechanic: ${ro(config?.mechanic_role_id)}\n` +
+        `🎓 Needs Training: ${ro((config as any)?.needs_training_role_id)}\n\n` +
+        "*Members with **Administrator** permission can always use all commands regardless of role.*"
       )
       .setFooter({ text: FOOTER });
-    await interaction.editReply({ embeds: [embed], components: [] });
+    const roleRow1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:roles:set:owner").setLabel("👑 Owner Role").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:roles:set:manager").setLabel("🔧 Manager Role").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:roles:set:trainer").setLabel("📚 Trainer Role").setStyle(ButtonStyle.Secondary),
+    );
+    const roleRow2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:roles:set:mechanic").setLabel("🔩 Mechanic Role").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:roles:set:needs_training").setLabel("🎓 Needs Training").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:commission:pick").setLabel("💰 Set Commission").setStyle(ButtonStyle.Primary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2] });
+    return true;
+  }
+
+  // ── Config: set role level ────────────────────────────────────────────────
+  if (section === "roles" && action === "set") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const level = parts[3] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
+    const levelLabels: Record<string, string> = {
+      owner: "👑 Owner", manager: "🔧 Manager", trainer: "📚 Trainer",
+      mechanic: "🔩 Mechanic", needs_training: "🎓 Needs Training"
+    };
+    const { RoleSelectMenuBuilder: RSM } = await import("discord.js");
+    const embed = new EmbedBuilder()
+      .setTitle(`🎭  Set ${levelLabels[level] ?? level} Role`)
+      .setColor(COLORS.dark)
+      .setDescription(`Pick the Discord role that maps to **${levelLabels[level] ?? level}** access.`)
+      .setFooter({ text: FOOTER });
+    const roleSelect = new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(
+      new RSM()
+        .setCustomId(`setup:setrole:${level}`)
+        .setPlaceholder(`Pick the ${level} role...`)
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [roleSelect] });
+    return true;
+  }
+
+  // ── Config: pick mechanic for commission ──────────────────────────────────
+  if (section === "commission" && action === "pick") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("💰  Set Individual Commission")
+      .setColor(COLORS.primary)
+      .setDescription("Pick the mechanic whose commission rate you want to change.")
+      .setFooter({ text: FOOTER });
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const userSelect = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new USM()
+        .setCustomId("admin:commission:pickmechanic")
+        .setPlaceholder("Select a mechanic...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [userSelect] });
     return true;
   }
 

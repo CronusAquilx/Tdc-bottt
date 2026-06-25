@@ -6,10 +6,88 @@ import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock
 import { requireRole } from "../lib/roles.js";
 import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
+import { warnedMechanics, stayedIn } from "../lib/warnState.js";
+import { autoClockOut } from "../lib/autoClockOut.js";
 
 export async function handleButton(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const id = rest.join(":");
+
+  // ── Clock-warning: Stay Clocked In ────────────────────────────────────────
+  if (ns === "clockwarn" && action === "stayin") {
+    await interaction.deferReply({ ephemeral: true });
+    const tcId = id;
+    const warnInfo = warnedMechanics.get(tcId);
+    if (!warnInfo) {
+      await interaction.editReply({ content: "ℹ️ No active warning found — you're good!" });
+      return;
+    }
+    // Check it's the right user
+    if (warnInfo.mechanicId !== interaction.user.id) {
+      await interaction.editReply({ content: "❌ This warning isn't for you." });
+      return;
+    }
+    warnedMechanics.delete(tcId);
+    stayedIn.set(interaction.user.id, Date.now());
+    // Disable the warning message buttons
+    try {
+      if (warnInfo.msgId && warnInfo.chanId && interaction.guild) {
+        const ch = await interaction.guild.channels.fetch(warnInfo.chanId);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).messages.fetch(warnInfo.msgId).catch(() => null);
+          if (msg) await msg.edit({ content: `✅ <@${interaction.user.id}> stayed clocked in.`, components: [] });
+        }
+      }
+    } catch { /* ignore */ }
+    await interaction.editReply({ content: "✅ Got it — you're still clocked in! Keep up the good work." });
+    return;
+  }
+
+  // ── Clock-warning: Clock Out Now ──────────────────────────────────────────
+  if (ns === "clockwarn" && action === "clockout") {
+    await interaction.deferReply({ ephemeral: true });
+    const tcId = id;
+    const warnInfo = warnedMechanics.get(tcId);
+
+    // Find the timeclock entry
+    const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
+    if (!tcR.rows[0]) { await interaction.editReply({ content: "❌ Timeclock entry not found." }); return; }
+    const entry = rowToTimeclock(tcR.rows[0]);
+
+    if (entry.clock_out_time) { await interaction.editReply({ content: "ℹ️ Already clocked out." }); return; }
+    if (entry.mechanic_id !== interaction.user.id) {
+      await interaction.editReply({ content: "❌ This isn't your timeclock entry." }); return;
+    }
+
+    warnedMechanics.delete(tcId);
+
+    // Disable warning message
+    try {
+      if (warnInfo?.msgId && warnInfo?.chanId && interaction.guild) {
+        const ch = await interaction.guild.channels.fetch(warnInfo.chanId);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).messages.fetch(warnInfo.msgId).catch(() => null);
+          if (msg) await msg.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] });
+        }
+      }
+    } catch { /* ignore */ }
+
+    await autoClockOut(
+      interaction.client,
+      interaction.guild,
+      tcId,
+      entry.mechanic_id,
+      entry.clock_in_time,
+      entry.clock_message_id ?? null,
+      entry.clock_channel_id ?? null
+    );
+
+    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const hrs = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
+    return;
+  }
 
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {

@@ -1,4 +1,8 @@
-import { ChatInputCommandInteraction, ButtonInteraction, ModalSubmitInteraction, AnySelectMenuInteraction } from "discord.js";
+import {
+  ChatInputCommandInteraction, ButtonInteraction,
+  ModalSubmitInteraction, AnySelectMenuInteraction,
+  PermissionFlagsBits
+} from "discord.js";
 import { hasRole as dbHasRole, getProfile, getUserRole as dbGetUserRole, getGuildConfig } from "../db.js";
 
 type AnyInteraction =
@@ -17,11 +21,9 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
     const config = await getGuildConfig(interaction.guild.id);
     if (!config) return false;
 
-    // Use interaction.member directly — roles are already populated, no API fetch needed
     const member = interaction.member;
     if (!member) return false;
 
-    // member.roles is either a string[] (API member) or a GuildMemberRoleManager (cached member)
     const memberRoleIds: Set<string> = new Set(
       Array.isArray(member.roles)
         ? member.roles
@@ -48,6 +50,48 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
   }
 }
 
-export async function requireRole(_interaction: AnyInteraction, _minRole: string): Promise<boolean> {
-  return true;
+export async function requireRole(interaction: AnyInteraction, minRole: string): Promise<boolean> {
+  // Always allow Discord Administrators regardless of TDC role config
+  if (interaction.guild && interaction.inGuild()) {
+    try {
+      const member = interaction.member;
+      if (member && "permissions" in member) {
+        const perms = member.permissions;
+        if (typeof perms !== "string" && perms.has(PermissionFlagsBits.Administrator)) {
+          return true;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // If no guild or DM, deny
+  if (!interaction.guild) {
+    try {
+      if (!interaction.replied && !(interaction as any).deferred) {
+        await (interaction as any).reply({ content: "❌ This can only be used in a server.", ephemeral: true });
+      }
+    } catch { /* ignore */ }
+    return false;
+  }
+
+  // Check if any roles are configured — if none are set, allow through gracefully
+  const config = await getGuildConfig(interaction.guild.id);
+  const hasAnyRoleConfig = !!(
+    config?.owner_role_id || config?.manager_role_id ||
+    config?.trainer_role_id || config?.mechanic_role_id ||
+    (config as any)?.needs_training_role_id
+  );
+  if (!hasAnyRoleConfig) return true;
+
+  const allowed = await checkDiscordRoles(interaction, minRole);
+  if (!allowed) {
+    try {
+      if (!interaction.replied && !(interaction as any).deferred) {
+        await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+      } else if ((interaction as any).deferred) {
+        await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+      }
+    } catch { /* ignore */ }
+  }
+  return allowed;
 }

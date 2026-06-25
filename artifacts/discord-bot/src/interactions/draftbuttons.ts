@@ -19,6 +19,34 @@ async function getAllTimeTotal(mechanicId: string): Promise<number> {
   return Number(r.rows[0]?.[0] ?? 0);
 }
 
+// ─── Shared button row builders ───────────────────────────────────────────────
+
+function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Performance").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🎁 Extras").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+function categoryViewButtonRow(orderId: string): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`order:backtocats:${orderId}`).setLabel("← Back").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
+  );
+}
+
+export { mainDraftButtonRows, categoryViewButtonRow };
+
 export async function handleDraftButton(interaction: ButtonInteraction): Promise<boolean> {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const orderId = rest.join(":");
@@ -27,7 +55,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   if (ns === "order" && action === "newpanel") {
     if (!(await requireRole(interaction, "mechanic"))) return true;
 
-    // Check the mechanic is clocked in
     const active = await db.execute({
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
@@ -70,7 +97,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       embeds: [buildDraftEmbed(draft, allTimeTotal)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        draftButtons(newOrderId)
+        ...mainDraftButtonRows(newOrderId)
       ]
     });
     return true;
@@ -100,9 +127,77 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       embeds: [buildDraftEmbed(order, allTimeTotal)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        draftButtons(orderId)
+        ...mainDraftButtonRows(orderId)
       ]
     });
+    return true;
+  }
+
+  // ── Remove Items — show current order items as a select ────────────────────
+  if (action === "removeitems") {
+    await interaction.deferReply({ ephemeral: true });
+    const r = await db.execute({ sql: "SELECT items FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) return true;
+    const items: any[] = JSON.parse(String(r.rows[0][0] ?? "[]"));
+    if (!items.length) {
+      await interaction.editReply({ content: "ℹ️ No items on this order to remove." });
+      return true;
+    }
+
+    const removeSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:removeitem:${orderId}`)
+      .setPlaceholder("Select items to remove...")
+      .setMinValues(1)
+      .setMaxValues(Math.min(items.length, 10))
+      .addOptions(items.map((item: any, idx: number) =>
+        new StringSelectMenuOptionBuilder()
+          .setLabel(`${item.label} (${item.category})`)
+          .setValue(String(idx))
+          .setDescription(`${money(item.price)}`)
+      ));
+
+    await interaction.editReply({
+      content: "Select which items to remove from the order:",
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(removeSelect)]
+    });
+    return true;
+  }
+
+  // ── Max Performance modal ───────────────────────────────────────────────────
+  if (action === "maxperf") {
+    const modal = new ModalBuilder()
+      .setCustomId(`order:addmaxperf:${orderId}`)
+      .setTitle("⚡ Max Performance Package");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Total price (e.g. 100000)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("Enter Max Performance total price...")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Extras modal ────────────────────────────────────────────────────────────
+  if (action === "extras") {
+    const modal = new ModalBuilder()
+      .setCustomId(`order:addextras:${orderId}`)
+      .setTitle("🎁 Add Extras");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("quantity")
+          .setLabel("How many extras? (each = $500)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("e.g. 3")
+      )
+    );
+    await interaction.showModal(modal);
     return true;
   }
 
@@ -151,7 +246,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     ]);
     const completed = rowToOrder(ur.rows[0]);
 
-    // allTimeTotal from DB now includes this completed order
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", allTimeTotal, profile?.commission_rate ?? 0.3);
 
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -192,12 +286,4 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   }
 
   return false;
-}
-
-function draftButtons(orderId: string): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Edit Labour").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
-  );
 }
