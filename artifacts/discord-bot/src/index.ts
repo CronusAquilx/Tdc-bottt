@@ -23,6 +23,7 @@ import { data as loaData,         execute as loaExecute         } from "./comman
 import { data as profileData,     execute as profileExecute     } from "./commands/profile.js";
 import { data as leaderboardData, execute as leaderboardExecute } from "./commands/leaderboard.js";
 import { data as setrankData,     execute as setrankExecute     } from "./commands/setrank.js";
+import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -92,6 +93,7 @@ const commandDefs = [
   { data: profileData,     execute: profileExecute     },
   { data: leaderboardData, execute: leaderboardExecute },
   { data: setrankData,     execute: setrankExecute     },
+  { data: managerData,     execute: managerExecute     },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();

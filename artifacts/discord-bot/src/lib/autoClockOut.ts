@@ -3,8 +3,8 @@ import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
 import { warnedMechanics, stayedIn } from "./warnState.js";
 
-const WARN_AFTER_MINS   = 30;  // send warning after 30 min of inactivity
-const AUTO_OUT_AFTER_WARN_MINS = 10; // auto clock-out 10 min after warning if no response
+const WARN_AFTER_MINS         = 30;
+const AUTO_OUT_AFTER_WARN_MINS = 10;
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -17,7 +17,7 @@ export function startAutoClockOutMonitor(client: Client) {
 async function checkIdleMechanics(client: Client) {
   try {
     const active = await db.execute(
-      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id
+      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at
        FROM timeclock
        WHERE clock_out_time IS NULL`
     );
@@ -28,8 +28,12 @@ async function checkIdleMechanics(client: Client) {
       const clockInTime = String(row[2] ?? "");
       const msgId       = row[3] ? String(row[3]) : null;
       const chanId      = row[4] ? String(row[4]) : null;
+      const warnedAtDb  = row[5] ? String(row[5]) : null;
 
       const clockInMs = new Date(clockInTime).getTime();
+      const minsClocked = (Date.now() - clockInMs) / 60000;
+
+      if (minsClocked < WARN_AFTER_MINS) continue;
 
       // Resolve guild
       let guild: any = null;
@@ -44,8 +48,8 @@ async function checkIdleMechanics(client: Client) {
         }
       }
 
-      // Last real activity: most recent completed order OR last "stay in" click
-      const cutoffWarn   = new Date(Date.now() - WARN_AFTER_MINS   * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+      // Last real activity
+      const cutoffWarn = new Date(Date.now() - WARN_AFTER_MINS * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
       const recentOrders = await db.execute({
         sql: `SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?`,
         args: [mechanicId, cutoffWarn]
@@ -54,22 +58,20 @@ async function checkIdleMechanics(client: Client) {
       const lastStay    = stayedIn.get(mechanicId) ?? 0;
       const lastStayMinsAgo = (Date.now() - lastStay) / 60000;
       const hadRecentActivity = recentCount > 0 || lastStayMinsAgo < WARN_AFTER_MINS;
-      const minsClocked = (Date.now() - clockInMs) / 60000;
 
-      // Grace period: don't touch people clocked in < WARN_AFTER_MINS ago
-      if (minsClocked < WARN_AFTER_MINS) {
-        continue;
-      }
+      // Check warn state from BOTH in-memory map AND the DB column.
+      // The DB column persists across bot restarts — this is the fix for repeated pings.
+      const inMemory = warnedMechanics.get(tcId);
+      const warnedAt = inMemory?.warnedAt ?? (warnedAtDb ? new Date(warnedAtDb).getTime() : null);
+      const alreadyWarned = warnedAt !== null;
 
-      const alreadyWarned = warnedMechanics.get(tcId);
-
-      // ── If already warned ──────────────────────────────────────────────────
       if (alreadyWarned) {
-        const minsSinceWarn = (Date.now() - alreadyWarned.warnedAt) / 60000;
+        const minsSinceWarn = (Date.now() - warnedAt!) / 60000;
 
-        // Had activity after warning → cancel warning
+        // Had activity after warning → cancel warning, clear DB flag
         if (hadRecentActivity) {
           warnedMechanics.delete(tcId);
+          await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] });
           continue;
         }
 
@@ -81,10 +83,10 @@ async function checkIdleMechanics(client: Client) {
         continue;
       }
 
-      // ── Not yet warned ─────────────────────────────────────────────────────
-      if (hadRecentActivity) continue; // still active
+      // Not yet warned
+      if (hadRecentActivity) continue;
 
-      // Send warning
+      // Send warning and persist warn time to DB
       await sendIdleWarning(client, guild, tcId, mechanicId, chanId);
     }
   } catch (err) {
@@ -107,8 +109,8 @@ async function sendIdleWarning(
         .setStyle(ButtonStyle.Danger)
     );
 
-    // Send warning in mechanic's personal sales channel first
     let warned = false;
+
     if (guild) {
       const profile = await getProfile(mechanicId);
       if (profile?.sales_channel_id) {
@@ -121,6 +123,8 @@ async function sendIdleWarning(
                 `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if you don't respond.`,
               components: [row]
             });
+            // Persist warn state to DB so it survives bot restarts
+            await db.execute({ sql: "UPDATE timeclock SET warned_at = datetime('now') WHERE id = ?", args: [tcId] });
             warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
             warned = true;
           }
@@ -128,7 +132,6 @@ async function sendIdleWarning(
       }
     }
 
-    // Fallback: DM the mechanic if no sales channel
     if (!warned) {
       try {
         const user = await client.users.fetch(mechanicId);
@@ -140,6 +143,8 @@ async function sendIdleWarning(
             `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
           components: [row]
         });
+        // Persist warn state to DB so it survives bot restarts
+        await db.execute({ sql: "UPDATE timeclock SET warned_at = datetime('now') WHERE id = ?", args: [tcId] });
         warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: dm.id, mechanicId });
         warned = true;
       } catch { /* DMs closed */ }
@@ -159,7 +164,7 @@ export async function autoClockOut(
   const mins = (Date.now() - clockInMs) / 60000;
 
   await db.execute({
-    sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved' WHERE id = ?",
+    sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL WHERE id = ?",
     args: [mins, tcId]
   });
   await db.execute({
@@ -172,7 +177,6 @@ export async function autoClockOut(
   const clockNow = new Date().toISOString().replace("T", " ").slice(0, 19);
   const embed   = buildClockOutEmbed(name, clockInTime, clockNow, mins, 0);
 
-  // Edit original clock-in message
   if (guild && msgId && chanId) {
     try {
       const ch = await guild.channels.fetch(chanId).catch(() => null);
@@ -183,7 +187,6 @@ export async function autoClockOut(
     } catch { /* ignore */ }
   }
 
-  // Notify in timeclock channel
   if (guild) {
     try {
       const config    = await getGuildConfig(guild.id);
