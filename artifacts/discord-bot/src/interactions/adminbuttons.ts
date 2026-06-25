@@ -409,7 +409,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       if (guild.members.me) {
         permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
       }
-      for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id), ...splitRoleIds(config?.mechanic_role_id)]) {
+      // Only managers and above can see the timeclock log channel — mechanics clock in/out from their sales channel
+      for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
         permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
       }
       const ch = await guild.channels.create({
@@ -552,22 +553,18 @@ export async function postRafflePanel(channel: TextChannel) {
 
 export async function postTimeclockPanel(channel: TextChannel) {
   const panelEmbed = new EmbedBuilder()
-    .setTitle("⏰  TIME CLOCK")
+    .setTitle("⏰  SHIFT LOG  ·  MANAGEMENT ONLY")
     .setColor(0x0d0d0d)
     .setDescription(
-      "**Tokyo Drift Customs — Shift Tracker**\n\n" +
-      "Click **Clock In** when your shift starts.\n" +
-      "Click **Clock Out** when you're done — it'll log your total time and orders completed."
+      "**Tokyo Drift Customs — Timeclock Log**\n\n" +
+      "This channel is a **management-only log** of all crew clock-ins and clock-outs.\n\n" +
+      "Crew members clock in and out directly from their **personal sales channels**.\n" +
+      "Idle warnings are sent there too."
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
     .setTimestamp();
 
-  const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
-  );
-
-  const msg = await channel.send({ embeds: [panelEmbed], components: [clockRow] });
+  const msg = await channel.send({ embeds: [panelEmbed] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }

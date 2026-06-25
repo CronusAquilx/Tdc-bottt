@@ -252,7 +252,11 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder()
         .setCustomId("order:newpanel")
         .setLabel("📋  New Order")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("clockout:panel")
+        .setLabel("🔴  Clock Out")
+        .setStyle(ButtonStyle.Danger)
     );
 
     let postedTo = "";

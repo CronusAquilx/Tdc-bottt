@@ -10,8 +10,7 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
     .setColor(0xe5342b)
     .setDescription(
       `**Welcome, ${displayName}.**\n\n` +
-      "This is your personal sales channel. Click the button below to start a new order — " +
-      "services and commission are calculated automatically.\n\n" +
+      "This is your personal sales channel. Start a new order below, or clock in when your shift begins.\n\n" +
       `> 💵 Your commission rate: **${(commissionRate * 100).toFixed(0)}% of labour**`
     )
     .setFooter({ text: FOOTER })
@@ -21,7 +20,15 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
     new ButtonBuilder()
       .setCustomId("order:newpanel")
       .setLabel("📋  New Order")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("clockin:panel")
+      .setLabel("🟢  Clock In")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("clockout:panel")
+      .setLabel("🔴  Clock Out")
+      .setStyle(ButtonStyle.Danger)
   );
 
   const msg = await channel.send({ embeds: [panelEmbed], components: [row] });

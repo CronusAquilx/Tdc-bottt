@@ -107,41 +107,45 @@ async function sendIdleWarning(
         .setStyle(ButtonStyle.Danger)
     );
 
-    // Send as a DM to the mechanic privately
-    let dmSent = false;
-    try {
-      const user = await client.users.fetch(mechanicId);
-      const dm = await user.createDM();
-      const msg = await dm.send({
-        content:
-          `⚠️ **Tokyo Drift Customs — Idle Warning**\n\n` +
-          `You've been clocked in but idle for **${WARN_AFTER_MINS} minutes**.\n` +
-          `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
-        components: [row]
-      });
-      warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: dm.id, mechanicId });
-      dmSent = true;
-    } catch { /* DMs closed */ }
-
-    // Fallback: post in timeclock channel if DM fails
-    if (!dmSent && guild) {
-      const config = await getGuildConfig(guild.id);
-      const chanId = config?.timeclock_channel_id ?? tcChanId;
-      if (chanId) {
-        const ch = await guild.channels.fetch(chanId).catch(() => null);
-        if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({
-            content:
-              `⚠️ <@${mechanicId}> — You've been idle for **${WARN_AFTER_MINS} minutes**.\n` +
-              `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
-            components: [row]
-          });
-          warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
-        }
+    // Send warning in mechanic's personal sales channel first
+    let warned = false;
+    if (guild) {
+      const profile = await getProfile(mechanicId);
+      if (profile?.sales_channel_id) {
+        try {
+          const ch = await guild.channels.fetch(profile.sales_channel_id).catch(() => null);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({
+              content:
+                `⚠️ <@${mechanicId}> — you've been idle for **${WARN_AFTER_MINS} minutes**.\n` +
+                `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if you don't respond.`,
+              components: [row]
+            });
+            warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
+            warned = true;
+          }
+        } catch { /* ignore */ }
       }
     }
 
-    console.log(`[TDC] ⚠️ Sent idle warning to ${mechanicId} (DM: ${dmSent})`);
+    // Fallback: DM the mechanic if no sales channel
+    if (!warned) {
+      try {
+        const user = await client.users.fetch(mechanicId);
+        const dm = await user.createDM();
+        const msg = await dm.send({
+          content:
+            `⚠️ **Tokyo Drift Customs — Idle Warning**\n\n` +
+            `You've been clocked in but idle for **${WARN_AFTER_MINS} minutes**.\n` +
+            `You'll be **automatically clocked out** in **${AUTO_OUT_AFTER_WARN_MINS} minutes** if no action is taken.`,
+          components: [row]
+        });
+        warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: dm.id, mechanicId });
+        warned = true;
+      } catch { /* DMs closed */ }
+    }
+
+    console.log(`[TDC] ⚠️ Sent idle warning to ${mechanicId} (warned: ${warned})`);
   } catch (err) {
     console.error(`[TDC] Failed to send idle warning to ${mechanicId}:`, err);
   }
