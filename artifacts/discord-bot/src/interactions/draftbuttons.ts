@@ -89,6 +89,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── "Create New Order" button from pinned panel ────────────────────────────
   if (ns === "order" && action === "newpanel") {
+    // Acknowledge immediately — DB calls below can take >3s and cause "Interaction Failed"
+    await interaction.deferReply({ ephemeral: true });
+
     if (!(await requireRole(interaction, "mechanic"))) return true;
 
     const active = await db.execute({
@@ -101,11 +104,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In Now").setStyle(ButtonStyle.Success)
       );
-      await interaction.reply({ embeds: [promptEmbed], components: [clockRow], ephemeral: true });
+      await interaction.editReply({ embeds: [promptEmbed], components: [clockRow] });
       return true;
     }
-
-    await interaction.deferReply({ ephemeral: true });
 
     const newOrderId = randomUUID();
     const { nextOrderNumber } = await import("../db.js");
@@ -240,9 +241,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Edit Labour modal ───────────────────────────────────────────────────────
   if (action === "editlabour") {
-    const r = await db.execute({ sql: "SELECT labour FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return true;
-    const currentLabour = Number(r.rows[0][0] ?? 0);
+    // No DB call here — showModal IS the acknowledgment and must fire within 3s
     const modal = new ModalBuilder().setCustomId(`order:setlabour:${orderId}`).setTitle("Edit Labour Amount");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
@@ -250,7 +249,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
         .setLabel("Labour amount (e.g. 15000)")
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
-        .setValue(String(currentLabour))
         .setPlaceholder("Enter custom labour amount...")
     ));
     await interaction.showModal(modal);
@@ -259,8 +257,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Complete Order ──────────────────────────────────────────────────────────
   if (action === "submit") {
+    await interaction.deferUpdate(); // Acknowledge first — requireRole hits DB
     if (!(await requireRole(interaction, "mechanic"))) return true;
-    await interaction.deferUpdate();
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
