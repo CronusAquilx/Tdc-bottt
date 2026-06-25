@@ -209,6 +209,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_override_rate REAL DEFAULT 0.20");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN warned_at TEXT");
+  await safeAlter("ALTER TABLE orders ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
