@@ -204,6 +204,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN leaderboard_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN training_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN needs_training_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN payday_channel_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN in_city_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_override_rate REAL DEFAULT 0.20");
@@ -234,7 +235,8 @@ export async function getGuildConfig(guildId: string) {
                  orders_channel_id, jobs_channel_id, log_channel_id, archive_channel_id,
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
-                 leaderboard_channel_id, training_channel_id, needs_training_role_id
+                 leaderboard_channel_id, training_channel_id, needs_training_role_id,
+                 payday_channel_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
@@ -256,12 +258,13 @@ export async function getGuildConfig(guildId: string) {
     leaderboard_channel_id:  row[12] ? String(row[12]) : null,
     training_channel_id:     row[13] ? String(row[13]) : null,
     needs_training_role_id:  row[14] ? String(row[14]) : null,
+    payday_channel_id:       row[15] ? String(row[15]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
