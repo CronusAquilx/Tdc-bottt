@@ -119,6 +119,24 @@ export async function handleButton(interaction: ButtonInteraction) {
       const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
       );
+      // Also update the order embed's buttons so they reflect the real clock state
+      try {
+        const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`orderpay:start:${interaction.user.id}`)
+            .setLabel("💸  Pay")
+            .setStyle(ButtonStyle.Primary)
+        );
+        await interaction.message.edit({
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
+            ),
+            payRow
+          ]
+        });
+      } catch { /* message may be too old to edit */ }
       await interaction.followUp({
         content: `⚠️ **You're already clocked in!**${sinceTs} Clock out first.`,
         components: [clockOutBtn],
@@ -962,6 +980,106 @@ export async function handleButton(interaction: ButtonInteraction) {
       )
     );
     await interaction.showModal(modal);
+    return;
+  }
+
+  // ── Manager force clock-out button (from /timeclock who-is-in) ────────────
+  if (ns === "tcmgr" && action === "forceout") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const targetId = id;
+
+    const activeR = await db.execute({
+      sql: `SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1`,
+      args: [targetId]
+    });
+
+    if (!activeR.rows[0]) {
+      await interaction.editReply({ content: `❌ <@${targetId}> is not currently clocked in.` });
+      return;
+    }
+
+    const entry = rowToTimeclock(activeR.rows[0]);
+    const mins  = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const reason = `Clocked out by manager via panel`;
+
+    await db.execute({
+      sql: `UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, notes = ? WHERE id = ?`,
+      args: [mins, reason, entry.id]
+    });
+    await db.execute({
+      sql: `UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?`,
+      args: [mins / 60, targetId]
+    });
+
+    const { warnedMechanics, stayedIn } = await import("../lib/warnState.js");
+    warnedMechanics.delete(entry.id);
+    stayedIn.delete(targetId);
+
+    const profile = await getProfile(targetId);
+    const name    = profile?.display_name ?? `<@${targetId}>`;
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+
+    // Edit clock-in message in the timeclock channel if we have it
+    const { buildClockOutEmbed } = await import("../lib/embeds.js");
+    const clockEmbed = buildClockOutEmbed(name, entry.clock_in_time, new Date().toISOString().replace("T", " ").slice(0, 19), mins, 0);
+    if (entry.clock_message_id && entry.clock_channel_id && interaction.guild) {
+      try {
+        const ch = await interaction.guild.channels.fetch(entry.clock_channel_id).catch(() => null);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).messages.fetch(entry.clock_message_id).catch(() => null);
+          if (msg) await msg.edit({ embeds: [clockEmbed] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Rebuild the who-is-in panel with the remaining active mechanics (if any)
+    try {
+      const remainingR = await db.execute(
+        `SELECT id, mechanic_id, clock_in_time FROM timeclock WHERE clock_out_time IS NULL ORDER BY clock_in_time ASC`
+      );
+      if (!remainingR.rows.length) {
+        await interaction.message.edit({ content: "✅ Nobody is currently clocked in.", embeds: [], components: [] });
+      } else {
+        const entries = await Promise.all(remainingR.rows.map(async row => {
+          const mechanicId = String(row[1] ?? "");
+          const clockIn    = String(row[2] ?? "");
+          const p          = await getProfile(mechanicId);
+          const name       = p?.display_name ?? mechanicId;
+          const mins       = Math.round((Date.now() - new Date(clockIn).getTime()) / 60000);
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          const unixTs = Math.floor(new Date(clockIn).getTime() / 1000);
+          return { mechanicId, name, h, m, unixTs };
+        }));
+        const lines = entries.map(e =>
+          `• **${e.name}** — <@${e.mechanicId}> — ${e.h}h ${e.m}m  ·  <t:${e.unixTs}:R>`
+        );
+        const updatedEmbed = new EmbedBuilder()
+          .setTitle(`⏰  Currently Clocked In (${entries.length})`)
+          .setColor(COLORS.primary)
+          .setDescription(lines.join("\n"))
+          .setFooter({ text: "Tokyo Drift Customs  ·  Click a button below to clock someone out" })
+          .setTimestamp();
+        const updatedRows: ActionRowBuilder<ButtonBuilder>[] = [];
+        for (let i = 0; i < Math.min(entries.length, 5); i++) {
+          const e = entries[i];
+          if (i % 5 === 0) updatedRows.push(new ActionRowBuilder<ButtonBuilder>());
+          updatedRows[updatedRows.length - 1].addComponents(
+            new ButtonBuilder()
+              .setCustomId(`tcmgr:forceout:${e.mechanicId}`)
+              .setLabel(`🔴 Clock Out ${e.name.slice(0, 15)}`)
+              .setStyle(ButtonStyle.Danger)
+          );
+        }
+        await interaction.message.edit({ embeds: [updatedEmbed], components: updatedRows });
+      }
+    } catch { /* ignore */ }
+
+    await interaction.editReply({
+      content: `✅ **${name}** has been clocked out. Shift: **${h}h ${m}m**`
+    });
     return;
   }
 

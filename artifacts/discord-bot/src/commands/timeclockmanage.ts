@@ -2,7 +2,7 @@ import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
 } from "discord.js";
-import { db, getProfile, getGuildConfig, rowToTimeclock } from "../db.js";
+import { db, getProfile, getGuildConfig, rowToTimeclock, hasRole } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildTimeclockEmbed, buildClockOutEmbed, COLORS } from "../lib/embeds.js";
 import { formatDuration } from "../lib/utils.js";
@@ -30,6 +30,11 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(s =>
     s.setName("who-is-in")
       .setDescription("See everyone currently clocked in (manager+)")
+  )
+  .addSubcommand(s =>
+    s.setName("check-week")
+      .setDescription("Check total hours worked this week (including active session)")
+      .addUserOption(o => o.setName("mechanic").setDescription("Mechanic to check (manager+) — leave blank for yourself"))
   )
   .addSubcommand(s =>
     s.setName("reset-all")
@@ -126,7 +131,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    const lines = await Promise.all(activeR.rows.map(async row => {
+    const entries = await Promise.all(activeR.rows.map(async row => {
+      const tcId       = String(row[0] ?? "");
       const mechanicId = String(row[1] ?? "");
       const clockIn    = String(row[2] ?? "");
       const warnedAt   = row[3] ? String(row[3]) : null;
@@ -136,14 +142,86 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const h = Math.floor(mins / 60);
       const m = mins % 60;
       const warnTag    = warnedAt ? " ⚠️ *idle warning sent*" : "";
-      return `• **${name}** — <@${mechanicId}> — ${h}h ${m}m${warnTag}`;
+      const unixTs     = Math.floor(new Date(clockIn).getTime() / 1000);
+      return { tcId, mechanicId, name, mins, h, m, warnTag, unixTs };
     }));
+
+    const lines = entries.map(e =>
+      `• **${e.name}** — <@${e.mechanicId}> — ${e.h}h ${e.m}m  ·  <t:${e.unixTs}:R>${e.warnTag}`
+    );
 
     const embed = new EmbedBuilder()
       .setTitle(`⏰  Currently Clocked In (${activeR.rows.length})`)
       .setColor(COLORS.primary)
       .setDescription(lines.join("\n"))
-      .setFooter({ text: "Tokyo Drift Customs  ·  Use /timeclock force-out to clock someone out" })
+      .setFooter({ text: "Tokyo Drift Customs  ·  Click a button below to clock someone out" })
+      .setTimestamp();
+
+    // Show a clock-out button for each person (up to 5 per row, Discord limit)
+    const components: ActionRowBuilder<ButtonBuilder>[] = [];
+    for (let i = 0; i < Math.min(entries.length, 5); i++) {
+      const e = entries[i];
+      if (i % 5 === 0) components.push(new ActionRowBuilder<ButtonBuilder>());
+      components[components.length - 1].addComponents(
+        new ButtonBuilder()
+          .setCustomId(`tcmgr:forceout:${e.mechanicId}`)
+          .setLabel(`🔴 Clock Out ${e.name.slice(0, 15)}`)
+          .setStyle(ButtonStyle.Danger)
+      );
+    }
+
+    await interaction.editReply({ embeds: [embed], components });
+    return;
+  }
+
+  // ── check-week ───────────────────────────────────────────────────────────────
+  if (sub === "check-week") {
+    const target = interaction.options.getUser("mechanic");
+    // If checking someone else, require manager role (uses Discord role mapping too)
+    if (target && target.id !== interaction.user.id) {
+      if (!(await requireRole(interaction, "manager"))) return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const userId = target?.id ?? interaction.user.id;
+    const profile = await getProfile(userId);
+    if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found — have them use `/crew join` first." }); return; }
+
+    // Completed hours stored on profile
+    const completedHrs = profile.hours_worked_this_week;
+
+    // Active session (if clocked in right now)
+    const activeR = await db.execute({
+      sql: `SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1`,
+      args: [userId]
+    });
+    let activeMinutes = 0;
+    let clockedInSince: number | null = null;
+    if (activeR.rows[0]) {
+      const clockIn = String(activeR.rows[0][0]);
+      activeMinutes = (Date.now() - new Date(clockIn).getTime()) / 60000;
+      clockedInSince = Math.floor(new Date(clockIn).getTime() / 1000);
+    }
+
+    const totalHrs = completedHrs + activeMinutes / 60;
+    const totalH   = Math.floor(totalHrs);
+    const totalM   = Math.round((totalHrs - totalH) * 60);
+    const compH    = Math.floor(completedHrs);
+    const compM    = Math.round((completedHrs - compH) * 60);
+
+    const sessionLine = clockedInSince
+      ? `\n🟢 **Currently clocked in** · session started <t:${clockedInSince}:R> (${Math.floor(activeMinutes / 60)}h ${Math.round(activeMinutes % 60)}m live)`
+      : `\n⚫ Not currently clocked in`;
+
+    const embed = new EmbedBuilder()
+      .setTitle(`⏱️  Weekly Hours  ·  ${profile.display_name}`)
+      .setColor(COLORS.primary)
+      .addFields(
+        { name: "✅ Completed Sessions", value: `**${compH}h ${compM}m**`, inline: true },
+        { name: "📊 Total This Week",     value: `**${totalH}h ${totalM}m**`, inline: true }
+      )
+      .setDescription(sessionLine)
+      .setFooter({ text: "Tokyo Drift Customs  ·  Resets when a manager runs /clear all" })
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
