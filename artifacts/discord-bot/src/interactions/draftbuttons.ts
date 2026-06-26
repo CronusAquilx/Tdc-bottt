@@ -162,7 +162,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const commData = await getCommissionData(interaction.user.id, guildId, order.role_level);
+    const currentRoleBtC = await detectUserRoleLevel(interaction);
+    const commData = await getCommissionData(interaction.user.id, guildId, currentRoleBtC);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -171,7 +172,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(order.role_level)
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(currentRoleBtC)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
 
@@ -217,7 +218,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Max Performance — auto-add all top-tier performance items ──────────────
   if (action === "maxperf") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
@@ -250,8 +251,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     ]);
     const updated = rowToOrder(ur.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const commData = await getCommissionData(interaction.user.id, guildId, updated.role_level);
-    const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
+    const currentRole = await detectUserRoleLevel(interaction);
+    const commData = await getCommissionData(interaction.user.id, guildId, currentRole);
+    const crewCutInfo = ["trainer","manager","owner"].includes(currentRole)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -260,15 +262,17 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions((catalog.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    // Update the original order embed, then reply with an ephemeral breakdown
-    await interaction.message.edit({
+    // Update the original order embed
+    await interaction.editReply({
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
       ]
     });
-    await interaction.editReply({
+    // Show ephemeral breakdown of what was applied
+    await interaction.followUp({
+      ephemeral: true,
       content:
         "⚡ **Max Performance Package applied!**\n\n" +
         `> 🔧 Engine 4 — $70,000\n` +
@@ -283,7 +287,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Full Build — add entire preset package (~$225k) ─────────────────────────
   if (action === "fullpackage") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
@@ -319,8 +323,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     ]);
     const updated2 = rowToOrder(ur2.rows[0]);
     const guildId2 = interaction.guildId ?? "";
-    const commData2 = await getCommissionData(interaction.user.id, guildId2, updated2.role_level);
-    const crewCutInfo2 = ["trainer","manager","owner"].includes(updated2.role_level)
+    const currentRole2 = await detectUserRoleLevel(interaction);
+    const commData2 = await getCommissionData(interaction.user.id, guildId2, currentRole2);
+    const crewCutInfo2 = ["trainer","manager","owner"].includes(currentRole2)
       ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
       : undefined;
     const catalog2 = JSON.parse(catalogStr2 ?? "{}");
@@ -329,15 +334,17 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions((catalog2.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    // Update the original order embed, then reply with ephemeral breakdown
-    await interaction.message.edit({
+    // Update the original order embed
+    await interaction.editReply({
       embeds: [buildDraftEmbed(updated2, commData2.weekCommission, commData2.rate, crewCutInfo2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect2),
         ...mainDraftButtonRows(orderId)
       ]
     });
-    await interaction.editReply({
+    // Show ephemeral breakdown of what was applied
+    await interaction.followUp({
+      ephemeral: true,
       content:
         "📦 **Full Build Package applied! ($224,800)**\n\n" +
         "**⚡ Performance**\n" +
@@ -439,8 +446,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const completed = rowToOrder(ur.rows[0]);
     const guildId = interaction.guildId ?? "";
 
-    const commData = await getCommissionData(interaction.user.id, guildId, completed.role_level);
-    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(completed.role_level)
+    const currentRoleSubmit = await detectUserRoleLevel(interaction);
+    const commData = await getCommissionData(interaction.user.id, guildId, currentRoleSubmit);
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(currentRoleSubmit)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
 

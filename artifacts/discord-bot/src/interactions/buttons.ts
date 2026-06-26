@@ -259,7 +259,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     });
 
     if (!inserted.rowsAffected) {
-      // Already clocked in
+      // Already clocked in — show clock-out button so they can immediately clock out
       const activeRow = await db.execute({
         sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
         args: [interaction.user.id]
@@ -267,8 +267,12 @@ export async function handleButton(interaction: ButtonInteraction) {
       const sinceTs = activeRow.rows[0]
         ? `\n> Clocked in <t:${Math.floor(new Date(String(activeRow.rows[0][0])).getTime() / 1000)}:R>`
         : "";
+      const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴  Clock Out Now").setStyle(ButtonStyle.Danger)
+      );
       await interaction.editReply({
-        content: `⚠️ **You're already clocked in!**${sinceTs}\n\nClock out first before clocking in again.`,
+        content: `⚠️ **You're already clocked in!**${sinceTs}\n\nClick **Clock Out Now** if you want to end your shift.`,
+        components: [clockOutBtn]
       });
       return;
     }

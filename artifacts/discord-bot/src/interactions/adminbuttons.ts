@@ -29,13 +29,13 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── MODAL-FIRST HANDLERS (single role check, immediately show modal) ────────
   if (section === "setup" && action === "createraffle") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     await showRaffleTypeSelector(interaction);
     return true;
   }
 
   if (section === "setup" && action === "jobpost") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const modal = new ModalBuilder().setCustomId("admin:jobpost").setTitle("Post a Job Ad");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -255,7 +255,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Panel tab: Raffle ─────────────────────────────────────────────────────
   if (section === "panel" && action === "raffle") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
     const config = await getGuildConfig(guild.id);
     const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
@@ -279,7 +279,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Panel tab: Payroll ────────────────────────────────────────────────────
   if (section === "panel" && action === "payroll") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
     const embed = new EmbedBuilder()
       .setTitle("💸  PAYROLL")
@@ -300,7 +300,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Panel tab: Config ─────────────────────────────────────────────────────
   if (section === "panel" && action === "config") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
     const config = await getGuildConfig(guild.id);
     const roMany = (s: string | null | undefined) => {
@@ -347,7 +347,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: set role level ────────────────────────────────────────────────
   if (section === "roles" && action === "set") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const level = parts[3] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
     const levelLabels: Record<string, string> = {
       owner: "👑 Owner", manager: "🔧 Manager", trainer: "📚 Trainer",
@@ -371,7 +371,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: pick mechanic for commission ──────────────────────────────────
   if (section === "commission" && action === "pick") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const embed = new EmbedBuilder()
       .setTitle("💰  Set Individual Commission")
       .setColor(COLORS.primary)
@@ -390,7 +390,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: set manager override rate (pick manager) ─────────────────────
   if (section === "commission" && action === "pickoverride") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { UserSelectMenuBuilder: USM } = await import("discord.js");
     const embed = new EmbedBuilder()
       .setTitle("💼  Set Manager Override Rate")
@@ -413,7 +413,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: assign mechanic → manager (step 1: pick mechanic) ─────────────
   if (section === "assign" && action === "manager") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { UserSelectMenuBuilder: USM } = await import("discord.js");
     const embed = new EmbedBuilder()
       .setTitle("👤  Assign Manager")
@@ -434,7 +434,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: assign by role — show role picker ─────────────────────────────
   if (section === "assign" && action === "byrolepicker") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { RoleSelectMenuBuilder: RSM } = await import("discord.js");
     const embed = new EmbedBuilder()
       .setTitle("🔩  Assign by Role — Step 1")
@@ -453,7 +453,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Config: assign mechanic → manager (manual, step 1: pick mechanic) ──────
   if (section === "assign" && action === "pickmechanic" && parts[3] === "manual") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { UserSelectMenuBuilder: USM } = await import("discord.js");
     const embed = new EmbedBuilder()
       .setTitle("👤  Assign Manager — Step 1 of 2")
@@ -472,7 +472,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Crew rate: set trainer cut % ──────────────────────────────────────────
   if (section === "commission" && action === "settrainerrate") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
     const modal = new ModalBuilder().setCustomId("admin:commission:trainerrate").setTitle("📚 Set Trainer Crew Cut %");
     modal.addComponents(
@@ -491,7 +491,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Crew rate: set manager cut % ──────────────────────────────────────────
   if (section === "commission" && action === "setmanagerrate") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
     const modal = new ModalBuilder().setCustomId("admin:commission:managerrate").setTitle("👔 Set Manager Crew Cut %");
     modal.addComponents(
@@ -510,7 +510,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
   // ── Assign user as trainer (manual, step 1) ────────────────────────────────
   if (section === "setrole" && action === "assign") {
-    if (!(await requireRole(interaction, "owner"))) return true;
+    if (!(await requireRole(interaction, "manager"))) return true;
     const roleTarget = parts[3] as "trainer" | "manager";
     const roleLabel = roleTarget === "trainer" ? "📚 Add as Trainer" : "👔 Add as Manager";
     const { UserSelectMenuBuilder: USM } = await import("discord.js");

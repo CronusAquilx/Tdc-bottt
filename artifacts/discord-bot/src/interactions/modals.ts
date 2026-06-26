@@ -5,7 +5,7 @@ import {
   EmbedBuilder
 } from "discord.js";
 import { db, getProfile, getGuildConfig, getSetting, rowToOrder } from "../db.js";
-import { requireRole } from "../lib/roles.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildDraftEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
 
@@ -21,8 +21,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     ]);
     const order = rowToOrder(r.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const commData = await getCommissionData(interaction.user.id, guildId, order.role_level);
-    const crewCutInfo = ["trainer","manager","owner"].includes(order.role_level)
+    const currentRole = await detectUserRoleLevel(interaction);
+    const commData = await getCommissionData(interaction.user.id, guildId, currentRole);
+    const crewCutInfo = ["trainer","manager","owner"].includes(currentRole)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -71,7 +72,10 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     }
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
-    if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
+    if (!r.rows[0]) {
+      await interaction.editReply({ content: "❌ This order no longer exists — it may have been cancelled. Start a new order with the **📋 New Order** button." });
+      return;
+    }
     const order = rowToOrder(r.rows[0]);
 
     if (!order.items.length) {

@@ -34,7 +34,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // admin:assignbyrole:pickrole — pick role → fetch members with that role → show multi-select
     if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickrole") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       const guild = interaction.guild;
       if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
       await interaction.deferUpdate();
@@ -87,7 +87,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   if (interaction.isUserSelectMenu()) {
     // admin:setrole:pickmember:(trainer|manager) — assign user a role in the DB
     if (ns === "admin" && action === "setrole" && rest[0] === "pickmember") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       await interaction.deferUpdate();
       try {
         const roleTarget = rest[1] as "trainer" | "manager";
@@ -117,7 +117,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // admin:assignbyrole:pickmanager — after bulk mechanic selection, pick manager
     if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickmanager") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       await interaction.deferUpdate();
       const managerId = interaction.values[0];
       const managerProfile = await getProfile(managerId);
@@ -220,7 +220,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // ── Admin: commission pick mechanic ─────────────────────────────────────
     if (ns === "admin" && action === "commission" && rest[0] === "pickmechanic") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       const mechanicId = interaction.values[0];
       const profile = await getProfile(mechanicId);
       if (!profile) {
@@ -248,7 +248,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // ── Admin: pick manager to set override rate → open modal ────────────────
     if (ns === "admin" && action === "commission" && rest[0] === "pickmanageroverride") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       const managerId = interaction.values[0];
       const profile = await getProfile(managerId);
       if (!profile) {
@@ -275,7 +275,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // ── Admin: assign manager — step 1, picked mechanic → pick manager ────────
     if (ns === "admin" && action === "assign" && rest[0] === "pickmechanic") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       const mechanicId = interaction.values[0];
       const profile = await getProfile(mechanicId);
       if (!profile) {
@@ -299,7 +299,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     // ── Admin: assign manager — step 2, picked manager → save ────────────────
     if (ns === "admin" && action === "assign" && rest[0] === "pickmanager") {
-      if (!(await requireRole(interaction, "owner"))) return;
+      if (!(await requireRole(interaction, "manager"))) return;
       const mechanicId = rest[1];
       const managerId  = interaction.values[0];
       const [mechanicProfile, managerProfile] = await Promise.all([
@@ -438,7 +438,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Bulk assign by role: mechanic multi-select → pick manager ─────────────
   if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickmembers") {
-    if (!(await requireRole(interaction, "owner"))) return;
+    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const selectedIds = interaction.values;
     const pendingKey = `pending_bulk_assign_${interaction.user.id}`;
