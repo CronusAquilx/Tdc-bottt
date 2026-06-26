@@ -221,6 +221,13 @@ export async function initDb() {
   // Ensure the owner/manager has manager role in the DB so they always get manager cut + admin access
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
   await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'manager')", args: ["1363222342800511058"] });
+  // Seed their commission rate at 40% (upsert so display_name is preserved if profile exists)
+  await db.execute({
+    sql: `INSERT INTO profiles (discord_id, display_name, commission_rate)
+          VALUES (?, 'Manager', 0.4)
+          ON CONFLICT(discord_id) DO UPDATE SET commission_rate = 0.4`,
+    args: ["1363222342800511058"]
+  });
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });

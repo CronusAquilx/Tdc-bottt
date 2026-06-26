@@ -3,8 +3,17 @@ import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
 import { warnedMechanics } from "./warnState.js";
 
-const WARN_AFTER_MINS         = 45;
-const AUTO_OUT_AFTER_WARN_MINS = 10;
+const WARN_AFTER_MINS         = 120;
+const AUTO_OUT_AFTER_WARN_MINS = 30;
+
+/** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no timezone marker.
+ *  Node.js parses this as LOCAL time, not UTC — causing idle times to appear
+ *  wrong by the server's UTC offset. Append 'Z' to force UTC interpretation. */
+function parseUtc(s: string): number {
+  if (!s) return 0;
+  const norm = s.includes("T") || s.endsWith("Z") ? s : s.replace(" ", "T") + "Z";
+  return new Date(norm).getTime();
+}
 
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -33,8 +42,8 @@ async function checkIdleMechanics(client: Client) {
       const guildId     = row[7] ? String(row[7]) : null;
 
       // Use the later of clock-in or last stay-in as the effective idle start
-      const clockInMs   = new Date(clockInTime).getTime();
-      const stayedInMs  = stayedInDb ? new Date(stayedInDb).getTime() : 0;
+      const clockInMs   = parseUtc(clockInTime);
+      const stayedInMs  = stayedInDb ? parseUtc(stayedInDb) : 0;
       const idleStartMs = Math.max(clockInMs, stayedInMs);
       const minsIdle    = (Date.now() - idleStartMs) / 60000;
 
@@ -68,7 +77,7 @@ async function checkIdleMechanics(client: Client) {
       // Check warn state from BOTH in-memory map AND the DB column.
       // The DB column persists across bot restarts — this is the fix for repeated pings.
       const inMemory = warnedMechanics.get(tcId);
-      const warnedAt = inMemory?.warnedAt ?? (warnedAtDb ? new Date(warnedAtDb).getTime() : null);
+      const warnedAt = inMemory?.warnedAt ?? (warnedAtDb ? parseUtc(warnedAtDb) : null);
       const alreadyWarned = warnedAt !== null;
 
       if (alreadyWarned) {
@@ -166,7 +175,7 @@ export async function autoClockOut(
   client: Client, guild: any, tcId: string, mechanicId: string,
   clockInTime: string, msgId: string | null, chanId: string | null
 ) {
-  const clockInMs = new Date(clockInTime).getTime();
+  const clockInMs = parseUtc(clockInTime);
   const mins = (Date.now() - clockInMs) / 60000;
 
   await db.execute({

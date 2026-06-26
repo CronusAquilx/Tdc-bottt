@@ -10,6 +10,14 @@ import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 import { autoClockOut } from "../lib/autoClockOut.js";
 import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
 
+/** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
+ *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
+function parseUtc(s: string): number {
+  if (!s) return 0;
+  const norm = s.includes("T") || s.endsWith("Z") ? s : s.replace(" ", "T") + "Z";
+  return new Date(norm).getTime();
+}
+
 export async function handleButton(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const id = rest.join(":");
@@ -89,7 +97,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       entry.clock_channel_id ?? null
     );
 
-    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
     const hrs = Math.floor(mins / 60);
     const m = Math.round(mins % 60);
     await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
@@ -302,7 +310,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
 
     await db.execute({
       sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', stayed_in_at = NULL, warned_at = NULL WHERE id = ?",
@@ -417,7 +425,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       } catch { /* ignore */ }
     }
 
-    const unixTs = Math.floor(new Date(entry.clock_in_time).getTime() / 1000);
+    const unixTs = Math.floor(parseUtc(entry.clock_in_time) / 1000);
     await interaction.editReply({ content: `✅ **Clocked in!** <t:${unixTs}:t>` } as any);
     return;
   }
@@ -436,7 +444,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
 
     await db.execute({
       sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?",
@@ -1104,7 +1112,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(activeR.rows[0]);
-    const mins  = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins  = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
     const reason = `Clocked out by manager via panel`;
 
     await db.execute({

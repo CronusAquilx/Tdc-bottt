@@ -12,19 +12,24 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  if (!(await requireRole(interaction, "owner"))) return;
+  if (!(await requireRole(interaction, "manager"))) return;
   await interaction.deferReply({ ephemeral: true });
   const target = interaction.options.getUser("user", true);
   const rate = interaction.options.getNumber("rate", true);
   const [profile, caller] = await Promise.all([getProfile(target.id), getProfile(interaction.user.id)]);
-  if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
-  await db.execute({ sql: "UPDATE profiles SET commission_rate = ? WHERE discord_id = ?", args: [rate, target.id] });
+  // Upsert — works even if the target has no profile row yet
+  await db.execute({
+    sql: `INSERT INTO profiles (discord_id, display_name, commission_rate)
+          VALUES (?, ?, ?)
+          ON CONFLICT(discord_id) DO UPDATE SET commission_rate = excluded.commission_rate`,
+    args: [target.id, profile?.display_name ?? target.username, rate]
+  });
   const embed = new EmbedBuilder()
     .setTitle("💰 Commission Rate Updated")
     .setColor(COLORS.approved)
     .addFields(
-      { name: "Mechanic", value: profile.display_name, inline: true },
-      { name: "Old Rate", value: `${(profile.commission_rate * 100).toFixed(0)}%`, inline: true },
+      { name: "Mechanic", value: profile?.display_name ?? target.username, inline: true },
+      { name: "Old Rate", value: `${((profile?.commission_rate ?? 0.3) * 100).toFixed(0)}%`, inline: true },
       { name: "New Rate", value: `${(rate * 100).toFixed(0)}%`, inline: true },
       { name: "Updated By", value: caller?.display_name ?? interaction.user.username, inline: true }
     )
