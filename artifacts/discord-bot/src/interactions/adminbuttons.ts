@@ -88,6 +88,67 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
+  // ── Sales Channel: Create with no category (top-level) ────────────────────
+  // customId: admin:saleschan:create:{mechanicId}
+  if (section === "saleschan" && action === "create") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const mechanicId = parts[3];
+    if (!mechanicId) return false;
+
+    await interaction.deferUpdate();
+
+    const profile = await getProfile(mechanicId);
+    if (!profile) {
+      await interaction.editReply({ content: "❌ Mechanic not found. Add them via `/crew add` first.", embeds: [], components: [] });
+      return true;
+    }
+
+    const config = await getGuildConfig(guild.id);
+    const channelName = `sales-${profile.display_name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 30)}`;
+
+    const permOverwrites: any[] = [
+      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+    ];
+    if (guild.members.me) {
+      permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
+    }
+    permOverwrites.push({ id: mechanicId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
+      permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    }
+    // Individual staff from DB
+    try {
+      const staffRows = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner','manager','trainer')");
+      for (const row of staffRows.rows) {
+        const uid = String(row[0]);
+        if (!uid || uid === mechanicId) continue;
+        try { await guild.members.fetch(uid); permOverwrites.push({ id: uid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }); } catch { /* not in server */ }
+      }
+    } catch { /* ignore */ }
+
+    let channel: TextChannel;
+    try {
+      channel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        topic: `📍 Personal sales channel — ${profile.display_name}`,
+        permissionOverwrites: permOverwrites
+      }) as TextChannel;
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Failed to create channel: ${err.message}`, embeds: [], components: [] });
+      return true;
+    }
+
+    await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
+    await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+
+    await interaction.editReply({
+      content: `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`,
+      embeds: [], components: []
+    });
+    return true;
+  }
+
   if (section === "timeclock" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
     const modal = new ModalBuilder().setCustomId("admin:timeclock:existing").setTitle("Attach Existing Timeclock Channel");

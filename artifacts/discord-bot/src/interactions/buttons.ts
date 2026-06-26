@@ -100,29 +100,32 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "clockin" && action === "order") {
     await interaction.deferUpdate();
 
-    // Duplicate check
-    const active = await db.execute({
-      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
-      args: [interaction.user.id]
+    // Atomic insert — prevents race condition where two clicks both pass a SELECT check
+    const tcId = randomUUID();
+    const inserted = await db.execute({
+      sql: `INSERT INTO timeclock (id, mechanic_id, clock_in_time)
+            SELECT ?, ?, datetime('now')
+            WHERE NOT EXISTS (SELECT 1 FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL)`,
+      args: [tcId, interaction.user.id, interaction.user.id]
     });
-    if (active.rows[0]) {
+    if (!inserted.rowsAffected) {
+      const activeRow = await db.execute({
+        sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+        args: [interaction.user.id]
+      });
+      const sinceTs = activeRow.rows[0]
+        ? ` (clocked in <t:${Math.floor(new Date(String(activeRow.rows[0][0])).getTime() / 1000)}:R>)`
+        : "";
       const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
       );
       await interaction.followUp({
-        content: "⚠️ You're already clocked in! Clock out first before clocking in again.",
+        content: `⚠️ **You're already clocked in!**${sinceTs} Clock out first.`,
         components: [clockOutBtn],
         ephemeral: true
       });
       return;
     }
-
-    // Clock in
-    const tcId = randomUUID();
-    await db.execute({
-      sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))",
-      args: [tcId, interaction.user.id]
-    });
 
     // Post to timeclock channel
     const profile = await getProfile(interaction.user.id);
@@ -245,26 +248,33 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "clockin" && action === "panel") {
     await interaction.deferReply({ ephemeral: true });
 
-    const active = await db.execute({
-      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
-      args: [interaction.user.id]
+    // Atomic insert — only inserts if no active shift exists (prevents race condition)
+    const tcId = randomUUID();
+    const inserted = await db.execute({
+      sql: `INSERT INTO timeclock (id, mechanic_id, clock_in_time)
+            SELECT ?, ?, datetime('now')
+            WHERE NOT EXISTS (SELECT 1 FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL)`,
+      args: [tcId, interaction.user.id, interaction.user.id]
     });
-    if (active.rows[0]) {
+
+    if (!inserted.rowsAffected) {
+      // Already clocked in
+      const activeRow = await db.execute({
+        sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+        args: [interaction.user.id]
+      });
+      const sinceTs = activeRow.rows[0]
+        ? `\n> Clocked in <t:${Math.floor(new Date(String(activeRow.rows[0][0])).getTime() / 1000)}:R>`
+        : "";
       const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
       );
       await interaction.editReply({
-        content: "⚠️ You're already clocked in! You can't clock in twice — clock out first.",
+        content: `⚠️ **You're already clocked in!**${sinceTs}\n\nClock out first before clocking in again.`,
         components: [clockOutBtn]
       });
       return;
     }
-
-    const tcId = randomUUID();
-    await db.execute({
-      sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))",
-      args: [tcId, interaction.user.id]
-    });
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
@@ -426,27 +436,32 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.deferUpdate();
     const guildId = interaction.guildId ?? "";
     const { setSetting } = await import("../db.js");
+    // Archive complete orders
     const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE status = 'complete' AND (guild_id = ? OR guild_id = '')",
+      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
       args: [guildId]
     });
-    await db.execute({
-      sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id IN (SELECT DISTINCT mechanic_id FROM orders WHERE guild_id = ? OR guild_id = '')",
+    // Delete draft orders entirely
+    const drafts = await db.execute({
+      sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
       args: [guildId]
     });
+    // Reset ALL profiles hours (not just those with orders)
+    await db.execute("UPDATE profiles SET hours_worked_this_week = 0");
     await setSetting("order_number_reset_ts", new Date().toISOString());
     const count = Number(r.rowsAffected ?? 0);
+    const draftCount = Number(drafts.rowsAffected ?? 0);
     const embed = new EmbedBuilder()
       .setTitle("🗑️  WEEK CLEARED — ALL CREW")
       .setColor(COLORS.warning)
       .setDescription(
-        `Cleared **${count} order(s)** for all mechanics.\n\n` +
-        "**Current stats:**\n" +
+        `Cleared **${count}** completed order(s) and **${draftCount}** draft(s) for all mechanics.\n\n` +
+        "**Stats reset:**\n" +
         "• Orders ➜ **0**\n" +
         "• Revenue ➜ **$0**\n" +
         "• Commissions ➜ **$0**\n" +
         "• Hours ➜ **0**\n\n" +
-        "*Orders are archived, not deleted — use `/payall` to pay and clear simultaneously.*"
+        "*Completed orders are archived. Drafts were deleted. Use `/payall` to pay before clearing next time.*"
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();
@@ -461,18 +476,26 @@ export async function handleButton(interaction: ButtonInteraction) {
     const mechId = rest.slice(1).join(":");
     const guildId = interaction.guildId ?? "";
     const profile = await getProfile(mechId);
+    // Archive complete orders
     const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status = 'complete' AND (guild_id = ? OR guild_id = '')",
+      sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
       args: [mechId, guildId]
     });
+    // Delete draft orders
+    const drafts = await db.execute({
+      sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
+      args: [mechId, guildId]
+    });
+    // Reset hours
     await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id = ?", args: [mechId] });
     const count = Number(r.rowsAffected ?? 0);
+    const draftCount = Number(drafts.rowsAffected ?? 0);
     const embed = new EmbedBuilder()
       .setTitle("🗑️  PLAYER STATS CLEARED")
       .setColor(COLORS.warning)
       .setDescription(
-        `Cleared **${count} order(s)** for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
-        "**Current stats:**\n" +
+        `Cleared **${count}** order(s) and **${draftCount}** draft(s) for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
+        "**Stats reset:**\n" +
         "• Orders ➜ **0**\n" +
         "• Revenue ➜ **$0**\n" +
         "• Commission ➜ **$0**\n" +

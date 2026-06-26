@@ -227,13 +227,27 @@ export async function initDb() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+// ── In-memory setting cache for hot-path reads (catalog, commission_default) ──
+const _settingCache = new Map<string, { value: string; ts: number }>();
+const SETTING_TTL = 60_000; // 60 seconds
+
 export async function getSetting(key: string): Promise<string | null> {
+  const cached = _settingCache.get(key);
+  if (cached && Date.now() - cached.ts < SETTING_TTL) return cached.value;
   const r = await db.execute({ sql: "SELECT value FROM app_settings WHERE key = ?", args: [key] });
-  return r.rows[0] ? String(r.rows[0][0]) : null;
+  const value = r.rows[0] ? String(r.rows[0][0]) : null;
+  if (value !== null) _settingCache.set(key, { value, ts: Date.now() });
+  return value;
+}
+
+export function invalidateSettingCache(key?: string) {
+  if (key) _settingCache.delete(key);
+  else _settingCache.clear();
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: [key, value] });
+  invalidateSettingCache(key);
 }
 
 export async function getGuildConfig(guildId: string) {

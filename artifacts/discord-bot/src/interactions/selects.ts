@@ -317,6 +317,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Channel select menus ───────────────────────────────────────────────────
   if (interaction.isChannelSelectMenu()) {
+    // ── Attach existing channel as sales channel ──────────────────────────────
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickchan") {
       if (!(await requireRole(interaction, "manager"))) return;
       const mechanicId = rest[1];
@@ -356,6 +357,72 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         embeds: [], components: []
       });
     }
+
+    // ── Category picker for new sales channel ─────────────────────────────────
+    // customId: admin:saleschan:pickcat:{mechanicId}
+    if (ns === "admin" && action === "saleschan" && rest[0] === "pickcat") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const mechanicId = rest[1];
+      const categoryId = interaction.values[0];
+      const guild = interaction.guild!;
+
+      await interaction.deferUpdate();
+
+      const profile = await getProfile(mechanicId);
+      if (!profile) {
+        await interaction.editReply({ content: "❌ Mechanic not found. Add them via `/crew add` first.", components: [], embeds: [] });
+        return;
+      }
+
+      // Create the sales channel inside the selected category
+      const { PermissionFlagsBits, ChannelType } = await import("discord.js");
+      const { splitRoleIds: srid, getGuildConfig: ggc } = await import("../db.js");
+      const config = await ggc(guild.id);
+      const channelName = `sales-${profile.display_name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 30)}`;
+
+      const permOverwrites: any[] = [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      ];
+      if (guild.members.me) {
+        permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
+      }
+      permOverwrites.push({ id: mechanicId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      for (const rid of [...srid(config?.owner_role_id), ...srid(config?.manager_role_id), ...srid(config?.trainer_role_id)]) {
+        permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      }
+      // Individual staff from DB
+      try {
+        const staffRows = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner','manager','trainer')");
+        for (const row of staffRows.rows) {
+          const uid = String(row[0]);
+          if (!uid || uid === mechanicId) continue;
+          try { await guild.members.fetch(uid); permOverwrites.push({ id: uid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }); } catch { /* not in server */ }
+        }
+      } catch { /* ignore */ }
+
+      let channel: TextChannel;
+      try {
+        channel = await guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          topic: `📍 Personal sales channel — ${profile.display_name}`,
+          permissionOverwrites: permOverwrites
+        }) as TextChannel;
+      } catch (err: any) {
+        await interaction.editReply({ content: `❌ Failed to create channel: ${err.message}`, embeds: [], components: [] });
+        return;
+      }
+
+      await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
+      await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+
+      await interaction.editReply({
+        content: `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nThe order panel has been pinned.`,
+        embeds: [], components: []
+      });
+    }
+
     return;
   }
 

@@ -350,34 +350,52 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
       });
     }
 
+    // ── Build owner/manager mention lists (roles + individual DB users) ──────────
+    const ownerRoleMentions = [
+      ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
+    ];
+    const managerRoleMentions = [
+      ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`),
+    ];
+    // Also ping individual owners/managers from DB (in case Discord roles aren't configured)
+    const ownerUserMentions: string[] = [];
+    const managerUserMentions: string[] = [];
+    try {
+      const staffRows = await db.execute("SELECT discord_id, role FROM user_roles WHERE role IN ('owner','manager')");
+      for (const row of staffRows.rows) {
+        const uid = String(row[0]);
+        const role = String(row[1]);
+        if (!uid || uid === interaction.user.id) continue;
+        if (role === "owner") ownerUserMentions.push(`<@${uid}>`);
+        else if (role === "manager") managerUserMentions.push(`<@${uid}>`);
+      }
+    } catch { /* ignore */ }
+
+    const allOwnerMentions = [...new Set([...ownerRoleMentions, ...ownerUserMentions])];
+    const allManagerMentions = [...new Set([...managerRoleMentions, ...managerUserMentions])];
+    const allStaffMentions = [...new Set([...allOwnerMentions, ...allManagerMentions])];
+
     // ── Ping owners if recruit is missing city job ────────────────────────────
     if (!hasCityJob) {
-      const ownerMentions = [
-        ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
-        ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`)
-      ];
       const missingThings = [
         ...(!hasCityJob ? ["city job / in-city ID"] : []),
         ...(!hasSalesChan ? ["sales channel"] : [])
       ];
-      if (ownerMentions.length) {
+      const pingTargets = allOwnerMentions.length ? allOwnerMentions : allStaffMentions;
+      if (pingTargets.length) {
         await trainingChannel.send({
           content:
-            `⚠️ **Heads up!** ${ownerMentions.join(" ")}\n\n` +
+            `⚠️ **Heads up!** ${pingTargets.join(" ")}\n\n` +
             `<@${interaction.user.id}> (**${yourName}**) needs: **${missingThings.join(" and ")}** before training can proceed.\n\n` +
             (!hasSalesChan ? `Use the **➕ Create Sales Channel** button above to create their channel right now.\n\n` : "") +
             `Please sort this before or during the session.`
         });
       }
     } else if (!hasSalesChan) {
-      const managerMentions = [
-        ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
-        ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`)
-      ];
-      if (managerMentions.length) {
+      if (allStaffMentions.length) {
         await trainingChannel.send({
           content:
-            `⚠️ **Heads up!** ${managerMentions.join(" ")}\n\n` +
+            `⚠️ **Heads up!** ${allStaffMentions.join(" ")}\n\n` +
             `<@${interaction.user.id}> (**${yourName}**) still needs a **sales channel**.\n` +
             `Use the **➕ Create Sales Channel** button above to create it now.`
         });
@@ -385,21 +403,31 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     }
 
     // ── Trainer ping in the ticket ─────────────────────────────────────────────
-    const trainerMentions = splitRoleIds(config?.trainer_role_id).map(r => `<@&${r}>`);
-    if (trainerMentions.length) {
+    const trainerRoleMentions = splitRoleIds(config?.trainer_role_id).map(r => `<@&${r}>`);
+    const trainerUserMentions: string[] = [];
+    try {
+      const trainerRows = await db.execute("SELECT discord_id FROM user_roles WHERE role = 'trainer'");
+      for (const row of trainerRows.rows) {
+        const uid = String(row[0]);
+        if (uid && uid !== interaction.user.id) trainerUserMentions.push(`<@${uid}>`);
+      }
+    } catch { /* ignore */ }
+    const allTrainerMentions = [...new Set([...trainerRoleMentions, ...trainerUserMentions])];
+
+    if (allTrainerMentions.length) {
       await trainingChannel.send({
-        content: `${trainerMentions.join(" ")} — a new recruit is ready for training! Check the details above. 📚`
+        content: `${allTrainerMentions.join(" ")} — a new recruit is ready for training! Check the details above. 📚`
       });
     }
 
     // ── Also ping trainers in the general training channel ────────────────────
-    if (config?.training_channel_id && trainerMentions.length) {
+    if (config?.training_channel_id && allTrainerMentions.length) {
       try {
         const trainingCh = await guild.channels.fetch(config.training_channel_id);
         if (trainingCh?.isTextBased()) {
           await (trainingCh as any).send({
             content:
-              `${trainerMentions.join(" ")} 📚 **New training request!**\n` +
+              `${allTrainerMentions.join(" ")} 📚 **New training request!**\n` +
               `**${yourName}** (<@${interaction.user.id}>) has opened a training ticket → <#${trainingChannel.id}>`
           });
         }
