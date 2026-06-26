@@ -162,55 +162,31 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
           return;
         }
 
-        const config = await getGuildConfig(guild.id);
-        const channelName = `sales-${profile.display_name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`;
+        // Ask which category to put the channel in
+        const embed = new EmbedBuilder()
+          .setTitle("📁  Choose a Category (optional)")
+          .setColor(COLORS.primary)
+          .setDescription(
+            `Creating sales channel for **${profile.display_name}**.\n\n` +
+            `Pick a **channel category** to place it in, or click **No Category** to create it at the top level.`
+          )
+          .setFooter({ text: FOOTER });
 
-        const permOverwrites: any[] = [
-          { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        ];
-        if (guild.members.me) {
-          permOverwrites.push({
-            id: guild.members.me.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages]
-          });
-        }
-        permOverwrites.push({
-          id: mechanicId,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
-        });
-        for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
-          permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-        }
-        const managersR = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner', 'manager', 'trainer')");
-        for (const row of managersR.rows) {
-          const mid = String(row[0]);
-          if (!mid || mid === mechanicId) continue;
-          try {
-            await guild.members.fetch(mid);
-            permOverwrites.push({ id: mid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-          } catch { /* not in server */ }
-        }
+        const catRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+          new ChannelSelectMenuBuilder()
+            .setCustomId(`admin:saleschan:pickcat:${mechanicId}`)
+            .setChannelTypes(ChannelType.GuildCategory)
+            .setPlaceholder("Select a category folder...")
+            .setMinValues(1).setMaxValues(1)
+        );
+        const skipRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`admin:saleschan:create:${mechanicId}`)
+            .setLabel("⬆️ No Category — Create Now")
+            .setStyle(ButtonStyle.Primary)
+        );
 
-        let channel: TextChannel;
-        try {
-          channel = await guild.channels.create({
-            name: channelName,
-            type: ChannelType.GuildText,
-            topic: `📍 Personal sales channel — ${profile.display_name}`,
-            permissionOverwrites: permOverwrites
-          }) as TextChannel;
-        } catch (err: any) {
-          await interaction.editReply({ content: `❌ Failed to create channel: ${err.message}`, components: [] });
-          return;
-        }
-
-        await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-        await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
-
-        await interaction.editReply({
-          content: `✅ Sales channel created for <@${mechanicId}> (**${profile.display_name}**): <#${channel.id}>\nOrder panel pinned and ready.`,
-          embeds: [], components: []
-        });
+        await interaction.editReply({ embeds: [embed], components: [catRow, skipRow] });
 
       } else {
         const profile = await getProfile(mechanicId);

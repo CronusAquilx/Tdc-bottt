@@ -106,7 +106,14 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [interaction.user.id]
     });
     if (active.rows[0]) {
-      await interaction.followUp({ content: "⚠️ You're already clocked in!", ephemeral: true });
+      const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
+      );
+      await interaction.followUp({
+        content: "⚠️ You're already clocked in! Clock out first before clocking in again.",
+        components: [clockOutBtn],
+        ephemeral: true
+      });
       return;
     }
 
@@ -243,7 +250,13 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [interaction.user.id]
     });
     if (active.rows[0]) {
-      await interaction.editReply({ content: `⚠️ <@${interaction.user.id}> You're already clocked in! Hit **Clock Out** first.` });
+      const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
+      );
+      await interaction.editReply({
+        content: "⚠️ You're already clocked in! You can't clock in twice — clock out first.",
+        components: [clockOutBtn]
+      });
       return;
     }
 

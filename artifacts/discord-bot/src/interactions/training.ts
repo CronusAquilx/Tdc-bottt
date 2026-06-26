@@ -265,6 +265,18 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     ]) {
       permOverwrites.push({ id: rid, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
+    // Also add individual trainer/manager/owner users from user_roles DB
+    try {
+      const staffRows = await db.execute("SELECT discord_id FROM user_roles WHERE role IN ('owner','manager','trainer')");
+      for (const row of staffRows.rows) {
+        const uid = String(row[0]);
+        if (!uid || uid === interaction.user.id) continue;
+        try {
+          await guild.members.fetch(uid);
+          permOverwrites.push({ id: uid, type: OverwriteType.Member, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+        } catch { /* not in server */ }
+      }
+    } catch { /* ignore */ }
     let trainingChannel: TextChannel;
     try {
       trainingChannel = await guild.channels.create({
@@ -338,30 +350,60 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
       });
     }
 
-    // ── Ping owners if missing items ──────────────────────────────────────────
-    const missingItems: string[] = [];
-    if (!hasCityJob)   missingItems.push("city job");
-    if (!hasSalesChan) missingItems.push("sales channel");
-
-    if (missingItems.length > 0) {
-      const ownerMentions: string[] = [];
-      if (config?.owner_role_id)   ownerMentions.push(`<@&${config.owner_role_id}>`);
-      if (config?.manager_role_id) ownerMentions.push(`<@&${config.manager_role_id}>`);
-
-      const needsMsg =
-        `⚠️ **Heads up!** ${ownerMentions.join(" ")}\n\n` +
-        `<@${interaction.user.id}> (**${yourName}**) needs to be set up with: **${missingItems.join(" and ")}** before training can proceed.\n\n` +
-        (hasSalesChan ? "" : `Use the **➕ Create Sales Channel** button above to create their channel right now.\n\n`) +
-        `Please get that sorted before or during this session.`;
-
-      await trainingChannel.send({ content: needsMsg });
+    // ── Ping owners if recruit is missing city job ────────────────────────────
+    if (!hasCityJob) {
+      const ownerMentions = [
+        ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
+        ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`)
+      ];
+      const missingThings = [
+        ...(!hasCityJob ? ["city job / in-city ID"] : []),
+        ...(!hasSalesChan ? ["sales channel"] : [])
+      ];
+      if (ownerMentions.length) {
+        await trainingChannel.send({
+          content:
+            `⚠️ **Heads up!** ${ownerMentions.join(" ")}\n\n` +
+            `<@${interaction.user.id}> (**${yourName}**) needs: **${missingThings.join(" and ")}** before training can proceed.\n\n` +
+            (!hasSalesChan ? `Use the **➕ Create Sales Channel** button above to create their channel right now.\n\n` : "") +
+            `Please sort this before or during the session.`
+        });
+      }
+    } else if (!hasSalesChan) {
+      const managerMentions = [
+        ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
+        ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`)
+      ];
+      if (managerMentions.length) {
+        await trainingChannel.send({
+          content:
+            `⚠️ **Heads up!** ${managerMentions.join(" ")}\n\n` +
+            `<@${interaction.user.id}> (**${yourName}**) still needs a **sales channel**.\n` +
+            `Use the **➕ Create Sales Channel** button above to create it now.`
+        });
+      }
     }
 
-    // ── Trainer ping ──────────────────────────────────────────────────────────
-    if (config?.trainer_role_id) {
+    // ── Trainer ping in the ticket ─────────────────────────────────────────────
+    const trainerMentions = splitRoleIds(config?.trainer_role_id).map(r => `<@&${r}>`);
+    if (trainerMentions.length) {
       await trainingChannel.send({
-        content: `<@&${config.trainer_role_id}> — a new recruit is ready for training! Check the details above. 📚`
+        content: `${trainerMentions.join(" ")} — a new recruit is ready for training! Check the details above. 📚`
       });
+    }
+
+    // ── Also ping trainers in the general training channel ────────────────────
+    if (config?.training_channel_id && trainerMentions.length) {
+      try {
+        const trainingCh = await guild.channels.fetch(config.training_channel_id);
+        if (trainingCh?.isTextBased()) {
+          await (trainingCh as any).send({
+            content:
+              `${trainerMentions.join(" ")} 📚 **New training request!**\n` +
+              `**${yourName}** (<@${interaction.user.id}>) has opened a training ticket → <#${trainingChannel.id}>`
+          });
+        }
+      } catch { /* ignore if channel missing */ }
     }
 
     await interaction.editReply({
