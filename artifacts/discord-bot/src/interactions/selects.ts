@@ -419,13 +419,17 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(remaining), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    const [updatedR, profileR] = await Promise.all([
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
+      getProfile(interaction.user.id)
+    ]);
     const updated = rowToOrder(updatedR.rows[0]);
-    const allTimeTotalR = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
+    const rate = profileR?.commission_rate ?? 0.3;
+    const weekCommR = await db.execute({
+      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
-    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
+    const weekComm = Number(weekCommR.rows[0]?.[0] ?? 0) * rate;
 
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -437,7 +441,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     await interaction.editReply({
       content: `✅ Removed ${indicesToRemove.size} item(s) from the order.`,
-      embeds: [buildDraftEmbed(updated, allTimeTotal)],
+      embeds: [buildDraftEmbed(updated, weekComm, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
@@ -456,14 +460,18 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catItems = items.filter(i => i.category === category);
     if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, ephemeral: true }); return; }
 
-    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
+    const [r, profileR] = await Promise.all([
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] }),
+      getProfile(interaction.user.id)
+    ]);
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
-    const allTimeTotalR = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
+    const rate = profileR?.commission_rate ?? 0.3;
+    const weekCommR = await db.execute({
+      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
-    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
+    const weekComm = Number(weekCommR.rows[0]?.[0] ?? 0) * rate;
 
     // Mark already-added items so user can see what's on the order
     const existingLabels = new Set((order.items ?? []).map((i: any) => `${i.category}::${i.label}`));
@@ -481,7 +489,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
           .setDescription(`Parts: ${money(i.cost)} | Labour: ${money(i.labour)} | Total: ${money(i.price)}${alreadyAdded ? " · already added" : ""}`);
       }));
 
-    const embed = buildDraftEmbed(order, allTimeTotal);
+    const embed = buildDraftEmbed(order, weekComm, rate);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
 
     await interaction.editReply({
@@ -535,12 +543,17 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(merged), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const updated = rowToOrder((await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })).rows[0]);
-    const allTimeTotalR2 = await db.execute({
-      sql: "SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
+    const [updatedR2, profileR2] = await Promise.all([
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
+      getProfile(interaction.user.id)
+    ]);
+    const updated = rowToOrder(updatedR2.rows[0]);
+    const rate2 = profileR2?.commission_rate ?? 0.3;
+    const weekCommR2 = await db.execute({
+      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
       args: [interaction.user.id]
     });
-    const allTimeTotal2 = Number(allTimeTotalR2.rows[0]?.[0] ?? 0);
+    const weekComm2 = Number(weekCommR2.rows[0]?.[0] ?? 0) * rate2;
 
     const categories: string[] = catalog.categories ?? [];
     const catSelect = new StringSelectMenuBuilder()
@@ -551,7 +564,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const addedNames = (newItems as any[]).map(i => i.label).join(", ");
     await interaction.editReply({
       content: `✅ Added: **${addedNames}**`,
-      embeds: [buildDraftEmbed(updated, allTimeTotal2)],
+      embeds: [buildDraftEmbed(updated, weekComm2, rate2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)

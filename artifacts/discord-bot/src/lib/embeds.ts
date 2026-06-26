@@ -126,7 +126,8 @@ interface OrderItem {
 
 export function buildDraftEmbed(
   order: Order,
-  allTimeTotal = 0
+  weekCommission = 0,
+  commissionRate = 0.3
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -134,7 +135,10 @@ export function buildDraftEmbed(
     ? items.map(i => `> **${i.label}** · ${money(i.price)}`).join("\n")
     : "*No services yet — pick a category below*";
 
-  // Build a clean summary line
+  // Preview commission for this current draft order
+  const thisOrderCommission = Math.round(order.labour * commissionRate);
+  const pct = (commissionRate * 100).toFixed(0);
+
   const summaryParts: string[] = [];
   if (order.parts_cost > 0) summaryParts.push(`Parts: ${money(order.parts_cost)}`);
   if (order.labour > 0)     summaryParts.push(`Labour: ${money(order.labour)}`);
@@ -145,15 +149,22 @@ export function buildDraftEmbed(
     {
       name: "💰 Order Total",
       value: `**${money(order.total)}**${summaryLine}`,
-      inline: items.length > 0
+      inline: true
+    },
+    {
+      name: "💵 Your Cut (This Order)",
+      value: order.labour > 0
+        ? `**${money(thisOrderCommission)}**\n-# ${pct}% of ${money(order.labour)} labour`
+        : `*—*\n-# Set labour above`,
+      inline: true
     },
   ];
 
-  if (allTimeTotal > 0) {
+  if (weekCommission > 0) {
     fields.push({
-      name: "📊 Running Total (Pay Period)",
-      value: `**${money(allTimeTotal)}**\n-# All completed orders since last pay`,
-      inline: items.length > 0
+      name: "📊 Running Commission (Pay Period)",
+      value: `**${money(Math.round(weekCommission))}**\n-# All completed orders since last pay`,
+      inline: false
     });
   }
 

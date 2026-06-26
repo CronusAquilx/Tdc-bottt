@@ -35,24 +35,30 @@ async function getWeekCommission(mechanicId: string, rate: number): Promise<numb
   return Number(r.rows[0]?.[0] ?? 0) * rate;
 }
 
-/** Manager's crew cut this week = their override_rate × total crew commission pool since reset */
+/**
+ * Manager's crew cut this pay period.
+ * Rule: manager gets override_rate% (default 20%) of the raw LABOUR from all crew orders.
+ * e.g. mechanic order has $10k labour → manager gets $2k (20%), mechanic gets $3k (30%)
+ *      total 50% of labour goes to people, 50% to the business.
+ */
 async function getManagerCutThisWeek(managerId: string): Promise<number> {
   const profileR = await db.execute({
     sql: "SELECT manager_override_rate FROM profiles WHERE discord_id = ?",
     args: [managerId]
   });
-  const overrideRate = Number(profileR.rows[0]?.[0] ?? 0);
+  const overrideRate = Number(profileR.rows[0]?.[0] ?? 0.20);
   if (!overrideRate) return 0;
 
-  // Total crew commission pool since reset
+  // SUM of ALL crew members' labour since last reset (manager gets % of raw labour, not % of commission)
   const poolR = await db.execute({
-    sql: `SELECT o.labour, p.commission_rate
-          FROM orders o JOIN profiles p ON o.mechanic_id = p.discord_id
-          WHERE o.${DONE_STATUSES} AND o.${SINCE_RESET_SQL}`,
-    args: []
+    sql: `SELECT COALESCE(SUM(o.labour), 0)
+          FROM orders o
+          WHERE o.${DONE_STATUSES} AND o.${SINCE_RESET_SQL}
+            AND o.mechanic_id != ?`,
+    args: [managerId]
   });
-  const pool = poolR.rows.reduce((s, row) => s + Number(row[0] ?? 0) * Number(row[1] ?? 0.3), 0);
-  return pool * overrideRate;
+  const totalCrewLabour = Number(poolR.rows[0]?.[0] ?? 0);
+  return totalCrewLabour * overrideRate;
 }
 
 // ─── Shared button row builders ───────────────────────────────────────────────
@@ -118,11 +124,13 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       args: [newOrderId, orderNumber, interaction.user.id, guildId]
     });
 
-    const [catalogStr, weekRevenue, draft] = await Promise.all([
+    const [catalogStr, profile, draft] = await Promise.all([
       getSetting("parts_catalog"),
-      getWeekRevenue(interaction.user.id),
+      getProfile(interaction.user.id),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
+    const rate = profile?.commission_rate ?? 0.3;
+    const weekComm = await getWeekCommission(interaction.user.id, rate);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -132,7 +140,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     await interaction.editReply({
-      embeds: [buildDraftEmbed(draft, weekRevenue)],
+      embeds: [buildDraftEmbed(draft, weekComm, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(newOrderId)
@@ -146,13 +154,15 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // ── Back to categories ──────────────────────────────────────────────────────
   if (action === "backtocats") {
     await interaction.deferUpdate();
-    const [catalogStr, r, weekRevenue] = await Promise.all([
+    const [catalogStr, r, profile] = await Promise.all([
       getSetting("parts_catalog"),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
-      getWeekRevenue(interaction.user.id)
+      getProfile(interaction.user.id)
     ]);
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
+    const rate = profile?.commission_rate ?? 0.3;
+    const weekComm = await getWeekCommission(interaction.user.id, rate);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -162,7 +172,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
     await interaction.editReply({
-      embeds: [buildDraftEmbed(order, weekRevenue)],
+      embeds: [buildDraftEmbed(order, weekComm, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)

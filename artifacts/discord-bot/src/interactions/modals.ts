@@ -13,23 +13,25 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
 
-  // Helper: rebuild category select + main draft buttons
+  // Helper: rebuild category select + main draft buttons with commission info
   async function refreshDraftView(ordId: string) {
     const DONE = `status IN ('complete', 'approved', 'paid')`;
-    const [catalogStr, r, allTimeTotalR] = await Promise.all([
+    const [catalogStr, r, profileR, weekLabourR] = await Promise.all([
       getSetting("parts_catalog"),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [ordId] }),
-      db.execute({ sql: `SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND ${DONE} AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')`, args: [interaction.user.id] })
+      getProfile(interaction.user.id),
+      db.execute({ sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE} AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')`, args: [interaction.user.id] })
     ]);
     const order = rowToOrder(r.rows[0]);
-    const allTimeTotal = Number(allTimeTotalR.rows[0]?.[0] ?? 0);
+    const rate = profileR?.commission_rate ?? 0.3;
+    const weekCommission = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${ordId}`)
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
-    return { order, allTimeTotal, catSelect };
+    return { order, weekCommission, rate, catSelect };
   }
 
   // ── Edit Labour ────────────────────────────────────────────────────────────
@@ -47,9 +49,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const newTotal = order.parts_cost + labour;
     await db.execute({ sql: "UPDATE orders SET labour = ?, total = ? WHERE id = ?", args: [labour, newTotal, extra] });
 
-    const { order: updated, allTimeTotal, catSelect } = await refreshDraftView(extra);
+    const { order: updated, weekCommission, rate, catSelect } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, allTimeTotal)],
+      embeds: [buildDraftEmbed(updated, weekCommission, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(extra)
@@ -85,9 +87,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, extra]
     });
 
-    const { order: updated, allTimeTotal, catSelect } = await refreshDraftView(extra);
+    const { order: updated, weekCommission, rate, catSelect } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, allTimeTotal)],
+      embeds: [buildDraftEmbed(updated, weekCommission, rate)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(extra)
@@ -124,11 +126,11 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, extra]
     });
 
-    const { order: updated, allTimeTotal, catSelect } = await refreshDraftView(extra);
+    const { order: updated2, weekCommission: wc2, rate: r2, catSelect: cs2 } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, allTimeTotal)],
+      embeds: [buildDraftEmbed(updated2, wc2, r2)],
       components: [
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(cs2),
         ...mainDraftButtonRows(extra)
       ]
     });

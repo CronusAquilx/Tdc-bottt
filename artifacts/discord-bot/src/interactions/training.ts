@@ -3,9 +3,9 @@ import {
   ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   EmbedBuilder, ChannelType, PermissionFlagsBits,
-  TextChannel
+  OverwriteType, TextChannel
 } from "discord.js";
-import { db, getProfile, getGuildConfig } from "../db.js";
+import { db, getProfile, getGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
@@ -94,11 +94,12 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     const channelName = `sales-${safeName.slice(0, 30)}`;
 
     const permOverwrites: any[] = [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
     ];
     if (guild.members.me) {
       permOverwrites.push({
         id: guild.members.me.id,
+        type: OverwriteType.Member,
         allow: [
           PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
           PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks,
@@ -108,10 +109,15 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     }
     permOverwrites.push({
       id: recruitId,
+      type: OverwriteType.Member,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
     });
-    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
-      permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    for (const rid of [
+      ...splitRoleIds(config?.owner_role_id),
+      ...splitRoleIds(config?.manager_role_id),
+      ...splitRoleIds(config?.trainer_role_id)
+    ]) {
+      permOverwrites.push({ id: rid, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
     let salesChannel: TextChannel;
     try {
@@ -232,11 +238,12 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     const channelName = `training-${safeName || "recruit"}`;
 
     const permOverwrites: any[] = [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: guild.id, type: OverwriteType.Role, deny: [PermissionFlagsBits.ViewChannel] },
     ];
     if (guild.members.me) {
       permOverwrites.push({
         id: guild.members.me.id,
+        type: OverwriteType.Member,
         allow: [
           PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
           PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks,
@@ -247,11 +254,16 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     // The recruit can see it
     permOverwrites.push({
       id: interaction.user.id,
+      type: OverwriteType.Member,
       allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
     });
-    // Owners, managers, trainers can see it
-    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
-      permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    // Owners, managers, trainers can see it — use splitRoleIds to handle multi-role configs
+    for (const rid of [
+      ...splitRoleIds(config?.owner_role_id),
+      ...splitRoleIds(config?.manager_role_id),
+      ...splitRoleIds(config?.trainer_role_id)
+    ]) {
+      permOverwrites.push({ id: rid, type: OverwriteType.Role, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
     let trainingChannel: TextChannel;
     try {
