@@ -218,6 +218,9 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN clocklog_channel_id TEXT");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
+  // Fix: remove stale 'trainer' DB role for the manager (user roles DB table must not override Discord role check)
+  // The manager's Discord roles are always authoritative — the DB user_roles table is only a fallback
+  await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ? AND role = 'trainer'", args: ["1363222342800511058"] });
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });

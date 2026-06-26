@@ -96,6 +96,95 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
+  // ── Clock In then immediately start a New Order (from the "clock in required" prompt) ──
+  if (ns === "clockin" && action === "then" && rest[0] === "order") {
+    await interaction.deferUpdate();
+
+    // Atomic insert — prevents race condition
+    const tcId = randomUUID();
+    const inserted = await db.execute({
+      sql: `INSERT INTO timeclock (id, mechanic_id, clock_in_time, guild_id)
+            SELECT ?, ?, datetime('now'), ?
+            WHERE NOT EXISTS (SELECT 1 FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL)`,
+      args: [tcId, interaction.user.id, interaction.guild?.id ?? "", interaction.user.id]
+    });
+
+    // If already clocked in — that's fine, proceed to new order
+    const effectiveTcId = inserted.rowsAffected ? tcId : null;
+
+    if (effectiveTcId) {
+      // Post clock-in embed to clock LOGS channel
+      await db.execute({ sql: "UPDATE profiles SET status = 'online' WHERE discord_id = ?", args: [interaction.user.id] });
+      const profile = await getProfile(interaction.user.id);
+      const displayName = profile?.display_name
+        ?? (interaction.member as any)?.displayName
+        ?? interaction.user.globalName
+        ?? interaction.user.username;
+      const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
+      const entry = rowToTimeclock(tcR.rows[0]);
+      const clockEmbed = buildClockInEmbed(displayName, entry.clock_in_time);
+
+      const CLOCK_LOG_CHANNEL = "1519941057616412832";
+      if (interaction.guild) {
+        const config = await getGuildConfig(interaction.guild.id);
+        const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id ?? CLOCK_LOG_CHANNEL;
+        try {
+          const ch = await interaction.guild.channels.fetch(logChanId);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({ embeds: [clockEmbed] });
+            await db.execute({
+              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+              args: [msg.id, ch.id, tcId]
+            });
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Immediately open the new order draft
+    const { db: _db, getSetting, rowToOrder, nextOrderNumber } = await import("../db.js");
+    const { detectUserRoleLevel } = await import("../lib/roles.js");
+    const { buildDraftEmbed } = await import("../lib/embeds.js");
+    const { mainDraftButtonRows, getCommissionData } = await import("./draftbuttons.js");
+    const { StringSelectMenuBuilder: SSB2, StringSelectMenuOptionBuilder: SSOB2 } = await import("discord.js");
+
+    const guildId = interaction.guildId ?? "";
+    const roleLevel = await detectUserRoleLevel(interaction);
+    const newOrderId = randomUUID();
+    const orderNumber = await nextOrderNumber();
+
+    await _db.execute({
+      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+      args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+    });
+
+    const [catalogStr, draft] = await Promise.all([
+      getSetting("parts_catalog"),
+      _db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
+    ]);
+    const commData = await getCommissionData(interaction.user.id, guildId, roleLevel);
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const categories: string[] = catalog.categories ?? [];
+
+    const catSelect = new SSB2()
+      .setCustomId(`order:selectcategory:${newOrderId}`)
+      .setPlaceholder("Pick a service category...")
+      .addOptions(categories.map((cat: string) => new SSOB2().setLabel(cat).setValue(cat)));
+
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(roleLevel)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
+
+    await interaction.editReply({
+      embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
+      components: [
+        new ActionRowBuilder<InstanceType<typeof SSB2>>().addComponents(catSelect),
+        ...mainDraftButtonRows(newOrderId)
+      ]
+    });
+    return;
+  }
+
   // ── Clock In from order embed (toggles to Clock Out) ─────────────────────
   if (ns === "clockin" && action === "order") {
     await interaction.deferUpdate();
@@ -156,21 +245,20 @@ export async function handleButton(interaction: ButtonInteraction) {
     const entry = rowToTimeclock(tcR.rows[0]);
     const clockEmbed = buildClockInEmbed(displayName, entry.clock_in_time);
 
+    const CLOCK_LOG_FALLBACK = "1519941057616412832";
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id;
-      if (logChanId) {
-        try {
-          const ch = await interaction.guild.channels.fetch(logChanId);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).send({ embeds: [clockEmbed] });
-            await db.execute({
-              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
-              args: [msg.id, ch.id, tcId]
-            });
-          }
-        } catch { /* ignore */ }
-      }
+      const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id ?? CLOCK_LOG_FALLBACK;
+      try {
+        const ch = await interaction.guild.channels.fetch(logChanId);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).send({ embeds: [clockEmbed] });
+          await db.execute({
+            sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+            args: [msg.id, ch.id, tcId]
+          });
+        }
+      } catch { /* ignore */ }
     }
 
     // Toggle button to Clock Out, preserve Pay row
@@ -312,28 +400,25 @@ export async function handleButton(interaction: ButtonInteraction) {
       ?? interaction.user.username;
     const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
-    // Post to the clock LOGS channel (not the panel channel — panel stays clean)
-    let posted = false;
+    // Post to the clock LOGS channel — always use the correct log channel
+    const CLOCK_LOG_FALLBACK_PANEL = "1519941057616412832";
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id;
-      if (logChanId) {
-        try {
-          const ch = await interaction.guild.channels.fetch(logChanId);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).send({ embeds: [embed] });
-            await db.execute({
-              sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
-              args: [msg.id, ch.id, tcId]
-            });
-            posted = true;
-          }
-        } catch { /* ignore */ }
-      }
+      const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id ?? CLOCK_LOG_FALLBACK_PANEL;
+      try {
+        const ch = await interaction.guild.channels.fetch(logChanId);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).send({ embeds: [embed] });
+          await db.execute({
+            sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?",
+            args: [msg.id, ch.id, tcId]
+          });
+        }
+      } catch { /* ignore */ }
     }
 
     const unixTs = Math.floor(new Date(entry.clock_in_time).getTime() / 1000);
-    await interaction.editReply({ content: `✅ **Clocked in!** <t:${unixTs}:t>${posted ? "" : "\n*(Set up a Clock Logs channel to record shifts)*"}` } as any);
+    await interaction.editReply({ content: `✅ **Clocked in!** <t:${unixTs}:t>` } as any);
     return;
   }
 
@@ -387,6 +472,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     );
 
     // Edit original clock-in message in the LOGS channel (not panel channel)
+    const CLOCK_LOG_FALLBACK_OUT = "1519941057616412832";
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -399,14 +485,20 @@ export async function handleButton(interaction: ButtonInteraction) {
         try {
           if (interaction.guild) {
             const config = await getGuildConfig(interaction.guild.id);
-            const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id;
-            if (logChanId) {
-              const ch = await interaction.guild.channels.fetch(logChanId);
-              if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
-            }
+            const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id ?? CLOCK_LOG_FALLBACK_OUT;
+            const ch = await interaction.guild.channels.fetch(logChanId);
+            if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
           }
         } catch { /* ignore */ }
       }
+    } else if (interaction.guild) {
+      // No stored clock-in message — post clock-out to log channel directly
+      try {
+        const config = await getGuildConfig(interaction.guild.id);
+        const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id ?? CLOCK_LOG_FALLBACK_OUT;
+        const ch = await interaction.guild.channels.fetch(logChanId);
+        if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+      } catch { /* ignore */ }
     }
 
     const hrs = Math.floor(mins / 60);

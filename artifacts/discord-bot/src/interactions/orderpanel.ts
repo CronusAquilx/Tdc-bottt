@@ -10,8 +10,9 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
     .setColor(0xe5342b)
     .setDescription(
       `**Welcome, ${displayName}.**\n\n` +
-      "This is your personal sales channel. Start a new order below, or clock in when your shift begins.\n\n" +
-      `> 💵 Your commission rate: **${(commissionRate * 100).toFixed(0)}% of labour**`
+      "This is your personal sales channel. Start a new order below.\n\n" +
+      `> 💵 Your commission rate: **${(commissionRate * 100).toFixed(0)}% of labour**\n\n` +
+      "> ⏰ **Clock in/out using the dedicated clock-in channel.**"
     )
     .setFooter({ text: FOOTER })
     .setTimestamp();
@@ -21,28 +22,9 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
       .setCustomId("order:newpanel")
       .setLabel("📋  New Order")
       .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId("clockin:panel")
-      .setLabel("🟢  Clock In")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("clockout:panel")
-      .setLabel("🔴  Clock Out")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("checktime:panel")
-      .setLabel("⏱️  Check Time")
-      .setStyle(ButtonStyle.Secondary),
   );
 
-  const closeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("closechan:panel")
-      .setLabel("🔒  Close Channel")
-      .setStyle(ButtonStyle.Danger),
-  );
-
-  const msg = await channel.send({ embeds: [panelEmbed], components: [row, closeRow] });
+  const msg = await channel.send({ embeds: [panelEmbed], components: [row] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }

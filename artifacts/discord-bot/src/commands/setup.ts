@@ -27,6 +27,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (sub === "init") {
+    // Only managers and above can run /setup init
+    const { requireRole } = await import("../lib/roles.js");
+    if (!(await requireRole(interaction, "manager"))) return;
+
     const config = await getGuildConfig(guild.id);
     const permOverwrites: any[] = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },

@@ -100,38 +100,79 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     if (!(await requireRole(interaction, "mechanic"))) return true;
 
-    const active = await db.execute({
-      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
-      args: [interaction.user.id]
-    });
+    const clickerId = interaction.user.id;
+    const guildId = interaction.guildId ?? "";
+    const clickerRole = await detectUserRoleLevel(interaction);
+    const isManager = clickerRole === "manager" || clickerRole === "owner";
 
-    if (!active.rows[0]) {
-      const promptEmbed = buildClockInPromptEmbed();
-      const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In Now").setStyle(ButtonStyle.Success)
-      );
-      await interaction.editReply({ embeds: [promptEmbed], components: [clockRow] });
-      return true;
+    // ── Determine WHO the order is for ────────────────────────────────────────
+    // If a manager clicks New Order in a channel that isn't their own sales
+    // channel, assume they are doing the order on behalf of the mechanic who
+    // owns that channel.
+    let targetMechanicId = clickerId;
+    let targetDisplayName: string | undefined;
+
+    if (isManager) {
+      const currentChannelId = interaction.channelId;
+      const clickerProfile = await getProfile(clickerId);
+
+      // Check if the current channel belongs to a different mechanic
+      if (currentChannelId && currentChannelId !== clickerProfile?.sales_channel_id) {
+        const ownerRow = await db.execute({
+          sql: "SELECT discord_id, display_name FROM profiles WHERE sales_channel_id = ? LIMIT 1",
+          args: [currentChannelId]
+        });
+        if (ownerRow.rows[0]) {
+          targetMechanicId = String(ownerRow.rows[0][0] ?? clickerId);
+          targetDisplayName = String(ownerRow.rows[0][1] ?? "");
+        }
+      }
+    }
+
+    // ── Check clock-in state for the TARGET mechanic (or the clicker if self) ─
+    // Managers doing orders for others don't need to be clocked in themselves;
+    // the order will be attributed to the mechanic. But we still check if the
+    // mechanic themselves is clocked in (for corded mechanics the flow requires it).
+    // For managers acting on behalf: skip the clock-in check.
+    if (!isManager || targetMechanicId === clickerId) {
+      const active = await db.execute({
+        sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+        args: [clickerId]
+      });
+
+      if (!active.rows[0]) {
+        const promptEmbed = buildClockInPromptEmbed();
+        const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("clockin:then:order").setLabel("🟢  Clock In & Start Order").setStyle(ButtonStyle.Success)
+        );
+        await interaction.editReply({ embeds: [promptEmbed], components: [clockRow] });
+        return true;
+      }
     }
 
     const newOrderId = randomUUID();
     const { nextOrderNumber } = await import("../db.js");
     const orderNumber = await nextOrderNumber();
-    const guildId = interaction.guildId ?? "";
 
-    // Detect and store the user's role level on the order
-    const roleLevel = await detectUserRoleLevel(interaction);
+    // Role level stored on the order = the mechanic's role (not the manager's)
+    let roleLevel = "mechanic";
+    if (targetMechanicId === clickerId) {
+      roleLevel = clickerRole;
+    } else {
+      // Default to mechanic for the stored role_level (commission is theirs)
+      roleLevel = "mechanic";
+    }
 
     await db.execute({
       sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-      args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+      args: [newOrderId, orderNumber, targetMechanicId, guildId, roleLevel]
     });
 
     const [catalogStr, draft] = await Promise.all([
       getSetting("parts_catalog"),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
-    const commData = await getCommissionData(interaction.user.id, guildId, roleLevel);
+    const commData = await getCommissionData(targetMechanicId, guildId, roleLevel);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -144,7 +185,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
 
+    const onBehalfNote = (isManager && targetMechanicId !== clickerId)
+      ? `\n\n> 📋 **Creating order on behalf of ${targetDisplayName ?? `<@${targetMechanicId}>`}**`
+      : "";
+
     await interaction.editReply({
+      content: onBehalfNote || undefined,
       embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
