@@ -5,6 +5,7 @@ import { db, getProfile, rowToTimeclock, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildClockInEmbed, buildClockOutEmbed } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
+import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clock")
@@ -27,7 +28,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
     const id = randomUUID();
-    await db.execute({ sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time) VALUES (?, ?, datetime('now'))", args: [id, interaction.user.id] });
+    await db.execute({
+      sql: "INSERT INTO timeclock (id, mechanic_id, clock_in_time, guild_id) VALUES (?, ?, datetime('now'), ?)",
+      args: [id, interaction.user.id, interaction.guild?.id ?? ""]
+    });
+    await db.execute({ sql: "UPDATE profiles SET status = 'online' WHERE discord_id = ?", args: [interaction.user.id] });
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [id] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
@@ -41,7 +46,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     let postedTo = "";
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      const logChanId = (config as any)?.clocklog_channel_id ?? config?.timeclock_channel_id;
+      const logChanId = config?.clocklog_channel_id ?? config?.timeclock_channel_id;
       if (logChanId) {
         try {
           const ch = await interaction.guild.channels.fetch(logChanId);
@@ -68,12 +73,20 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
     const entry = rowToTimeclock(active.rows[0]);
     const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
-    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'approved' WHERE id = ?", args: [mins, notes ?? null, entry.id] });
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ? WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
+    await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?", args: [mins, notes ?? null, entry.id] });
+    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
+    // Clear any in-memory warn/stay state for this shift
+    warnedMechanics.delete(entry.id);
+    stayedIn.delete(entry.mechanic_id);
     const ur = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [entry.id] });
     const updated = rowToTimeclock(ur.rows[0]);
     const profile = await getProfile(interaction.user.id);
-    const embed = buildClockOutEmbed(profile?.display_name ?? interaction.user.username, updated.clock_in_time, updated.clock_out_time!, mins);
+    const ordersThisShift = await db.execute({
+      sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?",
+      args: [interaction.user.id, entry.clock_in_time]
+    });
+    const orderCount = Number(ordersThisShift.rows[0]?.[0] ?? 0);
+    const embed = buildClockOutEmbed(profile?.display_name ?? interaction.user.username, updated.clock_in_time, updated.clock_out_time!, mins, orderCount);
 
     // Edit the original clock-in message in the timeclock channel
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {

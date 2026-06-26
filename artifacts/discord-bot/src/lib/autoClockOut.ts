@@ -17,7 +17,7 @@ export function startAutoClockOutMonitor(client: Client) {
 async function checkIdleMechanics(client: Client) {
   try {
     const active = await db.execute(
-      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at, stayed_in_at
+      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at, stayed_in_at, guild_id
        FROM timeclock
        WHERE clock_out_time IS NULL`
     );
@@ -30,6 +30,7 @@ async function checkIdleMechanics(client: Client) {
       const chanId      = row[4] ? String(row[4]) : null;
       const warnedAtDb  = row[5] ? String(row[5]) : null;
       const stayedInDb  = row[6] ? String(row[6]) : null;
+      const guildId     = row[7] ? String(row[7]) : null;
 
       // Use the later of clock-in or last stay-in as the effective idle start
       const clockInMs   = new Date(clockInTime).getTime();
@@ -39,9 +40,12 @@ async function checkIdleMechanics(client: Client) {
 
       if (minsIdle < WARN_AFTER_MINS) continue;
 
-      // Resolve guild
+      // Resolve guild — fast path via stored guild_id, fallback to channel/member scan
       let guild: any = null;
-      if (chanId) {
+      if (guildId) {
+        guild = client.guilds.cache.get(guildId) ?? null;
+      }
+      if (!guild && chanId) {
         for (const g of client.guilds.cache.values()) {
           try { const ch = await g.channels.fetch(chanId).catch(() => null); if (ch) { guild = g; break; } } catch { /* skip */ }
         }
