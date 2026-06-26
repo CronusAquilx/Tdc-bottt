@@ -27,11 +27,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (sub === "init") {
-    // Only managers and above can run /setup init
-    const { requireRole } = await import("../lib/roles.js");
-    if (!(await requireRole(interaction, "manager"))) return;
-
     const config = await getGuildConfig(guild.id);
+
+    // Build safe permission overwrites — only include role IDs that are valid strings
     const permOverwrites: any[] = [
       { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
     ];
@@ -45,8 +43,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         ]
       });
     }
-    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id].filter(Boolean)) {
-      permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+    // Only add role overwrites for IDs that are actually configured & valid snowflakes
+    const validId = (id: any) => typeof id === "string" && /^\d{17,20}$/.test(id);
+    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id]) {
+      if (!validId(rid)) continue;
+      // Verify the role actually exists in this guild before adding
+      try {
+        await guild.roles.fetch(rid!);
+        permOverwrites.push({ id: rid!, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      } catch { /* role not found — skip */ }
     }
 
     let adminChannel: TextChannel;
