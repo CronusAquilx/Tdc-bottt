@@ -1,7 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
 import { db, getProfile } from "../db.js";
 import { COLORS } from "../lib/embeds.js";
-import { randomUUID } from "../lib/utils.js";
 
 export const data = new SlashCommandBuilder()
   .setName("setrank")
@@ -28,13 +27,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // Upsert rank in user_roles
+  // Upsert rank in user_roles (no id column in this table)
   await db.execute({
-    sql: `INSERT INTO user_roles (id, discord_id, role)
-          VALUES (?, ?, ?)
-          ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role`,
-    args: [randomUUID(), target.id, rank]
+    sql: `INSERT INTO user_roles (discord_id, role)
+          VALUES (?, ?)
+          ON CONFLICT(discord_id, role) DO NOTHING`,
+    args: [target.id, rank]
   });
+  // Remove any old conflicting role for this user first, then re-insert cleanly
+  await db.execute({ sql: `DELETE FROM user_roles WHERE discord_id = ? AND role != ?`, args: [target.id, rank] });
 
   // Ensure a profile exists for them
   const existing = await getProfile(target.id);

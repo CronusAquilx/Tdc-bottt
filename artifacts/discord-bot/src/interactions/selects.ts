@@ -99,13 +99,14 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         // Remove any existing role for this user then insert the new one
         await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
         await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
+        const roleEmoji = roleTarget === "trainer" ? "📚" : "👔";
+        const roleDesc  = roleTarget === "manager"
+          ? `<@${targetUserId}> is now recognised as a **Manager** in the bot.\n\nThey can use manager commands and will earn a cut of the mechanic commission pool each pay period.`
+          : `<@${targetUserId}> is now recognised as a **Trainer** in the bot.\n\nThey will see their crew cut on order embeds and their commission is calculated accordingly.`;
         const embed = new EmbedBuilder()
-          .setTitle(`✅ ${roleTarget === "trainer" ? "📚 Trainer" : "👔 Manager"} Assigned`)
+          .setTitle(`✅ ${roleEmoji} ${roleTarget === "trainer" ? "Trainer" : "Manager"} Assigned`)
           .setColor(COLORS.approved)
-          .setDescription(
-            `<@${targetUserId}> is now recognised as a **${roleTarget}** in the bot.\n\n` +
-            `They will see their crew cut on their order embeds, and their commission is calculated accordingly.`
-          )
+          .setDescription(roleDesc)
           .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
         await interaction.editReply({ embeds: [embed], components: [] });
       } catch (err: any) {

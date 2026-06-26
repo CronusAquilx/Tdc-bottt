@@ -11,7 +11,8 @@ import {
 import { initDb } from "./db.js";
 import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
 import { data as crewData,        execute as crewExecute        } from "./commands/crew.js";
-import { data as timeclockData,   execute as timeclockExecute   } from "./commands/timeclock.js";
+import { data as timeclockData,      execute as timeclockExecute      } from "./commands/timeclock.js";
+import { data as timeclockManageData, execute as timeclockManageExecute } from "./commands/timeclockmanage.js";
 import { data as mysalesData,     execute as mysalesExecute     } from "./commands/mysales.js";
 import { data as payData,         execute as payExecute         } from "./commands/pay.js";
 import { data as payallData,      execute as payallExecute      } from "./commands/payall.js";
@@ -96,8 +97,9 @@ const commandDefs = [
   { data: leaderboardData, execute: leaderboardExecute },
   { data: setrankData,     execute: setrankExecute     },
   { data: managerData,     execute: managerExecute     },
-  { data: clearData,       execute: clearExecute       },
-  { data: newweekData,     execute: newweekExecute     },
+  { data: clearData,            execute: clearExecute            },
+  { data: newweekData,          execute: newweekExecute          },
+  { data: timeclockManageData,  execute: timeclockManageExecute  },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -116,6 +118,11 @@ client.once(Events.ClientReady, async (c) => {
       console.log(`[TDC] ⚡ Registering ${commandDefs.length} commands to guild ${guildId} (instant)...`);
       const result = await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body }) as any[];
       console.log(`[TDC] ✅ Guild commands registered instantly (${result.length}): ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+      // Clear any leftover global commands so users don't see duplicates
+      try {
+        await rest.put(Routes.applicationCommands(clientId), { body: [] });
+        console.log(`[TDC] 🧹 Cleared global commands (using guild-only mode).`);
+      } catch { /* ignore */ }
     } else {
       console.log(`[TDC] 🔧 Registering ${commandDefs.length} slash commands globally (up to 1hr propagation)...`);
       const result = await rest.put(Routes.applicationCommands(clientId), { body }) as any[];
