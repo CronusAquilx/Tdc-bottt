@@ -9,7 +9,7 @@ import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
-import { mainDraftButtonRows, categoryViewButtonRow } from "./draftbuttons.js";
+import { mainDraftButtonRows, categoryViewButtonRow, getCommissionData } from "./draftbuttons.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -85,6 +85,28 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── User select menus ──────────────────────────────────────────────────────
   if (interaction.isUserSelectMenu()) {
+    // admin:setrole:pickmember:(trainer|manager) — assign user a role in the DB
+    if (ns === "admin" && action === "setrole" && rest[0] === "pickmember") {
+      if (!(await requireRole(interaction, "owner"))) return;
+      await interaction.deferUpdate();
+      const roleTarget = rest[1] as "trainer" | "manager";
+      const targetUserId = interaction.values[0];
+      await db.execute({
+        sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?) ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role",
+        args: [targetUserId, roleTarget]
+      });
+      const embed = new EmbedBuilder()
+        .setTitle(`✅ ${roleTarget === "trainer" ? "📚 Trainer" : "👔 Manager"} Assigned`)
+        .setColor(COLORS.approved)
+        .setDescription(
+          `<@${targetUserId}> is now recognised as a **${roleTarget}** in the bot.\n\n` +
+          `They will see their crew cut on their order embeds, and their commission is calculated accordingly.`
+        )
+        .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+      return;
+    }
+
     // admin:assignbyrole:pickmanager — after bulk mechanic selection, pick manager
     if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickmanager") {
       if (!(await requireRole(interaction, "owner"))) return;
@@ -419,17 +441,13 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(remaining), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const [updatedR, profileR] = await Promise.all([
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
-      getProfile(interaction.user.id)
-    ]);
+    const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR.rows[0]);
-    const rate = profileR?.commission_rate ?? 0.3;
-    const weekCommR = await db.execute({
-      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
-      args: [interaction.user.id]
-    });
-    const weekComm = Number(weekCommR.rows[0]?.[0] ?? 0) * rate;
+    const guildId = interaction.guildId ?? "";
+    const commData = await getCommissionData(interaction.user.id, guildId, updated.role_level);
+    const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
 
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -441,7 +459,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
     await interaction.editReply({
       content: `✅ Removed ${indicesToRemove.size} item(s) from the order.`,
-      embeds: [buildDraftEmbed(updated, weekComm, rate)],
+      embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
@@ -460,18 +478,14 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catItems = items.filter(i => i.category === category);
     if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, ephemeral: true }); return; }
 
-    const [r, profileR] = await Promise.all([
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] }),
-      getProfile(interaction.user.id)
-    ]);
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
-    const rate = profileR?.commission_rate ?? 0.3;
-    const weekCommR = await db.execute({
-      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
-      args: [interaction.user.id]
-    });
-    const weekComm = Number(weekCommR.rows[0]?.[0] ?? 0) * rate;
+    const guildId2 = interaction.guildId ?? "";
+    const commData2 = await getCommissionData(interaction.user.id, guildId2, order.role_level);
+    const crewCutInfo2 = ["trainer","manager","owner"].includes(order.role_level)
+      ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
+      : undefined;
 
     // Mark already-added items so user can see what's on the order
     const existingLabels = new Set((order.items ?? []).map((i: any) => `${i.category}::${i.label}`));
@@ -489,7 +503,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
           .setDescription(`Parts: ${money(i.cost)} | Labour: ${money(i.labour)} | Total: ${money(i.price)}${alreadyAdded ? " · already added" : ""}`);
       }));
 
-    const embed = buildDraftEmbed(order, weekComm, rate);
+    const embed = buildDraftEmbed(order, commData2.weekCommission, commData2.rate, crewCutInfo2);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
 
     await interaction.editReply({
@@ -543,17 +557,13 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(merged), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const [updatedR2, profileR2] = await Promise.all([
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
-      getProfile(interaction.user.id)
-    ]);
+    const updatedR2 = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR2.rows[0]);
-    const rate2 = profileR2?.commission_rate ?? 0.3;
-    const weekCommR2 = await db.execute({
-      sql: "SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete', 'approved', 'paid') AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')",
-      args: [interaction.user.id]
-    });
-    const weekComm2 = Number(weekCommR2.rows[0]?.[0] ?? 0) * rate2;
+    const guildId3 = interaction.guildId ?? "";
+    const commData3 = await getCommissionData(interaction.user.id, guildId3, updated.role_level);
+    const crewCutInfo3 = ["trainer","manager","owner"].includes(updated.role_level)
+      ? { amount: commData3.crewCut, rate: commData3.crewCutRate, label: commData3.crewCutLabel }
+      : undefined;
 
     const categories: string[] = catalog.categories ?? [];
     const catSelect = new StringSelectMenuBuilder()
@@ -564,7 +574,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const addedNames = (newItems as any[]).map(i => i.label).join(", ");
     await interaction.editReply({
       content: `✅ Added: **${addedNames}**`,
-      embeds: [buildDraftEmbed(updated, weekComm2, rate2)],
+      embeds: [buildDraftEmbed(updated, commData3.weekCommission, commData3.rate, crewCutInfo3)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)

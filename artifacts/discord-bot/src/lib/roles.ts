@@ -50,6 +50,42 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
   }
 }
 
+/**
+ * Detect the highest role level for the user of this interaction.
+ * Checks Discord roles (via guild config) first, then falls back to user_roles DB table.
+ * Returns 'owner' | 'manager' | 'trainer' | 'mechanic'
+ */
+export async function detectUserRoleLevel(interaction: AnyInteraction): Promise<string> {
+  try {
+    if (interaction.guild && interaction.inGuild()) {
+      const config = await getGuildConfig(interaction.guild.id);
+      if (config) {
+        const member = interaction.member;
+        if (member) {
+          const memberRoleIds: Set<string> = new Set(
+            Array.isArray(member.roles)
+              ? member.roles
+              : [...(member.roles as any).cache.keys()]
+          );
+          const mappings = [
+            { level: 'owner',   roleIds: splitRoleIds(config.owner_role_id)   },
+            { level: 'manager', roleIds: splitRoleIds(config.manager_role_id) },
+            { level: 'trainer', roleIds: splitRoleIds(config.trainer_role_id) },
+            { level: 'mechanic', roleIds: splitRoleIds(config.mechanic_role_id) },
+          ];
+          for (const { level, roleIds } of mappings) {
+            if (roleIds.some(rid => memberRoleIds.has(rid))) return level;
+          }
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Fallback: check user_roles DB table
+  const dbRole = await dbGetUserRole(interaction.user.id);
+  return dbRole ?? 'mechanic';
+}
+
 export async function requireRole(interaction: AnyInteraction, minRole: string): Promise<boolean> {
   // Always allow Discord Administrators regardless of TDC role config
   if (interaction.guild && interaction.inGuild()) {
@@ -83,15 +119,20 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
   );
   if (!hasAnyRoleConfig) return true;
 
-  const allowed = await checkDiscordRoles(interaction, minRole);
-  if (!allowed) {
-    try {
-      if (!interaction.replied && !(interaction as any).deferred) {
-        await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
-      } else if ((interaction as any).deferred) {
-        await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
-      }
-    } catch { /* ignore */ }
-  }
-  return allowed;
+  // Check Discord roles first
+  const discordAllowed = await checkDiscordRoles(interaction, minRole);
+  if (discordAllowed) return true;
+
+  // Also check user_roles DB table (for users manually assigned via admin panel)
+  const dbAllowed = await dbHasRole(interaction.user.id, minRole);
+  if (dbAllowed) return true;
+
+  try {
+    if (!interaction.replied && !(interaction as any).deferred) {
+      await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+    } else if ((interaction as any).deferred) {
+      await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+    }
+  } catch { /* ignore */ }
+  return false;
 }

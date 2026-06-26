@@ -212,6 +212,9 @@ export async function initDb() {
   await safeAlter("ALTER TABLE timeclock ADD COLUMN stayed_in_at TEXT");
   await safeAlter("ALTER TABLE orders ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''");
+  await safeAlter("ALTER TABLE orders ADD COLUMN role_level TEXT NOT NULL DEFAULT 'mechanic'");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_crew_rate REAL DEFAULT 0.10");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_crew_rate REAL DEFAULT 0.20");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
@@ -240,7 +243,7 @@ export async function getGuildConfig(guildId: string) {
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
-                 payday_channel_id
+                 payday_channel_id, trainer_crew_rate, manager_crew_rate
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
@@ -263,6 +266,8 @@ export async function getGuildConfig(guildId: string) {
     training_channel_id:     row[13] ? String(row[13]) : null,
     needs_training_role_id:  row[14] ? String(row[14]) : null,
     payday_channel_id:       row[15] ? String(row[15]) : null,
+    trainer_crew_rate:       row[16] != null ? Number(row[16]) : 0.10,
+    manager_crew_rate:       row[17] != null ? Number(row[17]) : 0.20,
   };
 }
 
@@ -275,6 +280,18 @@ export async function setGuildConfig(
     sql: `INSERT INTO guild_config (guild_id, ${field}) VALUES (?, ?)
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
     args: [guildId, channelId]
+  });
+}
+
+export async function setGuildCrewRate(
+  guildId: string,
+  field: "trainer_crew_rate" | "manager_crew_rate",
+  rate: number
+): Promise<void> {
+  await db.execute({
+    sql: `INSERT INTO guild_config (guild_id, ${field}) VALUES (?, ?)
+          ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
+    args: [guildId, rate]
   });
 }
 
@@ -379,6 +396,7 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     approved_at:      c(12) ? String(c(12)) : null,
     approved_by:      c(13) ? String(c(13)) : null,
     completed_at:     c(14) ? String(c(14)) : null,
+    role_level:       c(16) ? String(c(16)) : "mechanic",
   };
 }
 

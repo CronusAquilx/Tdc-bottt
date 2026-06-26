@@ -1,64 +1,59 @@
 import {
   ButtonInteraction,
   ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
-  ButtonBuilder, ButtonStyle, EmbedBuilder,
+  ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
 import { db, getProfile, getSetting, rowToOrder, getGuildConfig } from "../db.js";
-import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, buildClockInEmbed, COLORS, money } from "../lib/embeds.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
+import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 
-const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
-
-// SQL clause to scope queries to since the last payday reset
 const SINCE_RESET_SQL =
   `created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')`;
 
 const DONE_STATUSES = `status IN ('complete', 'approved', 'paid')`;
 
-/** Total revenue from completed orders since last payday reset (for draft embed running total) */
-async function getWeekRevenue(mechanicId: string): Promise<number> {
-  const r = await db.execute({
-    sql: `SELECT COALESCE(SUM(total), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
-    args: [mechanicId]
-  });
-  return Number(r.rows[0]?.[0] ?? 0);
-}
-
-/** Total commission earned since last payday reset = SUM(labour) × rate */
-async function getWeekCommission(mechanicId: string, rate: number): Promise<number> {
-  const r = await db.execute({
-    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
-    args: [mechanicId]
-  });
-  return Number(r.rows[0]?.[0] ?? 0) * rate;
-}
-
 /**
- * Manager's crew cut this pay period.
- * Rule: manager gets override_rate% (default 20%) of the raw LABOUR from all crew orders.
- * e.g. mechanic order has $10k labour → manager gets $2k (20%), mechanic gets $3k (30%)
- *      total 50% of labour goes to people, 50% to the business.
+ * Central commission helper — call once per view refresh.
+ * roleLevel: 'mechanic' | 'trainer' | 'manager' | 'owner'
  */
-async function getManagerCutThisWeek(managerId: string): Promise<number> {
-  const profileR = await db.execute({
-    sql: "SELECT manager_override_rate FROM profiles WHERE discord_id = ?",
-    args: [managerId]
-  });
-  const overrideRate = Number(profileR.rows[0]?.[0] ?? 0.20);
-  if (!overrideRate) return 0;
+export async function getCommissionData(userId: string, guildId: string, roleLevel: string) {
+  const [profile, config] = await Promise.all([
+    getProfile(userId),
+    getGuildConfig(guildId)
+  ]);
+  const rate = profile?.commission_rate ?? 0.3;
 
-  // SUM of ALL crew members' labour since last reset (manager gets % of raw labour, not % of commission)
-  const poolR = await db.execute({
-    sql: `SELECT COALESCE(SUM(o.labour), 0)
-          FROM orders o
-          WHERE o.${DONE_STATUSES} AND o.${SINCE_RESET_SQL}
-            AND o.mechanic_id != ?`,
-    args: [managerId]
+  const weekLabourR = await db.execute({
+    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
+    args: [userId]
   });
-  const totalCrewLabour = Number(poolR.rows[0]?.[0] ?? 0);
-  return totalCrewLabour * overrideRate;
+  const weekCommission = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
+
+  let crewCut = 0;
+  let crewCutRate = 0;
+  let crewCutLabel = "";
+
+  if (roleLevel === "trainer") {
+    crewCutRate = config?.trainer_crew_rate ?? 0.10;
+    const r = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level = 'mechanic'`,
+      args: [userId]
+    });
+    crewCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
+    crewCutLabel = "Trainer Cut";
+  } else if (roleLevel === "manager" || roleLevel === "owner") {
+    crewCutRate = config?.manager_crew_rate ?? 0.20;
+    const r = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
+      args: [userId]
+    });
+    crewCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
+    crewCutLabel = "Manager Cut";
+  }
+
+  return { rate, weekCommission, crewCut, crewCutRate, crewCutLabel };
 }
 
 // ─── Shared button row builders ───────────────────────────────────────────────
@@ -95,7 +90,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── "Create New Order" button from pinned panel ────────────────────────────
   if (ns === "order" && action === "newpanel") {
-    // Acknowledge immediately — DB calls below can take >3s and cause "Interaction Failed"
     await interaction.deferReply({ ephemeral: true });
 
     if (!(await requireRole(interaction, "mechanic"))) return true;
@@ -117,20 +111,21 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const newOrderId = randomUUID();
     const { nextOrderNumber } = await import("../db.js");
     const orderNumber = await nextOrderNumber();
-
     const guildId = interaction.guildId ?? "";
+
+    // Detect and store the user's role level on the order
+    const roleLevel = await detectUserRoleLevel(interaction);
+
     await db.execute({
-      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '')",
-      args: [newOrderId, orderNumber, interaction.user.id, guildId]
+      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+      args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
     });
 
-    const [catalogStr, profile, draft] = await Promise.all([
+    const [catalogStr, draft] = await Promise.all([
       getSetting("parts_catalog"),
-      getProfile(interaction.user.id),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
-    const rate = profile?.commission_rate ?? 0.3;
-    const weekComm = await getWeekCommission(interaction.user.id, rate);
+    const commData = await getCommissionData(interaction.user.id, guildId, roleLevel);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -139,8 +134,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Pick a service category...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
+    const crewCutInfo = commData.crewCut > 0 || roleLevel === "trainer" || roleLevel === "manager" || roleLevel === "owner"
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
+
     await interaction.editReply({
-      embeds: [buildDraftEmbed(draft, weekComm, rate)],
+      embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(newOrderId)
@@ -154,15 +153,14 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // ── Back to categories ──────────────────────────────────────────────────────
   if (action === "backtocats") {
     await interaction.deferUpdate();
-    const [catalogStr, r, profile] = await Promise.all([
+    const [catalogStr, r] = await Promise.all([
       getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
-      getProfile(interaction.user.id)
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
     ]);
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
-    const rate = profile?.commission_rate ?? 0.3;
-    const weekComm = await getWeekCommission(interaction.user.id, rate);
+    const guildId = interaction.guildId ?? "";
+    const commData = await getCommissionData(interaction.user.id, guildId, order.role_level);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -171,8 +169,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(order.role_level)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
+
     await interaction.editReply({
-      embeds: [buildDraftEmbed(order, weekComm, rate)],
+      embeds: [buildDraftEmbed(order, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
@@ -251,7 +253,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Edit Labour modal ───────────────────────────────────────────────────────
   if (action === "editlabour") {
-    // No DB call here — showModal IS the acknowledgment and must fire within 3s
     const modal = new ModalBuilder().setCustomId(`order:setlabour:${orderId}`).setTitle("Edit Labour Amount");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
@@ -267,7 +268,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Complete Order ──────────────────────────────────────────────────────────
   if (action === "submit") {
-    await interaction.deferUpdate(); // Acknowledge first — requireRole hits DB
+    await interaction.deferUpdate();
     if (!(await requireRole(interaction, "mechanic"))) return true;
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
@@ -289,18 +290,23 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       getProfile(interaction.user.id)
     ]);
     const completed = rowToOrder(ur.rows[0]);
-    const rate = profile?.commission_rate ?? 0.3;
+    const guildId = interaction.guildId ?? "";
 
-    const [weekCommission, managerCut] = await Promise.all([
-      getWeekCommission(interaction.user.id, rate),
-      getManagerCutThisWeek(interaction.user.id)
-    ]);
+    const commData = await getCommissionData(interaction.user.id, guildId, completed.role_level);
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(completed.role_level)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
 
-    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", weekCommission, rate, managerCut);
+    const embed = buildOrderEmbed(
+      completed,
+      profile?.display_name ?? "Unknown",
+      commData.weekCommission,
+      commData.rate,
+      crewCutInfo
+    );
 
     const mechanicId = interaction.user.id;
 
-    // Check if mechanic is currently clocked in to show the right toggle button
     const activeTC = await db.execute({
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [mechanicId]

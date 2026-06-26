@@ -7,7 +7,7 @@ import {
 import { db, getProfile, getGuildConfig, getSetting, rowToOrder } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildDraftEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
-import { mainDraftButtonRows } from "./draftbuttons.js";
+import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
@@ -15,23 +15,23 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // Helper: rebuild category select + main draft buttons with commission info
   async function refreshDraftView(ordId: string) {
-    const DONE = `status IN ('complete', 'approved', 'paid')`;
-    const [catalogStr, r, profileR, weekLabourR] = await Promise.all([
+    const [catalogStr, r] = await Promise.all([
       getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [ordId] }),
-      getProfile(interaction.user.id),
-      db.execute({ sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE} AND created_at >= COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')`, args: [interaction.user.id] })
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [ordId] })
     ]);
     const order = rowToOrder(r.rows[0]);
-    const rate = profileR?.commission_rate ?? 0.3;
-    const weekCommission = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
+    const guildId = interaction.guildId ?? "";
+    const commData = await getCommissionData(interaction.user.id, guildId, order.role_level);
+    const crewCutInfo = ["trainer","manager","owner"].includes(order.role_level)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${ordId}`)
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
-    return { order, weekCommission, rate, catSelect };
+    return { order, weekCommission: commData.weekCommission, rate: commData.rate, crewCutInfo, catSelect };
   }
 
   // ── Edit Labour ────────────────────────────────────────────────────────────
@@ -49,9 +49,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const newTotal = order.parts_cost + labour;
     await db.execute({ sql: "UPDATE orders SET labour = ?, total = ? WHERE id = ?", args: [labour, newTotal, extra] });
 
-    const { order: updated, weekCommission, rate, catSelect } = await refreshDraftView(extra);
+    const { order: updated, weekCommission, rate, crewCutInfo: cci0, catSelect } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, weekCommission, rate)],
+      embeds: [buildDraftEmbed(updated, weekCommission, rate, cci0)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(extra)
@@ -87,9 +87,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, extra]
     });
 
-    const { order: updated, weekCommission, rate, catSelect } = await refreshDraftView(extra);
+    const { order: updated, weekCommission, rate, crewCutInfo, catSelect } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated, weekCommission, rate)],
+      embeds: [buildDraftEmbed(updated, weekCommission, rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(extra)
@@ -126,9 +126,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, extra]
     });
 
-    const { order: updated2, weekCommission: wc2, rate: r2, catSelect: cs2 } = await refreshDraftView(extra);
+    const { order: updated2, weekCommission: wc2, rate: r2, crewCutInfo: cci2, catSelect: cs2 } = await refreshDraftView(extra);
     await interaction.editReply({
-      embeds: [buildDraftEmbed(updated2, wc2, r2)],
+      embeds: [buildDraftEmbed(updated2, wc2, r2, cci2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(cs2),
         ...mainDraftButtonRows(extra)

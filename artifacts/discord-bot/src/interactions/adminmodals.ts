@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
 } from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, setGuildCrewRate, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
@@ -54,6 +54,48 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
         ? `✅ Job **${title}** posted to <#${config?.jobs_channel_id}>!`
         : `✅ Job **${title}** saved — configure a jobs channel first to post it publicly.`
     });
+    return true;
+  }
+
+  // ── Commission: set trainer crew cut % ───────────────────────────────────
+  if (section === "commission" && action === "trainerrate") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
+    const pct = parseFloat(rateStr);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      await interaction.editReply({ content: "❌ Invalid rate — enter a number between 0 and 100 (e.g. `10` for 10%)." });
+      return true;
+    }
+    const rate = pct / 100;
+    await setGuildCrewRate(guild.id, "trainer_crew_rate", rate);
+    const embed = new EmbedBuilder()
+      .setTitle("📚 Trainer Crew Cut Updated")
+      .setColor(COLORS.approved)
+      .setDescription(`Trainers will now earn **${pct.toFixed(0)}%** of all mechanic-role order labour per pay period.`)
+      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+    await interaction.editReply({ embeds: [embed] });
+    return true;
+  }
+
+  // ── Commission: set manager crew cut % ───────────────────────────────────
+  if (section === "commission" && action === "managerrate") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+    const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
+    const pct = parseFloat(rateStr);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      await interaction.editReply({ content: "❌ Invalid rate — enter a number between 0 and 100 (e.g. `20` for 20%)." });
+      return true;
+    }
+    const rate = pct / 100;
+    await setGuildCrewRate(guild.id, "manager_crew_rate", rate);
+    const embed = new EmbedBuilder()
+      .setTitle("👔 Manager Crew Cut Updated")
+      .setColor(COLORS.approved)
+      .setDescription(`Managers will now earn **${pct.toFixed(0)}%** of all mechanic+trainer-role order labour per pay period.`)
+      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+    await interaction.editReply({ embeds: [embed] });
     return true;
   }
 

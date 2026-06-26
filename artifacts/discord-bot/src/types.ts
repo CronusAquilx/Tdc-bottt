@@ -39,6 +39,7 @@ export interface Order {
   approved_at: string | null;
   approved_by: string | null;
   completed_at: string | null;
+  role_level: string;
 }
 
 export interface Timeclock {

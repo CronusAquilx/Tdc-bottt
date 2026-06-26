@@ -57,7 +57,7 @@ export function buildOrderEmbed(
   mechanicName: string,
   weekCommission = 0,
   commissionRate = 0.3,
-  managerCutThisWeek = 0
+  crewCutInfo?: { amount: number; rate: number; label: string }
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -104,10 +104,11 @@ export function buildOrderEmbed(
       }
     );
 
-  if (managerCutThisWeek > 0) {
+  if (crewCutInfo && crewCutInfo.amount > 0) {
+    const crewPct = (crewCutInfo.rate * 100).toFixed(0);
     embed.addFields({
-      name:  "👔 Crew Cut (Pay Period)",
-      value: `**${money(Math.round(managerCutThisWeek))}**\n-# Your % of crew commission pool`,
+      name:  `👥 ${crewCutInfo.label} (Pay Period)`,
+      value: `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`,
       inline: true
     });
   }
@@ -127,7 +128,8 @@ interface OrderItem {
 export function buildDraftEmbed(
   order: Order,
   weekCommission = 0,
-  commissionRate = 0.3
+  commissionRate = 0.3,
+  crewCutInfo?: { amount: number; rate: number; label: string }
 ): EmbedBuilder {
   const items: OrderItem[] = Array.isArray(order.items) ? order.items : [];
 
@@ -135,7 +137,6 @@ export function buildDraftEmbed(
     ? items.map(i => `> **${i.label}** · ${money(i.price)}`).join("\n")
     : "*No services yet — pick a category below*";
 
-  // Preview commission for this current draft order
   const thisOrderCommission = Math.round(order.labour * commissionRate);
   const pct = (commissionRate * 100).toFixed(0);
 
@@ -164,7 +165,18 @@ export function buildDraftEmbed(
     fields.push({
       name: "📊 Running Commission (Pay Period)",
       value: `**${money(Math.round(weekCommission))}**\n-# All completed orders since last pay`,
-      inline: false
+      inline: true
+    });
+  }
+
+  if (crewCutInfo) {
+    const crewPct = (crewCutInfo.rate * 100).toFixed(0);
+    fields.push({
+      name: `👥 ${crewCutInfo.label} (Pay Period)`,
+      value: crewCutInfo.amount > 0
+        ? `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`
+        : `**${money(0)}**\n-# ${crewPct}% — no crew orders yet`,
+      inline: true
     });
   }
 

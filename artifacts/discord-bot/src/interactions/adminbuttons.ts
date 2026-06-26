@@ -272,7 +272,13 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:assign:manager").setLabel("👤 Assign Manager").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:commission:pickoverride").setLabel("💼 Manager Cut %").setStyle(ButtonStyle.Secondary),
     );
-    await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2, roleRow3] });
+    const roleRow4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setrole:assign:trainer").setLabel("🎓 Add as Trainer").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setrole:assign:manager").setLabel("👔 Add as Manager").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:commission:settrainerrate").setLabel("📚 Trainer Cut %").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:commission:setmanagerrate").setLabel("👔 Manager Cut %").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [roleRow1, roleRow2, roleRow3, roleRow4] });
     return true;
   }
 
@@ -395,6 +401,65 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new USM()
         .setCustomId("admin:assign:pickmechanic")
         .setPlaceholder("Pick a mechanic...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
+    return true;
+  }
+
+  // ── Crew rate: set trainer cut % ──────────────────────────────────────────
+  if (section === "commission" && action === "settrainerrate") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
+    const modal = new ModalBuilder().setCustomId("admin:commission:trainerrate").setTitle("📚 Set Trainer Crew Cut %");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("rate")
+          .setLabel("Trainer cut % of mechanic labour (e.g. 10)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("10")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Crew rate: set manager cut % ──────────────────────────────────────────
+  if (section === "commission" && action === "setmanagerrate") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
+    const modal = new ModalBuilder().setCustomId("admin:commission:managerrate").setTitle("👔 Set Manager Crew Cut %");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("rate")
+          .setLabel("Manager cut % of crew labour (e.g. 20)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("20")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  // ── Assign user as trainer (manual, step 1) ────────────────────────────────
+  if (section === "setrole" && action === "assign") {
+    if (!(await requireRole(interaction, "owner"))) return true;
+    const roleTarget = parts[3] as "trainer" | "manager";
+    const roleLabel = roleTarget === "trainer" ? "📚 Add as Trainer" : "👔 Add as Manager";
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const embed = new EmbedBuilder()
+      .setTitle(`${roleLabel}`)
+      .setColor(COLORS.dark)
+      .setDescription(`Select the member to grant **${roleTarget}** role in the bot database.\n\nThis supplements Discord role detection — they will be recognized as ${roleTarget} even without the Discord role.`)
+      .setFooter({ text: FOOTER });
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new USM()
+        .setCustomId(`admin:setrole:pickmember:${roleTarget}`)
+        .setPlaceholder(`Pick a member to make ${roleTarget}...`)
         .setMinValues(1).setMaxValues(1)
     );
     await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });

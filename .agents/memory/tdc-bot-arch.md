@@ -1,40 +1,68 @@
 ---
 name: TDC Bot Architecture
-description: Core design decisions for the Tokyo Drift Customs Discord bot — commission math, order flow, timeclock design, catalog structure
+description: Core design decisions for the Tokyo Drift Customs Discord bot — commission math, crew cut, order flow, timeclock, catalog, role detection
 ---
 
-## Commission
-- commission = `order.labour * commission_rate` (NOT total — labour only)
-- Default rate: 0.3 (30%) stored in `profiles.commission_rate`
-- Always display commission on every completed order embed
+## Commission Rules
+- **Mechanic** — own completed orders × `commission_rate` (default 30%, per-mechanic from `profiles`).
+- **Trainer** — own orders commission + `trainer_crew_rate` (default 10%) × SUM of all OTHER mechanics' completed order labour this pay period.
+- **Manager / Owner** — own orders commission + `manager_crew_rate` (default 20%) × SUM of all OTHER mechanics' AND trainers' completed order labour this pay period.
+- Crew cut is NEVER from own orders — SQL always filters `mechanic_id != ?`.
+- Crew cut field shown on embed **only** for trainer/manager/owner via optional `crewCutInfo` param.
+
+## Central Commission Helper
+`getCommissionData(userId, guildId, roleLevel)` in `draftbuttons.ts`.
+Returns `{ rate, weekCommission, crewCut, crewCutRate, crewCutLabel }`.
+All draft/order view refreshes call this once and pass a `crewCutInfo` object (or `undefined` for mechanics).
+
+## Embed Signatures
+- `buildDraftEmbed(order, weekCommission, commissionRate, crewCutInfo?)`
+- `buildOrderEmbed(order, mechanicName, weekCommission, commissionRate, crewCutInfo?)`
+- `crewCutInfo` shape: `{ amount: number; rate: number; label: string }`
+
+## Role Detection
+`detectUserRoleLevel(interaction)` in `roles.ts`:
+1. Checks Discord roles via guild_config mapping (owner → manager → trainer → mechanic, highest wins).
+2. Falls back to `user_roles` DB table (for manually assigned roles via admin panel).
+`requireRole` checks both Discord roles AND user_roles DB.
+
+## Order `role_level` Column
+- Stored on the order at creation via `detectUserRoleLevel`.
+- Column index 16 in `SELECT *` — `rowToOrder` reads it there (guild_id is at 15).
+- Used in crew cut SQL: `role_level = 'mechanic'` for trainer cut; `role_level IN ('mechanic','trainer')` for manager cut.
+
+## Guild Config Crew Rates
+- `trainer_crew_rate REAL DEFAULT 0.10` and `manager_crew_rate REAL DEFAULT 0.20` added via `safeAlter` in `db.ts`.
+- Set via `setGuildCrewRate(guildId, field, rate)` in `db.ts`.
+- Admin panel Config tab row4: "📚 Trainer Cut %" / "👔 Manager Cut %" → modal → `admin:commission:trainerrate/managerrate`.
+
+## Admin: Add User as Trainer/Manager
+- Config panel row4: `admin:setrole:assign:trainer/manager` → UserSelectMenu `admin:setrole:pickmember:trainer/manager` → upserts into `user_roles`.
+- Handled in `adminbuttons.ts` (show select) + `selects.ts` (handle selection).
 
 ## Order Flow
-- draft → complete (no approve/reject, no manager gate)
-- On "Complete Order": status = 'complete', posted to mechanic's `sales_channel_id`
-- "Create New Order" button (customId `order:newpanel`) pinned in each sales channel
-- Parts/labour/total auto-calculated from catalog on item select; labour editable via `order:editlabour:ID` button → modal `order:setlabour:ID`
-- `pay` command marks orders `paid` from `status IN ('complete','approved')`
+- draft → complete (no approve/reject step).
+- On "Complete Order": status = 'complete', posted to mechanic's `sales_channel_id`.
+- "Create New Order" button (customId `order:newpanel`) pinned in each sales channel.
+- Parts/labour/total auto-calculated from catalog on item select; labour editable via modal.
+- `pay` command marks orders `paid` from `status IN ('complete','approved')`.
 
 ## Timeclock
-- Panel buttons: `clockin:panel` / `clockout:panel` in `#tdc-timeclock` channel
-- Clock-in posts a new message to timeclock channel with `<t:UNIX:R>` (live Discord timer)
-- Clock-out EDITS that same message (stored in `clock_message_id` / `clock_channel_id` DB cols)
-- `/clock in` / `/clock out` commands also supported as fallback
+- Panel buttons: `clockin:panel` / `clockout:panel` in timeclock channel.
+- Clock-in posts new message with `<t:UNIX:R>` (live Discord timer).
+- Clock-out EDITS that same message (stored in `clock_message_id` / `clock_channel_id` DB cols).
 
 ## Catalog
-- 32 items in `app_settings` key `parts_catalog` (JSON)
-- Each item: `{ label, category, price, cost, labour }`
-- `parts_cost = sum(item.cost)`, `labour = sum(item.labour)`, `total = sum(item.price)`
-- Categories: Repair, Brakes, Engine, Suspension, Transmission, Turbo, Visual & Body, Neon & Lighting, Extras
+- Stored in `app_settings` key `parts_catalog` (JSON).
+- Each item: `{ label, category, price, cost, labour }`.
+- `parts_cost = sum(item.cost)`, `labour = sum(item.labour)`, `total = sum(item.price)`.
 
-## DB Column Indices (important for rowToOrder / rowToTimeclock)
+## DB Column Indices
 - timeclock: col 9 = clock_message_id, col 10 = clock_channel_id
-- guild_config: col 9 = timeclock_channel_id
-
-## Commands Registered
-/order /crew /clock /mysales /pay /job /setup /settings /help /payout
+- guild_config: col 9 = timeclock_channel_id; col 16 = trainer_crew_rate; col 17 = manager_crew_rate
+- orders: col 15 = guild_id; col 16 = role_level
 
 ## Why
-- No approve/reject reduces friction — mechanics complete orders directly
-- Sales channels per mechanic keep orders organized and private
-- Discord <t:UNIX:R> timestamps update in real-time without any polling
+- No approve/reject reduces friction — mechanics complete orders directly.
+- Role stored per-order (not per-user) so historical crew cut calculations survive role changes.
+- Discord `<t:UNIX:R>` timestamps update in real-time without polling.
