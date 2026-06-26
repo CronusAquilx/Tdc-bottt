@@ -62,11 +62,13 @@ function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[]
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Performance").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Perf").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:fullpackage:${orderId}`).setLabel("📦 Full Build").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🩸 Body Parts").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:discount:${orderId}`).setLabel("💲 Discount").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
     )
@@ -213,19 +215,132 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Max Performance modal ───────────────────────────────────────────────────
+  // ── Max Performance — auto-add all top-tier performance items ──────────────
   if (action === "maxperf") {
+    await interaction.deferUpdate();
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) return true;
+    const order = rowToOrder(r.rows[0]);
+
+    const MAX_PERF_ITEMS = [
+      { label: "Engine 4",       category: "Performance", price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",          category: "Performance", price: 40000, cost: 10000, labour: 30000 },
+      { label: "Suspension 4",   category: "Performance", price: 21000, cost: 12000, labour: 9000  },
+      { label: "Transmission 3", category: "Performance", price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",       category: "Performance", price: 16900, cost: 7500,  labour: 9400  },
+    ];
+    const perfLabels = new Set(MAX_PERF_ITEMS.map(i => i.label));
+
+    // Remove any existing performance items that clash, keep everything else
+    const existing = (order.items ?? []).filter((i: any) => !perfLabels.has(i.label));
+    const items = [...existing, ...MAX_PERF_ITEMS];
+
+    const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
+    const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
+    const newTotal     = items.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
+
+    await db.execute({
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, orderId]
+    });
+
+    const [catalogStr, ur] = await Promise.all([
+      getSetting("parts_catalog"),
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
+    ]);
+    const updated = rowToOrder(ur.rows[0]);
+    const guildId = interaction.guildId ?? "";
+    const commData = await getCommissionData(interaction.user.id, guildId, updated.role_level);
+    const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+      : undefined;
+    const catalog = JSON.parse(catalogStr ?? "{}");
+    const catSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${orderId}`)
+      .setPlaceholder("Add more services...")
+      .addOptions((catalog.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
+
+    await interaction.editReply({
+      embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        ...mainDraftButtonRows(orderId)
+      ]
+    });
+    return true;
+  }
+
+  // ── Full Build — add entire preset package (~$225k) ─────────────────────────
+  if (action === "fullpackage") {
+    await interaction.deferUpdate();
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) return true;
+    const order = rowToOrder(r.rows[0]);
+
+    const FULL_PACKAGE = [
+      { label: "Engine 4",       category: "Performance",    price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",          category: "Performance",    price: 40000, cost: 10000, labour: 30000 },
+      { label: "Suspension 4",   category: "Performance",    price: 21000, cost: 12000, labour: 9000  },
+      { label: "Transmission 3", category: "Performance",    price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",       category: "Performance",    price: 16900, cost: 7500,  labour: 9400  },
+      { label: "Primary Color",  category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
+      { label: "Secondary Color",category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
+      { label: "Pearlescent",    category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
+      { label: "Wheels",         category: "Extras",         price:  3900, cost:  500,  labour: 3400  },
+      { label: "Neon Kit",       category: "Neon & Lighting",price:  4000, cost: 1000,  labour: 3000  },
+      { label: "Tire Smoke",     category: "Neon & Lighting",price:  4000, cost: 1000,  labour: 3000  },
+      { label: "Window Tinting", category: "Neon & Lighting",price:  2100, cost: 1000,  labour: 1100  },
+      { label: "Xenon Lighting", category: "Neon & Lighting",price:  2100, cost: 1000,  labour: 1100  },
+    ]; // Total: $224,800
+
+    const newPartsCost = FULL_PACKAGE.reduce((s, i) => s + i.cost,   0);
+    const newLabour    = FULL_PACKAGE.reduce((s, i) => s + i.labour, 0);
+    const newTotal     = FULL_PACKAGE.reduce((s, i) => s + i.price,  0);
+
+    await db.execute({
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      args: [JSON.stringify(FULL_PACKAGE), newPartsCost, newLabour, newTotal, orderId]
+    });
+
+    const [catalogStr2, ur2] = await Promise.all([
+      getSetting("parts_catalog"),
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
+    ]);
+    const updated2 = rowToOrder(ur2.rows[0]);
+    const guildId2 = interaction.guildId ?? "";
+    const commData2 = await getCommissionData(interaction.user.id, guildId2, updated2.role_level);
+    const crewCutInfo2 = ["trainer","manager","owner"].includes(updated2.role_level)
+      ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
+      : undefined;
+    const catalog2 = JSON.parse(catalogStr2 ?? "{}");
+    const catSelect2 = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${orderId}`)
+      .setPlaceholder("Add more services...")
+      .addOptions((catalog2.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
+
+    await interaction.editReply({
+      embeds: [buildDraftEmbed(updated2, commData2.weekCommission, commData2.rate, crewCutInfo2)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect2),
+        ...mainDraftButtonRows(orderId)
+      ]
+    });
+    return true;
+  }
+
+  // ── Discount modal ────────────────────────────────────────────────────────
+  if (action === "discount") {
     const modal = new ModalBuilder()
-      .setCustomId(`order:addmaxperf:${orderId}`)
-      .setTitle("⚡ Max Performance Package");
+      .setCustomId(`order:applydiscount:${orderId}`)
+      .setTitle("💲 Apply Discount");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
-          .setCustomId("amount")
-          .setLabel("Total price (e.g. 100000)")
+          .setCustomId("percent")
+          .setLabel("Discount % (1 – 100)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("Enter Max Performance total price...")
+          .setPlaceholder("e.g. 10  for a 10% discount")
       )
     );
     await interaction.showModal(modal);

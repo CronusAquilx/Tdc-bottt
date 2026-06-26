@@ -91,10 +91,9 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       await interaction.deferUpdate();
       const roleTarget = rest[1] as "trainer" | "manager";
       const targetUserId = interaction.values[0];
-      await db.execute({
-        sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?) ON CONFLICT(discord_id) DO UPDATE SET role = excluded.role",
-        args: [targetUserId, roleTarget]
-      });
+      // Remove any existing role for this user then insert the new one (avoids broken ON CONFLICT on composite key)
+      await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
+      await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
       const embed = new EmbedBuilder()
         .setTitle(`✅ ${roleTarget === "trainer" ? "📚 Trainer" : "👔 Manager"} Assigned`)
         .setColor(COLORS.approved)

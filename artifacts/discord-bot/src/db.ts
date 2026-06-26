@@ -215,6 +215,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE orders ADD COLUMN role_level TEXT NOT NULL DEFAULT 'mechanic'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_crew_rate REAL DEFAULT 0.10");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_crew_rate REAL DEFAULT 0.20");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN clocklog_channel_id TEXT");
   // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
   await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
 
@@ -257,7 +258,7 @@ export async function getGuildConfig(guildId: string) {
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
-                 payday_channel_id, trainer_crew_rate, manager_crew_rate
+                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
@@ -282,12 +283,13 @@ export async function getGuildConfig(guildId: string) {
     payday_channel_id:       row[15] ? String(row[15]) : null,
     trainer_crew_rate:       row[16] != null ? Number(row[16]) : 0.10,
     manager_crew_rate:       row[17] != null ? Number(row[17]) : 0.20,
+    clocklog_channel_id:     row[18] ? String(row[18]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({

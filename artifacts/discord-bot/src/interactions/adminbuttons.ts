@@ -228,10 +228,11 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `📜 Logs: ${ch(config?.log_channel_id)}\n` +
         `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
         `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
-        `⏰ Timeclock: ${ch(config?.timeclock_channel_id)}\n` +
+        `⏰ Clock Panel: ${ch(config?.timeclock_channel_id)}\n` +
+        `📋 Clock Logs: ${ch((config as any)?.clocklog_channel_id)}\n` +
         `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-          `📚 Training: ${ch((config as any)?.training_channel_id)}`
+        `📚 Training: ${ch((config as any)?.training_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -242,7 +243,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:loach").setLabel("🌴 LOA").setStyle(ButtonStyle.Secondary),
     );
     const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰ Timeclock").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰ Clock Panel").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:setup:clocklogch").setLabel("📋 Clock Logs").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:rafflech").setLabel("🎰 Raffle").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:trainingch").setLabel("📚 Training").setStyle(ButtonStyle.Secondary),
@@ -570,24 +572,21 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     try {
       const config = await getGuildConfig(guild.id);
       const permOverwrites: any[] = [
-        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        // Everyone can see the panel but cannot send messages (only use buttons)
+        { id: guild.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] },
       ];
       if (guild.members.me) {
         permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
       }
-      // Only managers and above can see the timeclock log channel — mechanics clock in/out from their sales channel
-      for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
-        permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] });
-      }
       const ch = await guild.channels.create({
-        name: "tdc-timeclock",
+        name: "tdc-clock-panel",
         type: ChannelType.GuildText,
-        topic: "⏰ Tokyo Drift Customs — Clock in and out here",
+        topic: "⏰ Tokyo Drift Customs — Clock in and out using the buttons below",
         permissionOverwrites: permOverwrites
       }) as TextChannel;
       await postTimeclockPanel(ch);
       await setGuildConfig(guild.id, "timeclock_channel_id", ch.id);
-      await interaction.followUp({ content: `✅ Timeclock channel created → <#${ch.id}>`, ephemeral: true });
+      await interaction.followUp({ content: `✅ Clock panel created → <#${ch.id}>\n\n💡 **Next step:** Set up a **Clock Logs** channel so clock-in/out records go there instead of the panel.`, ephemeral: true });
     } catch (err: any) {
       await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
     }
@@ -635,7 +634,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
@@ -646,6 +645,7 @@ export const CHANNEL_MAP: Record<string, {
   rafflech:    { field: "raffle_channel_id",       name: "tdc-raffle",      topic: "Tokyo Drift Customs — Raffles",              label: "Raffle"      },
   leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
   trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
+  clocklogch:  { field: "clocklog_channel_id",     name: "tdc-clock-logs",  topic: "Tokyo Drift Customs — Clock in/out logs",    label: "Clock Logs"  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

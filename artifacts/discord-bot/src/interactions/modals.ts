@@ -60,13 +60,13 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     return;
   }
 
-  // ── Max Performance ────────────────────────────────────────────────────────
-  if (ns === "order" && action === "addmaxperf") {
+  // ── Discount ────────────────────────────────────────────────────────────────
+  if (ns === "order" && action === "applydiscount") {
     await interaction.deferReply({ ephemeral: true });
-    const amtStr = interaction.fields.getTextInputValue("amount").replace(/[$,]/g, "");
-    const amount = parseFloat(amtStr);
-    if (isNaN(amount) || amount <= 0) {
-      await interaction.editReply({ content: "❌ Invalid amount — enter a number like `100000`." });
+    const pctStr = interaction.fields.getTextInputValue("percent").replace(/[%\s]/g, "");
+    const pct = parseFloat(pctStr);
+    if (isNaN(pct) || pct < 1 || pct > 100) {
+      await interaction.editReply({ content: "❌ Enter a discount between **1** and **100**." });
       return;
     }
 
@@ -74,17 +74,26 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
     const order = rowToOrder(r.rows[0]);
 
-    // Remove any existing Max Performance entry, then add fresh
-    const items: any[] = (order.items ?? []).filter((i: any) => i.label !== "Max Performance");
-    items.push({ label: "Max Performance", price: amount, cost: 0, labour: amount, category: "Performance" });
+    if (!order.items.length) {
+      await interaction.editReply({ content: "❌ Add items to the order before applying a discount." });
+      return;
+    }
 
-    const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
-    const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
-    const newTotal     = items.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
+    const mult = 1 - pct / 100;
+    const discounted = order.items.map((i: any) => ({
+      ...i,
+      price:  Math.round(i.price  * mult),
+      cost:   Math.round(i.cost   * mult),
+      labour: Math.round(i.labour * mult),
+    }));
+
+    const newPartsCost = discounted.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
+    const newLabour    = discounted.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
+    const newTotal     = discounted.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
 
     await db.execute({
       sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
-      args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, extra]
+      args: [JSON.stringify(discounted), newPartsCost, newLabour, newTotal, extra]
     });
 
     const { order: updated, weekCommission, rate, crewCutInfo, catSelect } = await refreshDraftView(extra);
