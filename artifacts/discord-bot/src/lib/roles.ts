@@ -74,19 +74,17 @@ export async function detectUserRoleLevel(interaction: AnyInteraction): Promise<
             { level: 'mechanic', roleIds: splitRoleIds(config.mechanic_role_id) },
           ];
           // Check all mappings and return the highest matching Discord role
+          // Discord roles are always authoritative when they match
           for (const { level, roleIds } of mappings) {
             if (roleIds.some(rid => memberRoleIds.has(rid))) return level;
           }
-          // User has at least one configured Discord role bucket but didn't match —
-          // they are not in the system (skip DB fallback to avoid stale overrides)
-          const hasAnyConfiguredRoles = mappings.some(m => m.roleIds.length > 0);
-          if (hasAnyConfiguredRoles) return 'mechanic';
+          // No Discord role matched — fall through to DB fallback below
         }
       }
     }
   } catch { /* ignore */ }
 
-  // Fallback: check user_roles DB table ONLY if no Discord role config matched
+  // Fallback: check user_roles DB table (used when Discord role config doesn't cover this user)
   const dbRole = await dbGetUserRole(interaction.user.id);
   return dbRole ?? 'mechanic';
 }
@@ -124,19 +122,14 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
   );
   if (!hasAnyRoleConfig) return true;
 
-  // Check Discord roles first — these are always authoritative
+  // Check Discord roles first — always authoritative when they match
   const discordAllowed = await checkDiscordRoles(interaction, minRole);
   if (discordAllowed) return true;
 
-  // Only fall back to user_roles DB table if the user has NO Discord role mappings at all
-  // (i.e. they are not found in any Discord role bucket). This prevents DB 'trainer'
-  // entries from overriding a user's proper Manager Discord role.
-  const hasAnyDiscordRole = await checkDiscordRoles(interaction, "mechanic");
-  if (!hasAnyDiscordRole) {
-    // User has no Discord role match at all — check DB as fallback
-    const dbAllowed = await dbHasRole(interaction.user.id, minRole);
-    if (dbAllowed) return true;
-  }
+  // Fall back to user_roles DB table (covers users manually assigned via admin panel
+  // or whose Discord role isn't mapped in guild config)
+  const dbAllowed = await dbHasRole(interaction.user.id, minRole);
+  if (dbAllowed) return true;
 
   try {
     if (!interaction.replied && !(interaction as any).deferred) {
