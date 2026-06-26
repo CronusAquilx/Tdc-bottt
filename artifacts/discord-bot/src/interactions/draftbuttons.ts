@@ -27,7 +27,9 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
     getProfile(userId),
     getGuildConfig(guildId)
   ]);
-  const rate = profile?.commission_rate ?? 0.3;
+  // Mechanics default to 30%; managers/trainers/owners default to 40%
+  const defaultRate = roleLevel === "mechanic" ? 0.3 : 0.4;
+  const rate = profile?.commission_rate ?? defaultRate;
 
   const weekLabourR = await db.execute({
     sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
@@ -39,15 +41,8 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
   let crewCutRate = 0;
   let crewCutLabel = "";
 
-  if (roleLevel === "trainer") {
-    crewCutRate = config?.trainer_crew_rate ?? 0.10;
-    const r = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level = 'mechanic'`,
-      args: [userId]
-    });
-    crewCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
-    crewCutLabel = "Trainer Cut";
-  } else if (roleLevel === "manager" || roleLevel === "owner") {
+  // Only managers/owners get a crew cut — trainer crew cut is removed
+  if (roleLevel === "manager" || roleLevel === "owner") {
     crewCutRate = config?.manager_crew_rate ?? 0.20;
     const r = await db.execute({
       sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,

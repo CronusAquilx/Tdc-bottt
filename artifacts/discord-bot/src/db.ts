@@ -216,8 +216,6 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_crew_rate REAL DEFAULT 0.10");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_crew_rate REAL DEFAULT 0.20");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN clocklog_channel_id TEXT");
-  // Reset any profiles incorrectly saved with 0.4 trainer default back to standard 0.3
-  await db.execute("UPDATE profiles SET commission_rate = 0.3 WHERE commission_rate = 0.4");
   // Ensure the owner/manager has manager role in the DB so they always get manager cut + admin access
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
   await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'manager')", args: ["1363222342800511058"] });

@@ -104,13 +104,21 @@ export function buildOrderEmbed(
       }
     );
 
-  if (crewCutInfo && crewCutInfo.amount > 0) {
+  if (crewCutInfo) {
     const crewPct = (crewCutInfo.rate * 100).toFixed(0);
-    embed.addFields({
-      name:  `👥 ${crewCutInfo.label} (Pay Period)`,
-      value: `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`,
-      inline: true
-    });
+    const totalPayout = Math.round(weekCommission) + Math.round(crewCutInfo.amount);
+    embed.addFields(
+      {
+        name:  `👥 ${crewCutInfo.label} (Pay Period)`,
+        value: `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`,
+        inline: true
+      },
+      {
+        name:  "💸 Total Payout (Pay Period)",
+        value: `**${money(totalPayout)}**\n-# Order commission + Cut combined`,
+        inline: true
+      }
+    );
   }
 
   embed.setFooter({ text: FOOTER_TEXT }).setTimestamp();
@@ -171,13 +179,21 @@ export function buildDraftEmbed(
 
   if (crewCutInfo) {
     const crewPct = (crewCutInfo.rate * 100).toFixed(0);
-    fields.push({
-      name: `👥 ${crewCutInfo.label} (Pay Period)`,
-      value: crewCutInfo.amount > 0
-        ? `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`
-        : `**${money(0)}**\n-# ${crewPct}% — no crew orders yet`,
-      inline: true
-    });
+    const totalPayout = Math.round(weekCommission) + Math.round(crewCutInfo.amount);
+    fields.push(
+      {
+        name: `👥 ${crewCutInfo.label} (Pay Period)`,
+        value: crewCutInfo.amount > 0
+          ? `**${money(Math.round(crewCutInfo.amount))}**\n-# ${crewPct}% of crew labour`
+          : `**${money(0)}**\n-# ${crewPct}% — no crew orders yet`,
+        inline: true
+      },
+      {
+        name: "💸 Total Payout (Pay Period)",
+        value: `**${money(totalPayout)}**\n-# Order commission + Cut combined`,
+        inline: true
+      }
+    );
   }
 
   return new EmbedBuilder()
