@@ -57,24 +57,30 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === "add") {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferReply({ ephemeral: true });
-    const target = interaction.options.getUser("user", true);
-    const role = interaction.options.getString("role", true);
-    const displayName = interaction.options.getString("display_name", true);
-    await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [target.id, displayName] });
-    await db.execute({ sql: "UPDATE profiles SET display_name = ?, commission_rate = 0.3 WHERE discord_id = ?", args: [displayName, target.id] });
-    await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, ?)", args: [target.id, role] });
-    const caller = await getProfile(interaction.user.id);
-    const embed = new EmbedBuilder()
-      .setTitle("✅ Crew Member Added")
-      .setColor(COLORS.approved)
-      .addFields(
-        { name: "User", value: displayName, inline: true },
-        { name: "Role", value: role.toUpperCase(), inline: true },
-        { name: "Added By", value: caller?.display_name ?? interaction.user.username, inline: true }
-      )
-      .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
-    await interaction.editReply({ embeds: [embed] });
-    await logToChannel(interaction, embed);
+    try {
+      const target = interaction.options.getUser("user", true);
+      const role = interaction.options.getString("role", true);
+      const displayName = interaction.options.getString("display_name", true);
+      await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [target.id, displayName] });
+      await db.execute({ sql: "UPDATE profiles SET display_name = ?, commission_rate = 0.3 WHERE discord_id = ?", args: [displayName, target.id] });
+      await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
+      await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [target.id, role] });
+      const caller = await getProfile(interaction.user.id);
+      const embed = new EmbedBuilder()
+        .setTitle("✅ Crew Member Added")
+        .setColor(COLORS.approved)
+        .addFields(
+          { name: "User", value: displayName, inline: true },
+          { name: "Role", value: role.toUpperCase(), inline: true },
+          { name: "Added By", value: caller?.display_name ?? interaction.user.username, inline: true }
+        )
+        .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+      await interaction.editReply({ embeds: [embed] });
+      await logToChannel(interaction, embed);
+    } catch (err: any) {
+      console.error("[TDC] crew add error:", err);
+      try { await interaction.editReply({ content: `❌ Failed to add crew member: ${err?.message ?? "Unknown error"}` }); } catch { /* ignore */ }
+    }
     return;
   }
 

@@ -89,20 +89,29 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     if (ns === "admin" && action === "setrole" && rest[0] === "pickmember") {
       if (!(await requireRole(interaction, "owner"))) return;
       await interaction.deferUpdate();
-      const roleTarget = rest[1] as "trainer" | "manager";
-      const targetUserId = interaction.values[0];
-      // Remove any existing role for this user then insert the new one (avoids broken ON CONFLICT on composite key)
-      await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
-      await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
-      const embed = new EmbedBuilder()
-        .setTitle(`✅ ${roleTarget === "trainer" ? "📚 Trainer" : "👔 Manager"} Assigned`)
-        .setColor(COLORS.approved)
-        .setDescription(
-          `<@${targetUserId}> is now recognised as a **${roleTarget}** in the bot.\n\n` +
-          `They will see their crew cut on their order embeds, and their commission is calculated accordingly.`
-        )
-        .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
-      await interaction.editReply({ embeds: [embed], components: [] });
+      try {
+        const roleTarget = rest[1] as "trainer" | "manager";
+        const targetUserId = interaction.values[0];
+        const targetUser = interaction.users?.get(targetUserId) ?? (await interaction.client.users.fetch(targetUserId).catch(() => null));
+        const displayName = targetUser?.displayName ?? targetUser?.username ?? targetUserId;
+        // Ensure profile exists so the role record has a backing profile
+        await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [targetUserId, displayName] });
+        // Remove any existing role for this user then insert the new one
+        await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
+        await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
+        const embed = new EmbedBuilder()
+          .setTitle(`✅ ${roleTarget === "trainer" ? "📚 Trainer" : "👔 Manager"} Assigned`)
+          .setColor(COLORS.approved)
+          .setDescription(
+            `<@${targetUserId}> is now recognised as a **${roleTarget}** in the bot.\n\n` +
+            `They will see their crew cut on their order embeds, and their commission is calculated accordingly.`
+          )
+          .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+        await interaction.editReply({ embeds: [embed], components: [] });
+      } catch (err: any) {
+        console.error("[TDC] setrole:pickmember error:", err);
+        try { await interaction.editReply({ content: `❌ Failed to assign role: ${err?.message ?? "Unknown error"}`, components: [] }); } catch { /* ignore */ }
+      }
       return;
     }
 

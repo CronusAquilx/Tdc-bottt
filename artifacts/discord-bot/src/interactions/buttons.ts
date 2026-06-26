@@ -127,7 +127,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       return;
     }
 
-    // Post to timeclock channel
+    // Post clock-in embed to clock LOGS channel (not the panel channel)
     const profile = await getProfile(interaction.user.id);
     const displayName = profile?.display_name
       ?? (interaction.member as any)?.displayName
@@ -139,9 +139,10 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      if (config?.timeclock_channel_id) {
+      const logChanId = (config as any)?.clocklog_channel_id ?? config?.timeclock_channel_id;
+      if (logChanId) {
         try {
-          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          const ch = await interaction.guild.channels.fetch(logChanId);
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [clockEmbed] });
             await db.execute({
@@ -266,12 +267,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       const sinceTs = activeRow.rows[0]
         ? `\n> Clocked in <t:${Math.floor(new Date(String(activeRow.rows[0][0])).getTime() / 1000)}:R>`
         : "";
-      const clockOutBtn = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴 Clock Out Now").setStyle(ButtonStyle.Danger)
-      );
       await interaction.editReply({
         content: `⚠️ **You're already clocked in!**${sinceTs}\n\nClock out first before clocking in again.`,
-        components: [clockOutBtn]
       });
       return;
     }
@@ -284,13 +281,14 @@ export async function handleButton(interaction: ButtonInteraction) {
       ?? interaction.user.username;
     const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
-    // Always post to the configured timeclock channel
+    // Post to the clock LOGS channel (not the panel channel — panel stays clean)
     let posted = false;
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      if (config?.timeclock_channel_id) {
+      const logChanId = (config as any)?.clocklog_channel_id ?? config?.timeclock_channel_id;
+      if (logChanId) {
         try {
-          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          const ch = await interaction.guild.channels.fetch(logChanId);
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [embed] });
             await db.execute({
@@ -303,7 +301,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       }
     }
 
-    await interaction.editReply({ content: posted ? "✅ Clocked in!" : "✅ Clocked in! (no timeclock channel configured)", ephemeral: true } as any);
+    const unixTs = Math.floor(new Date(entry.clock_in_time).getTime() / 1000);
+    await interaction.editReply({ content: `✅ **Clocked in!** <t:${unixTs}:t>${posted ? "" : "\n*(Set up a Clock Logs channel to record shifts)*"}` } as any);
     return;
   }
 
@@ -353,7 +352,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       orderCount
     );
 
-    // Edit the original clock-in message in the timeclock channel
+    // Edit original clock-in message in the LOGS channel (not panel channel)
     if (updated.clock_message_id && updated.clock_channel_id && interaction.guild) {
       try {
         const ch = await interaction.guild.channels.fetch(updated.clock_channel_id);
@@ -362,12 +361,15 @@ export async function handleButton(interaction: ButtonInteraction) {
           await msg.edit({ embeds: [embed] });
         }
       } catch {
-        // If original message not found, post a new clock-out to the timeclock channel
+        // If original message not found, post new clock-out to clock logs channel
         try {
-          const config = await getGuildConfig(interaction.guild.id);
-          if (config?.timeclock_channel_id) {
-            const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
-            if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+          if (interaction.guild) {
+            const config = await getGuildConfig(interaction.guild.id);
+            const logChanId = (config as any)?.clocklog_channel_id ?? config?.timeclock_channel_id;
+            if (logChanId) {
+              const ch = await interaction.guild.channels.fetch(logChanId);
+              if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+            }
           }
         } catch { /* ignore */ }
       }
@@ -376,6 +378,49 @@ export async function handleButton(interaction: ButtonInteraction) {
     const hrs = Math.floor(mins / 60);
     const m = Math.round(mins % 60);
     await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
+    return;
+  }
+
+  // ── Check Time (how long clocked in) ──────────────────────────────────────
+  if (ns === "checktime" && action === "panel") {
+    await interaction.deferReply({ ephemeral: true });
+    const active = await db.execute({
+      sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      args: [interaction.user.id]
+    });
+    if (!active.rows[0]) {
+      await interaction.editReply({ content: "⚫ You're not currently clocked in." });
+      return;
+    }
+    const clockInTime = String(active.rows[0][0]);
+    const mins = (Date.now() - new Date(clockInTime).getTime()) / 60000;
+    const hrs = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    const unixTs = Math.floor(new Date(clockInTime).getTime() / 1000);
+    await interaction.editReply({
+      content: `🟢 You've been clocked in for **${hrs}h ${m}m**\n> Started: <t:${unixTs}:t> · <t:${unixTs}:R>`
+    });
+    return;
+  }
+
+  // ── Close Channel (trainer+) ───────────────────────────────────────────────
+  if (ns === "closechan" && action === "panel") {
+    if (!(await requireRole(interaction, "trainer"))) return;
+    await interaction.deferReply({ ephemeral: true });
+    const channel = interaction.channel;
+    if (!channel || !interaction.guild) {
+      await interaction.editReply({ content: "❌ Could not find this channel." });
+      return;
+    }
+    try {
+      const chName = (channel as any).name ?? "channel";
+      await (channel as any).permissionOverwrites.edit(interaction.guild.id, { SendMessages: false });
+      try { await (channel as any).setName(`closed-${chName}`.slice(0, 100)); } catch { /* rename may fail if already prefixed */ }
+      await (channel as any).send({ content: `🔒 **Channel closed** by <@${interaction.user.id}>` });
+      await interaction.editReply({ content: `✅ Channel locked and renamed to \`closed-${chName}\`.` });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Failed to close channel: ${err?.message ?? "Missing permissions"}` });
+    }
     return;
   }
 

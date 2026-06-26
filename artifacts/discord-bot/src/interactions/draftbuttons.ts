@@ -217,7 +217,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Max Performance — auto-add all top-tier performance items ──────────────
   if (action === "maxperf") {
-    await interaction.deferUpdate();
+    await interaction.deferReply({ ephemeral: true });
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
@@ -260,19 +260,30 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions((catalog.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    await interaction.editReply({
+    // Update the original order embed, then reply with an ephemeral breakdown
+    await interaction.message.edit({
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
       ]
     });
+    await interaction.editReply({
+      content:
+        "⚡ **Max Performance Package applied!**\n\n" +
+        `> 🔧 Engine 4 — $70,000\n` +
+        `> 💨 Turbo — $40,000\n` +
+        `> 🌀 Suspension 4 — $21,000\n` +
+        `> ⚙️ Transmission 3 — $26,300\n` +
+        `> 🛑 Brakes 3 — $16,900\n\n` +
+        `**Package Total: $174,200** · Labour: $89,700`
+    });
     return true;
   }
 
   // ── Full Build — add entire preset package (~$225k) ─────────────────────────
   if (action === "fullpackage") {
-    await interaction.deferUpdate();
+    await interaction.deferReply({ ephemeral: true });
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
@@ -318,12 +329,33 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions((catalog2.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    await interaction.editReply({
+    // Update the original order embed, then reply with ephemeral breakdown
+    await interaction.message.edit({
       embeds: [buildDraftEmbed(updated2, commData2.weekCommission, commData2.rate, crewCutInfo2)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect2),
         ...mainDraftButtonRows(orderId)
       ]
+    });
+    await interaction.editReply({
+      content:
+        "📦 **Full Build Package applied! ($224,800)**\n\n" +
+        "**⚡ Performance**\n" +
+        "> 🔧 Engine 4 — $70,000\n" +
+        "> 💨 Turbo — $40,000\n" +
+        "> 🌀 Suspension 4 — $21,000\n" +
+        "> ⚙️ Transmission 3 — $26,300\n" +
+        "> 🛑 Brakes 3 — $16,900\n\n" +
+        "**🎨 Visual & Body**\n" +
+        "> 🖌️ Primary Color — $11,500\n" +
+        "> 🖌️ Secondary Color — $11,500\n" +
+        "> ✨ Pearlescent — $11,500\n\n" +
+        "**🎆 Extras & Lighting**\n" +
+        "> 🛞 Wheels — $3,900\n" +
+        "> 💡 Neon Kit — $4,000\n" +
+        "> 💨 Tire Smoke — $4,000\n" +
+        "> 🪟 Window Tinting — $2,100\n" +
+        "> 💡 Xenon Lighting — $2,100"
     });
     return true;
   }

@@ -37,13 +37,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       ?? interaction.user.username;
     const embed = buildClockInEmbed(displayName, entry.clock_in_time);
 
-    // Post to timeclock channel — reply with short ack to avoid double-posting
+    // Post to clock LOGS channel (not the panel channel — panel stays clean)
     let postedTo = "";
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      if (config?.timeclock_channel_id) {
+      const logChanId = (config as any)?.clocklog_channel_id ?? config?.timeclock_channel_id;
+      if (logChanId) {
         try {
-          const ch = await interaction.guild.channels.fetch(config.timeclock_channel_id);
+          const ch = await interaction.guild.channels.fetch(logChanId);
           if (ch?.isTextBased()) {
             const msg = await (ch as any).send({ embeds: [embed] });
             await db.execute({ sql: "UPDATE timeclock SET clock_message_id = ?, clock_channel_id = ? WHERE id = ?", args: [msg.id, ch.id, id] });

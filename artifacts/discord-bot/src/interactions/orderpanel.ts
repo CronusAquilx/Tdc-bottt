@@ -28,10 +28,21 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
     new ButtonBuilder()
       .setCustomId("clockout:panel")
       .setLabel("🔴  Clock Out")
-      .setStyle(ButtonStyle.Danger)
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("checktime:panel")
+      .setLabel("⏱️  Check Time")
+      .setStyle(ButtonStyle.Secondary),
   );
 
-  const msg = await channel.send({ embeds: [panelEmbed], components: [row] });
+  const closeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("closechan:panel")
+      .setLabel("🔒  Close Channel")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  const msg = await channel.send({ embeds: [panelEmbed], components: [row, closeRow] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }

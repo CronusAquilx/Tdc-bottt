@@ -719,18 +719,25 @@ export async function postRafflePanel(channel: TextChannel) {
 
 export async function postTimeclockPanel(channel: TextChannel) {
   const panelEmbed = new EmbedBuilder()
-    .setTitle("⏰  SHIFT LOG  ·  MANAGEMENT ONLY")
+    .setTitle("⏰  TOKYO DRIFT CUSTOMS  ·  CLOCK PANEL")
     .setColor(0x0d0d0d)
     .setDescription(
-      "**Tokyo Drift Customs — Timeclock Log**\n\n" +
-      "This channel is a **management-only log** of all crew clock-ins and clock-outs.\n\n" +
-      "Crew members clock in and out directly from their **personal sales channels**.\n" +
-      "Idle warnings are sent there too."
+      "**Use the buttons below to clock in or out.**\n\n" +
+      "• 🟢 **Clock In** — start your shift\n" +
+      "• 🔴 **Clock Out** — end your shift\n" +
+      "• ⏱️ **Check Time** — see how long you've been clocked in\n\n" +
+      "*Your clock-in and clock-out records are posted in the clock logs channel.*"
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
     .setTimestamp();
 
-  const msg = await channel.send({ embeds: [panelEmbed] });
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("clockin:panel").setLabel("🟢  Clock In").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("clockout:panel").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("checktime:panel").setLabel("⏱️  Check Time").setStyle(ButtonStyle.Secondary),
+  );
+
+  const msg = await channel.send({ embeds: [panelEmbed], components: [row] });
   try { await msg.pin(); } catch { /* ignore */ }
   return msg;
 }
