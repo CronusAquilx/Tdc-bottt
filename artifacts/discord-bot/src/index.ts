@@ -48,6 +48,16 @@ if (!token) {
   process.exit(1);
 }
 
+// Guard: only connect to Discord when running on Render (the live deployment).
+// This prevents the Replit dev environment from spinning up a second bot instance
+// that would cause duplicate command responses and double event handling.
+// Set BOT_ENABLED=true on Render to allow the connection.
+// Render also automatically sets RENDER=true for all its services.
+const BOT_ACTIVE = process.env.BOT_ENABLED === "true" || process.env.RENDER === "true";
+if (!BOT_ACTIVE) {
+  console.log("[TDC] ⚠️  Not on Render — running health server only. Set BOT_ENABLED=true or deploy to Render to activate the bot.");
+}
+
 const tokenParts = token.split(".");
 const clientId = Buffer.from(tokenParts[0], "base64").toString("utf-8");
 
@@ -453,7 +463,11 @@ async function scheduleTimeclockPanelRepost(client: Client) {
 }
 
 initDb().then(() => {
-  client.login(token!);
+  if (BOT_ACTIVE) {
+    client.login(token!);
+  } else {
+    console.log("[TDC] 🛑 Bot login skipped (not on Render). Health server is running.");
+  }
 }).catch(err => {
   console.error("[TDC] ❌ DB init failed:", err);
   process.exit(1);

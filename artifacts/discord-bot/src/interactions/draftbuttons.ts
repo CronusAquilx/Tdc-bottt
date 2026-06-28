@@ -494,16 +494,21 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       args: [orderId]
     });
 
-    const [ur, profile] = await Promise.all([
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }),
-      getProfile(interaction.user.id)
-    ]);
+    const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
     const guildId = interaction.guildId ?? "";
 
-    const currentRoleSubmit = await detectUserRoleLevel(interaction);
-    const commData = await getCommissionData(interaction.user.id, guildId, currentRoleSubmit);
-    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(currentRoleSubmit)
+    // Always use the order's mechanic_id — managers completing orders on behalf
+    // of a mechanic should show that mechanic's commission, not the manager's.
+    const mechanicId = completed.mechanic_id ?? interaction.user.id;
+    const mechanicRoleLevel = completed.role_level ?? "mechanic";
+
+    const [profile] = await Promise.all([
+      getProfile(mechanicId)
+    ]);
+
+    const commData = await getCommissionData(mechanicId, guildId, mechanicRoleLevel);
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
 
@@ -514,8 +519,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       commData.rate,
       crewCutInfo
     );
-
-    const mechanicId = interaction.user.id;
 
     const activeTC = await db.execute({
       sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",

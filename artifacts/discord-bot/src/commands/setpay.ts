@@ -119,14 +119,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.editReply({ embeds: [embed] });
 
-  // Re-post their order panel in their sales channel so it reflects the new rate
+  // Always re-post a fresh panel and notice to the sales channel for any setpay change
   if (interaction.guild && updatedProfile?.sales_channel_id) {
     try {
       const ch = await interaction.guild.channels.fetch(updatedProfile.sales_channel_id).catch(() => null);
       if (ch?.isTextBased()) {
         const noticeLines: string[] = [];
-        if (commission !== null)     noticeLines.push(`💵 Weekly commission manually set to **${money(commission)}**`);
-        if (managerCut !== null)     noticeLines.push(`👔 Manager cut manually set to **${money(managerCut)}**`);
+        if (commission !== null)     noticeLines.push(`💵 Running commission set to **${money(commission)}**`);
+        if (managerCut !== null)     noticeLines.push(`👔 Manager cut set to **${money(managerCut)}**`);
         if (commissionRate !== null) noticeLines.push(`📊 Commission rate updated to **${(commissionRate * 100).toFixed(0)}%**`);
 
         await (ch as any).send({
@@ -136,15 +136,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
             `\n> *Updated by <@${interaction.user.id}>*`
         });
 
-        // Also re-post a fresh order panel if commission rate changed
-        if (commissionRate !== null) {
-          await postOrderPanel(
-            ch as any,
-            target.id,
-            updatedProfile.display_name,
-            commissionRate
-          );
-        }
+        // Always re-post a fresh order panel so the channel shows up-to-date rate/pay info
+        await postOrderPanel(
+          ch as any,
+          target.id,
+          updatedProfile.display_name,
+          updatedProfile.commission_rate ?? 0.3
+        );
       }
     } catch { /* ignore */ }
   }
