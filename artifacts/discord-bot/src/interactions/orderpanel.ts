@@ -22,6 +22,10 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
       .setCustomId("order:newpanel")
       .setLabel("📋  New Order")
       .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`orderpay:start:${mechanicId}`)
+      .setLabel("💸  Pay All")
+      .setStyle(ButtonStyle.Primary),
   );
 
   const msg = await channel.send({ embeds: [panelEmbed], components: [row] });

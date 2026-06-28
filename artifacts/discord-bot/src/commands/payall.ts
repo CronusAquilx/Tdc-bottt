@@ -14,7 +14,7 @@ export const data = new SlashCommandBuilder()
   .setDescription("Process weekly payout for ALL crew and post payday announcement (owner only)");
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  if (!(await requireRole(interaction, "owner"))) return;
+  if (!(await requireRole(interaction, "manager"))) return;
   await interaction.deferReply({ ephemeral: true });
 
   const embed = await buildPayallSummaryEmbed(weekStart(), interaction.guild ?? undefined);
