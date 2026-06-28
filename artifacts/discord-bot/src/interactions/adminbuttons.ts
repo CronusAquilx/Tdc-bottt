@@ -285,20 +285,82 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   if (section === "panel" && action === "payroll") {
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ ephemeral: true });
+
+    // Pull every profile and their current-period labour
+    const crewR = await db.execute({
+      sql: `SELECT p.discord_id, p.display_name, p.commission_rate, p.commission_adjustment,
+                   COALESCE(SUM(o.labour), 0) AS week_labour, COUNT(o.id) AS order_count
+            FROM profiles p
+            LEFT JOIN orders o ON o.mechanic_id = p.discord_id
+              AND o.status IN ('complete', 'approved', 'paid')
+              AND datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(
+                    COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')
+                  )
+            GROUP BY p.discord_id
+            ORDER BY p.display_name`,
+      args: []
+    });
+
+    const lines: string[] = [];
+    let grandTotal = 0;
+    for (const row of crewR.rows) {
+      const name     = String(row[1] ?? "Unknown");
+      const rate     = Number(row[2] ?? 0.3);
+      const override = Number(row[3] ?? 0);
+      const labour   = Number(row[4] ?? 0);
+      const orders   = Number(row[5] ?? 0);
+      const comm     = override > 0 ? override : labour * rate;
+      grandTotal += comm;
+      const rateLabel = override > 0 ? "manual" : `${(rate * 100).toFixed(0)}%`;
+      const ordNote   = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
+      lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(comm).toLocaleString()}**`);
+    }
+
+    const crewBlock = lines.length ? lines.join("\n") : "*No crew profiles found.*";
+
     const embed = new EmbedBuilder()
       .setTitle("💸  PAYROLL")
       .setColor(0xffd700)
       .setDescription(
-        "**Manage crew pay and payday schedule.**\n\n" +
-        "• **Schedule Pay Day** — run payday right now: pay all crew, post announcement, reset weekly stats & order numbers\n" +
-        "• Payday runs **automatically every Monday** at midnight UTC\n\n" +
+        "**Current pay period commission summary.**\n\n" +
+        "Use **💰 Set Individual Pay** to manually override someone's commission for this period.\n" +
+        "Use **📅 Pay All** to process payroll, notify crew, and reset the week.\n\n" +
         "💡 *You can also use `/payall` or `/pay @user` commands directly.*"
       )
+      .addFields(
+        { name: `👥 Crew (${crewR.rows.length})`, value: crewBlock.slice(0, 1024), inline: false },
+        { name: "💰 Total Commission", value: `**$${Math.round(grandTotal).toLocaleString()}**`, inline: true }
+      )
       .setFooter({ text: FOOTER });
+
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅  Schedule Pay Day").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:payroll:setpay").setLabel("💰 Set Individual Pay").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅 Pay All").setStyle(ButtonStyle.Success),
     );
     await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Payroll: set individual pay — pick member ─────────────────────────────
+  if (section === "payroll" && action === "setpay") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("💰  Set Individual Commission")
+      .setColor(0xffd700)
+      .setDescription(
+        "Pick the crew member whose commission you want to override for this pay period.\n\n" +
+        "This sets a **fixed dollar amount** that replaces the calculated commission.\n" +
+        "Set it to `0` to clear the override and go back to the % calculation."
+      )
+      .setFooter({ text: FOOTER });
+    const { UserSelectMenuBuilder: USM } = await import("discord.js");
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new USM()
+        .setCustomId("admin:payroll:pickmember")
+        .setPlaceholder("Select a crew member...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
     return true;
   }
 

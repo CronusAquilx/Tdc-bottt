@@ -150,6 +150,34 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     return;
   }
 
+  // ── Admin: payroll set individual pay ─────────────────────────────────────
+  if (ns === "admin" && action === "payroll" && extra.startsWith("setpay:")) {
+    await interaction.deferReply({ ephemeral: true });
+    if (!(await requireRole(interaction, "manager"))) return;
+    const memberId = extra.replace("setpay:", "");
+    const amountStr = interaction.fields.getTextInputValue("amount").replace(/[$,\s]/g, "");
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount) || amount < 0) {
+      await interaction.editReply({ content: "❌ Invalid amount — enter a dollar value like `5000` or `0` to clear." });
+      return;
+    }
+    const profile = await getProfile(memberId);
+    if (!profile) {
+      await interaction.editReply({ content: "❌ User not found in crew." });
+      return;
+    }
+    await db.execute({
+      sql: "UPDATE profiles SET commission_adjustment = ? WHERE discord_id = ?",
+      args: [amount, memberId]
+    });
+    if (amount === 0) {
+      await interaction.editReply({ content: `✅ Cleared commission override for **${profile.display_name}** — back to % calculation.` });
+    } else {
+      await interaction.editReply({ content: `✅ Set **${profile.display_name}**'s commission to **$${Math.round(amount).toLocaleString()}** for this pay period.` });
+    }
+    return;
+  }
+
   // ── Job apply modal ────────────────────────────────────────────────────────
   if (ns === "job" && action === "applymodal") {
     await interaction.deferReply({ ephemeral: true });

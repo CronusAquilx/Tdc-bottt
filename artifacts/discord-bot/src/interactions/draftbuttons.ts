@@ -487,6 +487,20 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       return true;
     }
 
+    // Always use the order's mechanic_id — managers completing orders on behalf
+    // of a mechanic should show that mechanic's commission, not the manager's.
+    const mechanicId = order.mechanic_id ?? interaction.user.id;
+    const mechanicRoleLevel = order.role_level ?? "mechanic";
+    const guildId = interaction.guildId ?? "";
+
+    // Fetch commission data BEFORE marking complete so we have the previous
+    // baseline + rate. We then compute the final total explicitly — this
+    // guarantees the completed embed always matches what the draft was projecting.
+    const [profile, prevCommData] = await Promise.all([
+      getProfile(mechanicId),
+      getCommissionData(mechanicId, guildId, mechanicRoleLevel)
+    ]);
+
     await db.execute({
       sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
       args: [orderId]
@@ -494,27 +508,25 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
-    const guildId = interaction.guildId ?? "";
 
-    // Always use the order's mechanic_id — managers completing orders on behalf
-    // of a mechanic should show that mechanic's commission, not the manager's.
-    const mechanicId = completed.mechanic_id ?? interaction.user.id;
-    const mechanicRoleLevel = completed.role_level ?? "mechanic";
+    // Add this order's cut on top of the previous week total.
+    // If a manual commission_adjustment override is active, leave it unchanged
+    // (the override replaces the calculated total, so we don't stack on top).
+    const thisOrderCut = Math.round(completed.labour * prevCommData.rate);
+    const hasOverride = (profile?.commission_adjustment ?? 0) > 0;
+    const finalWeekCommission = hasOverride
+      ? prevCommData.weekCommission
+      : prevCommData.weekCommission + thisOrderCut;
 
-    const [profile] = await Promise.all([
-      getProfile(mechanicId)
-    ]);
-
-    const commData = await getCommissionData(mechanicId, guildId, mechanicRoleLevel);
-    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)
-      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
+    const crewCutInfo = prevCommData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)
+      ? { amount: prevCommData.crewCut, rate: prevCommData.crewCutRate, label: prevCommData.crewCutLabel }
       : undefined;
 
     const embed = buildOrderEmbed(
       completed,
       profile?.display_name ?? "Unknown",
-      commData.weekCommission,
-      commData.rate,
+      finalWeekCommission,
+      prevCommData.rate,
       crewCutInfo
     );
 

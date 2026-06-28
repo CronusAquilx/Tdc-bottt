@@ -219,6 +219,34 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       }
     }
 
+    // ── Admin: payroll — pick member to set individual pay ───────────────────
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmember") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ That user isn't in the crew. Add them via `/crew add` first.", embeds: [], components: [] });
+        return;
+      }
+      const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
+      const currentOverride = profile.commission_adjustment ?? 0;
+      const modal = new ModalBuilder()
+        .setCustomId(`admin:payroll:setpay:${memberId}`)
+        .setTitle(`Set Pay — ${profile.display_name}`);
+      modal.addComponents(
+        new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Commission $ amount (0 = use % calculation)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(currentOverride > 0 ? String(Math.round(currentOverride)) : "")
+            .setPlaceholder("e.g. 5000  (enter 0 to clear override)")
+        )
+      );
+      await interaction.showModal(modal);
+    }
+
     // ── Admin: commission pick mechanic ─────────────────────────────────────
     if (ns === "admin" && action === "commission" && rest[0] === "pickmechanic") {
       if (!(await requireRole(interaction, "manager"))) return;
