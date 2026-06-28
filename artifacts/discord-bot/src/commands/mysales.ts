@@ -47,10 +47,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const rate       = profile.commission_rate;
   const adjustment = profile.commission_adjustment ?? 0;
 
-  // commission_adjustment is an OVERRIDE — when set it replaces order-based commission
-  const weekCommission = (adjustment > 0 && period === "week")
-    ? adjustment
-    : periodTotals.labour * rate;
+  // commission_adjustment is ADDITIVE — stacks on top of order-based commission
+  const weekCommission = periodTotals.labour * rate + (period === "week" ? adjustment : 0);
 
   const embed = buildDashboardEmbed(
     profile.display_name, profile.status,

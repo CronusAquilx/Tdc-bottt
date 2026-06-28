@@ -94,14 +94,16 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   const payLines: string[] = [];
 
   for (const [mid, m] of mechanicMap) {
-    const override   = adjustSummaryMap.get(mid) ?? 0;
-    // commission_adjustment is an OVERRIDE — when set it replaces order-based commission
-    const commission = override > 0 ? override : m.labour * m.rate;
+    const adjustment = adjustSummaryMap.get(mid) ?? 0;
+    // commission_adjustment is ADDITIVE — stacks on top of order-based commission
+    const commission = m.labour * m.rate + adjustment;
     grandCommission += commission;
     totalLabour     += m.labour;
     totalRevenue    += m.revenue;
     const hrsNote    = m.hours > 0 ? ` · ${m.hours.toFixed(1)}h` : "";
-    const rateNote   = override > 0 ? "manual set" : `${(m.rate * 100).toFixed(0)}%`;
+    const rateNote   = adjustment > 0
+      ? `${(m.rate * 100).toFixed(0)}% + $${Math.round(adjustment).toLocaleString()} bonus`
+      : `${(m.rate * 100).toFixed(0)}%`;
     payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} · ${rateNote} → **${money(commission)}**`);
   }
 
@@ -239,9 +241,9 @@ export async function processPayall(
   const payoutResults: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
 
   for (const [mid, m] of mechanicMap) {
-    const override    = adjustMap.get(mid) ?? 0;
-    // commission_adjustment is an OVERRIDE — when set it replaces order-based commission
-    const commission  = override > 0 ? override : m.labour * m.rate;
+    const adjustment  = adjustMap.get(mid) ?? 0;
+    // commission_adjustment is ADDITIVE — stacks on top of order-based commission
+    const commission  = m.labour * m.rate + adjustment;
     grandCommission  += commission;
     totalLabour      += m.labour;
     totalRevenue     += m.revenue;

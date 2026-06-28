@@ -309,9 +309,11 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       const override = Number(row[3] ?? 0);
       const labour   = Number(row[4] ?? 0);
       const orders   = Number(row[5] ?? 0);
-      const comm     = override > 0 ? override : labour * rate;
+      const comm     = labour * rate + override;
       grandTotal += comm;
-      const rateLabel = override > 0 ? "manual" : `${(rate * 100).toFixed(0)}%`;
+      const rateLabel = override > 0
+        ? `${(rate * 100).toFixed(0)}% + $${Math.round(override).toLocaleString()} bonus`
+        : `${(rate * 100).toFixed(0)}%`;
       const ordNote   = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
       lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(comm).toLocaleString()}**`);
     }

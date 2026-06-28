@@ -37,9 +37,9 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
   });
   const baseCommission   = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
   const commAdj          = profile?.commission_adjustment ?? 0;
-  // commission_adjustment is an OVERRIDE — when set it replaces the order-based calculation
-  // entirely so /setpay commission gives exactly that dollar total
-  const weekCommission   = commAdj > 0 ? commAdj : baseCommission;
+  // commission_adjustment is ADDITIVE — stacks on top of the order-based calculation
+  // (same as manager_cut_adjustment). Orders still grow the total; the adjustment is a bonus.
+  const weekCommission   = baseCommission + commAdj;
 
   let crewCut = 0;
   let crewCutRate = 0;
@@ -510,13 +510,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const completed = rowToOrder(ur.rows[0]);
 
     // Add this order's cut on top of the previous week total.
-    // If a manual commission_adjustment override is active, leave it unchanged
-    // (the override replaces the calculated total, so we don't stack on top).
+    // commission_adjustment is additive, so no special-casing needed.
     const thisOrderCut = Math.round(completed.labour * prevCommData.rate);
-    const hasOverride = (profile?.commission_adjustment ?? 0) > 0;
-    const finalWeekCommission = hasOverride
-      ? prevCommData.weekCommission
-      : prevCommData.weekCommission + thisOrderCut;
+    const finalWeekCommission = prevCommData.weekCommission + thisOrderCut;
 
     const crewCutInfo = prevCommData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)
       ? { amount: prevCommData.crewCut, rate: prevCommData.crewCutRate, label: prevCommData.crewCutLabel }
