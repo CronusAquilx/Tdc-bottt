@@ -21,9 +21,12 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     ]);
     const order = rowToOrder(r.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const currentRole = await detectUserRoleLevel(interaction);
-    const commData = await getCommissionData(interaction.user.id, guildId, currentRole);
-    const crewCutInfo = ["trainer","manager","owner"].includes(currentRole)
+    // Use the order's mechanic_id (not the clicker) so on-behalf edits show the
+    // correct commission for the assigned mechanic, not the manager's own rate.
+    const mechanicId   = order.mechanic_id ?? interaction.user.id;
+    const orderRole    = (order as any).role_level ?? "mechanic";
+    const commData = await getCommissionData(mechanicId, guildId, orderRole);
+    const crewCutInfo = ["trainer","manager","owner"].includes(orderRole)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");

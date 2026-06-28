@@ -62,6 +62,20 @@ All draft/order view refreshes call this once and pass a `crewCutInfo` object (o
 - guild_config: col 9 = timeclock_channel_id; col 16 = trainer_crew_rate; col 17 = manager_crew_rate
 - orders: col 15 = guild_id; col 16 = role_level
 
+## Commission Consistency Rule (critical)
+Every pay path MUST use the snapshot formula AND the `order_number_reset_ts` boundary — not `weekStart()` or `DATE(created_at) >= ?`:
+```
+SINCE_RESET = datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))
+commAdj   = profile.commission_adjustment ?? 0
+snapshot  = profile.commission_labour_snapshot ?? 0
+labourAfter = Math.max(0, totalLabour - snapshot)
+commission = commAdj > 0 ? commAdj + labourAfter * rate : totalLabour * rate
+```
+Files that must use this: `setpay.ts`, `payall.ts`, `draftbuttons.ts` (getCommissionData), `mysales.ts`, `pay.ts`, `buttons.ts` (orderpay:start, orderpay:confirm, pay:confirm, sales:viewdetailed). Using `weekStart()` as query boundary causes divergence after mid-week payday.
+
+## On-Behalf Order Editing (modals.ts)
+`refreshDraftView` must pass `order.mechanic_id` (not `interaction.user.id`) and `order.role_level` to `getCommissionData` — otherwise manager editing another mechanic's draft sees wrong commission projection.
+
 ## Why
 - No approve/reject reduces friction — mechanics complete orders directly.
 - Role stored per-order (not per-user) so historical crew cut calculations survive role changes.

@@ -22,18 +22,28 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
 
   const ws = weekStart();
+  const SINCE_RESET = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
   const r = await db.execute({
-    sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-    args: [target.id, ws]
+    sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET}`,
+    args: [target.id]
   });
   if (!r.rows.length) {
-    await interaction.editReply({ content: `❌ No completed orders for **${profile.display_name}** this week.` });
+    await interaction.editReply({ content: `❌ No completed orders for **${profile.display_name}** this pay period.` });
     return;
   }
 
-  const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+  const totalLabour  = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
   const totalRevenue = r.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-  const commission = totalLabour * profile.commission_rate;
+  // Snapshot-aware commission — matches /setpay + /payall formula
+  const commAdj     = profile.commission_adjustment ?? 0;
+  const snapshot    = profile.commission_labour_snapshot ?? 0;
+  const labourAfter = Math.max(0, totalLabour - snapshot);
+  const commission  = commAdj > 0
+    ? commAdj + labourAfter * profile.commission_rate
+    : totalLabour * profile.commission_rate;
+  const rateLabel = commAdj > 0
+    ? `set ${Math.round(commAdj).toLocaleString()} + new orders`
+    : `${(profile.commission_rate * 100).toFixed(0)}%`;
 
   const confirmEmbed = new EmbedBuilder()
     .setTitle(`💸  Confirm Payout  ·  ${profile.display_name}`)
@@ -42,7 +52,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Orders to Pay", value: String(r.rows.length), inline: true },
       { name: "Total Revenue", value: money(totalRevenue), inline: true },
       { name: "Total Labour", value: money(totalLabour), inline: true },
-      { name: `Commission (${(profile.commission_rate * 100).toFixed(0)}%)`, value: `**${money(commission)}**`, inline: false }
+      { name: `Commission (${rateLabel})`, value: `**${money(commission)}**`, inline: false }
     )
     .setDescription("Click **Confirm** to process this payout and mark all orders as paid.")
     .setFooter({ text: FOOTER });
