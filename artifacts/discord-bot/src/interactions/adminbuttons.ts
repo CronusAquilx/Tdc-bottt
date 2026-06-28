@@ -232,8 +232,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `📋 Clock Logs: ${ch((config as any)?.clocklog_channel_id)}\n` +
         `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-        `📚 Training: ${ch((config as any)?.training_channel_id)}\n` +
-        `💸 Pay Logs: ${ch(config?.payday_channel_id)}`
+        `📚 Training: ${ch((config as any)?.training_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -250,10 +249,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:trainingch").setLabel("📚 Training").setStyle(ButtonStyle.Secondary),
     );
-    const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("admin:setup:paylogs").setLabel("💸 Pay Logs").setStyle(ButtonStyle.Primary),
-    );
-    await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
+    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
     return true;
   }
 
@@ -297,27 +293,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setFooter({ text: FOOTER });
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅  Schedule Pay Day").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("admin:payroll:resetperiod").setLabel("🔧  Fix Pay Period").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [row] });
-    return true;
-  }
-
-  // ── Payroll: Fix Pay Period (reset order_number_reset_ts) ─────────────────
-  if (section === "payroll" && action === "resetperiod") {
-    if (!(await requireRole(interaction, "manager"))) return true;
-    const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
-    const modal = new ModalBuilder()
-      .setCustomId("admin:payroll:setperiod")
-      .setTitle("Fix Pay Period Start");
-    const field = new TextInputBuilder()
-      .setCustomId("perioddate")
-      .setLabel("Pay period start (YYYY-MM-DD)")
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder("e.g. 2026-06-23")
-      .setRequired(true);
-    modal.addComponents(new (await import("discord.js")).ActionRowBuilder<TextInputBuilder>().addComponents(field));
-    await interaction.showModal(modal);
     return true;
   }
 
@@ -657,7 +634,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
@@ -669,7 +646,6 @@ export const CHANNEL_MAP: Record<string, {
   leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
   trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
   clocklogch:  { field: "clocklog_channel_id",     name: "tdc-clock-logs",  topic: "Tokyo Drift Customs — Clock in/out logs",    label: "Clock Logs"  },
-  paylogs:     { field: "payday_channel_id",       name: "tdc-pay-logs",    topic: "Tokyo Drift Customs — Weekly payroll & pay logs", label: "Pay Logs" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
