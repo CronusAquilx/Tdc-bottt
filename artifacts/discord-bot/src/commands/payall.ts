@@ -77,28 +77,47 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   }
 
   let grandCommission = 0;
+  let totalLabour     = 0;
   let totalRevenue    = 0;
   const payLines: string[] = [];
 
-  for (const [, m] of mechanicMap) {
-    const commission  = m.labour * m.rate;
-    grandCommission  += commission;
-    totalRevenue     += m.revenue;
+  // Also pull commission_adjustment overrides for the summary
+  const adjustSummaryR = await db.execute(
+    "SELECT discord_id, commission_adjustment FROM profiles WHERE commission_adjustment > 0"
+  );
+  const adjustSummaryMap = new Map<string, number>();
+  for (const row of adjustSummaryR.rows) {
+    adjustSummaryMap.set(String(row[0] ?? ""), Number(row[1] ?? 0));
+  }
+
+  for (const [mid, m] of mechanicMap) {
+    const override   = adjustSummaryMap.get(mid) ?? 0;
+    // Manual override replaces order-based commission entirely
+    const commission = override > 0 ? override : m.labour * m.rate;
+    grandCommission += commission;
+    totalLabour     += m.labour;
+    totalRevenue    += m.revenue;
     payLines.push(`**${m.name}** · ${m.orders} orders · ${(m.rate * 100).toFixed(0)}% → **${money(commission)}**`);
   }
 
   if (!payLines.length) return null;
 
+  // Manager cuts are calculated as % of total raw labour (same base as mechanic commissions)
   const managersR = await db.execute(
-    "SELECT p.discord_id, p.display_name, p.manager_override_rate FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
+    "SELECT p.discord_id, p.display_name, p.manager_override_rate, p.manager_cut_adjustment FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
   );
   const managerLines: string[] = [];
   let totalManagerCuts = 0;
   for (const row of managersR.rows) {
+    const manualCut    = Number(row[3] ?? 0);
     const overrideRate = Number(row[2] ?? 0.20);
-    const cut          = grandCommission * overrideRate;
-    if (overrideRate > 0) {
-      managerLines.push(`**${String(row[1] ?? "")}** · ${(overrideRate * 100).toFixed(0)}% of pool → **${money(cut)}**`);
+    // Manual cut overrides % calculation; otherwise 20% of raw labour pool
+    const cut          = manualCut > 0 ? manualCut : totalLabour * overrideRate;
+    if (cut > 0) {
+      const label = manualCut > 0
+        ? `**${String(row[1] ?? "")}** · manual override → **${money(cut)}**`
+        : `**${String(row[1] ?? "")}** · ${(overrideRate * 100).toFixed(0)}% of labour → **${money(cut)}**`;
+      managerLines.push(label);
       totalManagerCuts += cut;
     }
   }
@@ -158,10 +177,11 @@ export async function processPayall(
   }
 
   let grandCommission = 0;
+  let totalLabour     = 0;
   let totalRevenue    = 0;
   const { randomUUID } = await import("../lib/utils.js");
 
-  // Also pull commission_adjustment for each mechanic (manual pay overrides)
+  // Pull commission_adjustment overrides — if set, they REPLACE the order-based commission
   const adjustR = await db.execute(
     "SELECT discord_id, commission_adjustment FROM profiles WHERE commission_adjustment > 0"
   );
@@ -171,11 +191,12 @@ export async function processPayall(
   }
 
   for (const [mid, m] of mechanicMap) {
-    const baseCommission  = m.labour * m.rate;
-    const adjustment      = adjustMap.get(mid) ?? 0;
-    const commission      = baseCommission + adjustment;
-    grandCommission      += commission;
-    totalRevenue         += m.revenue;
+    const override    = adjustMap.get(mid) ?? 0;
+    // Manual override replaces order-based commission entirely (zeroes out the base)
+    const commission  = override > 0 ? override : m.labour * m.rate;
+    grandCommission  += commission;
+    totalLabour      += m.labour;
+    totalRevenue     += m.revenue;
     const payoutId = randomUUID();
     await db.execute({
       sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
@@ -196,7 +217,8 @@ export async function processPayall(
   const { setSetting } = await import("../db.js");
   await setSetting("order_number_reset_ts", new Date().toISOString());
 
-  // Manager cuts — use manager_cut_adjustment if set, otherwise % of pool
+  // Manager cuts — use manager_cut_adjustment if set, otherwise % of raw labour pool
+  // (20% of total labour, same base as mechanic commissions — NOT % of mechanic commission pool)
   const managersR = await db.execute(
     "SELECT discord_id, manager_override_rate, manager_cut_adjustment FROM profiles INNER JOIN user_roles USING (discord_id) WHERE role IN ('manager','owner')"
   );
@@ -204,7 +226,7 @@ export async function processPayall(
   for (const row of managersR.rows) {
     const manualCut    = Number(row[2] ?? 0);
     const overrideRate = Number(row[1] ?? 0.20);
-    totalManagerCuts  += manualCut > 0 ? manualCut : grandCommission * overrideRate;
+    totalManagerCuts  += manualCut > 0 ? manualCut : totalLabour * overrideRate;
   }
 
   return {
