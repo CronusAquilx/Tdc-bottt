@@ -27,6 +27,7 @@ import { data as setrankData,     execute as setrankExecute     } from "./comman
 import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { data as clearData,       execute as clearExecute       } from "./commands/clear.js";
 import { data as newweekData,     execute as newweekExecute     } from "./commands/newweek.js";
+import { data as setpayData,      execute as setpayExecute      } from "./commands/setpay.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -100,6 +101,7 @@ const commandDefs = [
   { data: clearData,            execute: clearExecute            },
   { data: newweekData,          execute: newweekExecute          },
   { data: timeclockManageData,  execute: timeclockManageExecute  },
+  { data: setpayData,           execute: setpayExecute           },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();

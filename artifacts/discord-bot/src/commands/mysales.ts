@@ -44,17 +44,26 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const todayTotals  = sum(todayR.rows);
   const ytdTotals    = sum(ytdR.rows);
 
-  const rate = profile.commission_rate;
+  const rate       = profile.commission_rate;
+  const adjustment = profile.commission_adjustment ?? 0;
 
   const embed = buildDashboardEmbed(
     profile.display_name, profile.status,
     todayR.rows.length, todayTotals.total,
     periodR.rows.length, periodTotals.total,
     profile.hours_worked_this_week,
-    periodTotals.labour * rate,
+    periodTotals.labour * rate + (period === "week" ? adjustment : 0),
     ytdR.rows.length, ytdTotals.total,
     ytdTotals.labour * rate
   );
+
+  if (adjustment > 0 && period === "week") {
+    embed.addFields({
+      name: "📌 Manual Pay Adjustment (This Week)",
+      value: `**+${money(adjustment)}** added by management`,
+      inline: false
+    });
+  }
 
   // ── Manager commission section ───────────────────────────────────────────────
   // Check if this user has any mechanics assigned to them as manager

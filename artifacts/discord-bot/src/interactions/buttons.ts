@@ -61,17 +61,21 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.deferReply({ ephemeral: true });
     const tcId = id;
 
-    // Find the timeclock entry
-    const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
+    // Find the timeclock entry — also fetch warned_at (index 11) for stale-shift detection
+    const tcR = await db.execute({
+      sql: "SELECT id, mechanic_id, clock_in_time, clock_out_time, duration_minutes, approved_by, status, notes, created_at, clock_message_id, clock_channel_id, warned_at FROM timeclock WHERE id = ?",
+      args: [tcId]
+    });
     if (!tcR.rows[0]) {
       try { await interaction.message.edit({ content: "ℹ️ This warning is no longer active.", components: [] }); } catch { /* ignore */ }
       await interaction.editReply({ content: "ℹ️ That shift no longer exists." });
       return;
     }
     const entry = rowToTimeclock(tcR.rows[0]);
+    const warnedAtRaw = tcR.rows[0][11] ? String(tcR.rows[0][11]) : null;
 
     if (entry.clock_out_time) {
-      // Already clocked out — just kill the buttons so user stops seeing them
+      // Already clocked out — remove buttons so it stops showing
       try { await interaction.message.edit({ content: "✅ Already clocked out.", components: [] }); } catch { /* ignore */ }
       await interaction.editReply({ content: "ℹ️ You're already clocked out." });
       return;
@@ -84,7 +88,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     warnedMechanics.delete(tcId);
     await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
 
-    // Disable warning message buttons using interaction.message directly
+    // Disable warning message buttons
     try { await interaction.message.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] }); } catch { /* ignore */ }
 
     await autoClockOut(
@@ -97,9 +101,22 @@ export async function handleButton(interaction: ButtonInteraction) {
       entry.clock_channel_id ?? null
     );
 
-    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
-    const hrs = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
+    // Calculate displayed duration — cap at warned_at + 30 min buffer if this was a stale shift
+    // (prevents showing "27 hours" when the shift should have been auto-clocked-out long ago)
+    const clockInMs  = parseUtc(entry.clock_in_time);
+    const warnedAtMs = warnedAtRaw ? parseUtc(warnedAtRaw) : 0;
+    const realMins   = (Date.now() - clockInMs) / 60000;
+    // If shift was warned and button clicked more than 35 min after the warning,
+    // show duration as of (warned_at + 30 min) — the expected auto-out window
+    const WARN_MINS     = 120;
+    const AUTO_OUT_MINS = 30;
+    let displayMins = realMins;
+    if (warnedAtMs > 0 && realMins > WARN_MINS + AUTO_OUT_MINS + 10) {
+      displayMins = (warnedAtMs + AUTO_OUT_MINS * 60000 - clockInMs) / 60000;
+      if (displayMins < 1) displayMins = realMins; // safety fallback
+    }
+    const hrs = Math.floor(displayMins / 60);
+    const m = Math.round(displayMins % 60);
     await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
     return;
   }

@@ -161,12 +161,22 @@ export async function processPayall(
   let totalRevenue    = 0;
   const { randomUUID } = await import("../lib/utils.js");
 
+  // Also pull commission_adjustment for each mechanic (manual pay overrides)
+  const adjustR = await db.execute(
+    "SELECT discord_id, commission_adjustment FROM profiles WHERE commission_adjustment > 0"
+  );
+  const adjustMap = new Map<string, number>();
+  for (const row of adjustR.rows) {
+    adjustMap.set(String(row[0] ?? ""), Number(row[1] ?? 0));
+  }
+
   for (const [mid, m] of mechanicMap) {
-    const commission = m.labour * m.rate;
-    grandCommission += commission;
-    totalRevenue    += m.revenue;
+    const baseCommission  = m.labour * m.rate;
+    const adjustment      = adjustMap.get(mid) ?? 0;
+    const commission      = baseCommission + adjustment;
+    grandCommission      += commission;
+    totalRevenue         += m.revenue;
     const payoutId = randomUUID();
-    const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
     await db.execute({
       sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
       args: [payoutId, mid, ws, commission, m.orders, m.hours, m.orders, paidById]
@@ -179,21 +189,22 @@ export async function processPayall(
     args: [ws]
   });
 
-  // Reset weekly stats for everyone
-  await db.execute("UPDATE profiles SET hours_worked_this_week = 0");
+  // Reset weekly stats + clear manual pay adjustments for everyone
+  await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0");
 
   // Reset order number counter
   const { setSetting } = await import("../db.js");
   await setSetting("order_number_reset_ts", new Date().toISOString());
 
-  // Manager cuts
+  // Manager cuts — use manager_cut_adjustment if set, otherwise % of pool
   const managersR = await db.execute(
-    "SELECT discord_id, manager_override_rate FROM profiles INNER JOIN user_roles USING (discord_id) WHERE role IN ('manager','owner')"
+    "SELECT discord_id, manager_override_rate, manager_cut_adjustment FROM profiles INNER JOIN user_roles USING (discord_id) WHERE role IN ('manager','owner')"
   );
   let totalManagerCuts = 0;
   for (const row of managersR.rows) {
+    const manualCut    = Number(row[2] ?? 0);
     const overrideRate = Number(row[1] ?? 0.20);
-    totalManagerCuts += grandCommission * overrideRate;
+    totalManagerCuts  += manualCut > 0 ? manualCut : grandCommission * overrideRate;
   }
 
   return {
