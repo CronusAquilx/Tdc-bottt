@@ -169,10 +169,12 @@ export function buildDraftEmbed(
     },
   ];
 
-  if (weekCommission > 0) {
+  // Include this draft order's projected commission so the running total updates as items are added
+  const projectedWeekCommission = weekCommission + thisOrderCommission;
+  if (projectedWeekCommission > 0) {
     fields.push({
       name: "📊 Running Commission (Pay Period)",
-      value: `**${money(Math.round(weekCommission))}**\n-# All completed orders since last pay`,
+      value: `**${money(Math.round(projectedWeekCommission))}**\n-# Includes this order's projected cut`,
       inline: true
     });
   }
