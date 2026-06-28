@@ -37,9 +37,9 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
   });
   const baseCommission   = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
   const commAdj          = profile?.commission_adjustment ?? 0;
-  // commission_adjustment is additive — it stacks on top of order-based commission so
-  // completing new orders still increases the running total as expected
-  const weekCommission   = baseCommission + commAdj;
+  // commission_adjustment is an OVERRIDE — when set it replaces the order-based calculation
+  // entirely so /setpay commission gives exactly that dollar total
+  const weekCommission   = commAdj > 0 ? commAdj : baseCommission;
 
   let crewCut = 0;
   let crewCutRate = 0;
@@ -47,21 +47,17 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
 
   // Only managers/owners get a crew cut — trainer crew cut is removed
   if (roleLevel === "manager" || roleLevel === "owner") {
-    const manualCut = profile?.manager_cut_adjustment ?? 0;
-    if (manualCut > 0) {
-      // Use the manually-set dollar amount directly
-      crewCut      = manualCut;
-      crewCutRate  = profile?.manager_override_rate ?? 0.20;
-      crewCutLabel = "Manager Cut";
-    } else {
-      crewCutRate = config?.manager_crew_rate ?? 0.20;
-      const r = await db.execute({
-        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
-        args: [userId]
-      });
-      crewCut      = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
-      crewCutLabel = "Manager Cut";
-    }
+    crewCutRate = profile?.manager_override_rate ?? config?.manager_crew_rate ?? 0.20;
+    const r = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
+      args: [userId]
+    });
+    const percentageCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
+    const manualBonus   = profile?.manager_cut_adjustment ?? 0;
+    // manager_cut_adjustment is ADDITIVE — it stacks on top of the % cut so
+    // the cut still grows as orders come in
+    crewCut      = percentageCut + manualBonus;
+    crewCutLabel = "Manager Cut";
   }
 
   return { rate, weekCommission, crewCut, crewCutRate, crewCutLabel };

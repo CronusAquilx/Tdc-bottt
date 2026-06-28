@@ -94,32 +94,33 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   const payLines: string[] = [];
 
   for (const [mid, m] of mechanicMap) {
-    const bonus      = adjustSummaryMap.get(mid) ?? 0;
-    const commission = m.labour * m.rate + bonus;
+    const override   = adjustSummaryMap.get(mid) ?? 0;
+    // commission_adjustment is an OVERRIDE — when set it replaces order-based commission
+    const commission = override > 0 ? override : m.labour * m.rate;
     grandCommission += commission;
     totalLabour     += m.labour;
     totalRevenue    += m.revenue;
-    const bonusNote  = bonus > 0 ? ` + ${money(bonus)} bonus` : "";
     const hrsNote    = m.hours > 0 ? ` · ${m.hours.toFixed(1)}h` : "";
-    payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} · ${(m.rate * 100).toFixed(0)}%${bonusNote} → **${money(commission)}**`);
+    const rateNote   = override > 0 ? "manual set" : `${(m.rate * 100).toFixed(0)}%`;
+    payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} · ${rateNote} → **${money(commission)}**`);
   }
 
   if (!payLines.length) return null;
 
-  // Manager cuts
+  // Manager cuts — percentage-based + additive manual bonus
   const managersR = await db.execute(
     "SELECT p.discord_id, p.display_name, p.manager_override_rate, p.manager_cut_adjustment FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
   );
   const managerLines: string[] = [];
   let totalManagerCuts = 0;
   for (const row of managersR.rows) {
-    const manualCut    = Number(row[3] ?? 0);
+    const manualBonus  = Number(row[3] ?? 0);
     const overrideRate = Number(row[2] ?? 0.20);
-    const cut          = manualCut > 0 ? manualCut : totalLabour * overrideRate;
+    // manager_cut_adjustment is ADDITIVE — stacks on top of % cut
+    const cut          = totalLabour * overrideRate + manualBonus;
     if (cut > 0) {
-      const label = manualCut > 0
-        ? `**${String(row[1] ?? "")}** · manual override → **${money(cut)}**`
-        : `**${String(row[1] ?? "")}** · ${(overrideRate * 100).toFixed(0)}% of labour → **${money(cut)}**`;
+      const bonusPart = manualBonus > 0 ? ` + ${money(manualBonus)} bonus` : "";
+      const label = `**${String(row[1] ?? "")}** · ${(overrideRate * 100).toFixed(0)}% of labour${bonusPart} → **${money(cut)}**`;
       managerLines.push(label);
       totalManagerCuts += cut;
     }
@@ -238,8 +239,9 @@ export async function processPayall(
   const payoutResults: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
 
   for (const [mid, m] of mechanicMap) {
-    const bonus       = adjustMap.get(mid) ?? 0;
-    const commission  = m.labour * m.rate + bonus;
+    const override    = adjustMap.get(mid) ?? 0;
+    // commission_adjustment is an OVERRIDE — when set it replaces order-based commission
+    const commission  = override > 0 ? override : m.labour * m.rate;
     grandCommission  += commission;
     totalLabour      += m.labour;
     totalRevenue     += m.revenue;
@@ -272,15 +274,16 @@ export async function processPayall(
   const { setSetting } = await import("../db.js");
   await setSetting("order_number_reset_ts", new Date().toISOString());
 
-  // Manager cuts
+  // Manager cuts — percentage of total labour + additive manual bonus
   const managersR = await db.execute(
     "SELECT discord_id, manager_override_rate, manager_cut_adjustment FROM profiles INNER JOIN user_roles USING (discord_id) WHERE role IN ('manager','owner')"
   );
   let totalManagerCuts = 0;
   for (const row of managersR.rows) {
-    const manualCut    = Number(row[2] ?? 0);
+    const manualBonus  = Number(row[2] ?? 0);
     const overrideRate = Number(row[1] ?? 0.20);
-    totalManagerCuts  += manualCut > 0 ? manualCut : totalLabour * overrideRate;
+    // manager_cut_adjustment is ADDITIVE — stacks on top of % cut
+    totalManagerCuts  += totalLabour * overrideRate + manualBonus;
   }
 
   return {
