@@ -91,13 +91,14 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   }
 
   for (const [mid, m] of mechanicMap) {
-    const override   = adjustSummaryMap.get(mid) ?? 0;
-    // Manual override replaces order-based commission entirely
-    const commission = override > 0 ? override : m.labour * m.rate;
+    const bonus      = adjustSummaryMap.get(mid) ?? 0;
+    // commission_adjustment stacks on top of order-based commission (additive)
+    const commission = m.labour * m.rate + bonus;
     grandCommission += commission;
     totalLabour     += m.labour;
     totalRevenue    += m.revenue;
-    payLines.push(`**${m.name}** · ${m.orders} orders · ${(m.rate * 100).toFixed(0)}% → **${money(commission)}**`);
+    const bonusNote  = bonus > 0 ? ` + ${money(bonus)} bonus` : "";
+    payLines.push(`**${m.name}** · ${m.orders} orders · ${(m.rate * 100).toFixed(0)}%${bonusNote} → **${money(commission)}**`);
   }
 
   if (!payLines.length) return null;
@@ -191,9 +192,9 @@ export async function processPayall(
   }
 
   for (const [mid, m] of mechanicMap) {
-    const override    = adjustMap.get(mid) ?? 0;
-    // Manual override replaces order-based commission entirely (zeroes out the base)
-    const commission  = override > 0 ? override : m.labour * m.rate;
+    const bonus       = adjustMap.get(mid) ?? 0;
+    // commission_adjustment stacks on top of order-based commission (additive)
+    const commission  = m.labour * m.rate + bonus;
     grandCommission  += commission;
     totalLabour      += m.labour;
     totalRevenue     += m.revenue;

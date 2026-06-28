@@ -37,8 +37,9 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
   });
   const baseCommission   = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
   const commAdj          = profile?.commission_adjustment ?? 0;
-  // If a manual override is set via /setpay, it replaces the order-based commission entirely
-  const weekCommission   = commAdj > 0 ? commAdj : baseCommission;
+  // commission_adjustment is additive — it stacks on top of order-based commission so
+  // completing new orders still increases the running total as expected
+  const weekCommission   = baseCommission + commAdj;
 
   let crewCut = 0;
   let crewCutRate = 0;
