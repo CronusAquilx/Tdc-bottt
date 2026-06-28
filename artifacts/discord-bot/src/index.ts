@@ -190,9 +190,6 @@ client.once(Events.ClientReady, async (c) => {
   // Weekly auto-payday — every Monday at midnight UTC
   scheduleWeeklyPayday(c);
 
-  // Weekly NEW WEEK message — every Monday to all sales channels
-  scheduleNewWeekMessage(c);
-
   // Timeclock panel repost — every 45 minutes
   scheduleTimeclockPanelRepost(c);
 });
@@ -256,49 +253,116 @@ function scheduleWeeklyPayday(client: Client) {
       firedThisWeek = true;
       console.log("[TDC] 💸 Running automatic Monday payday...");
       try {
-        const { processPayall } = await import("./commands/payall.js");
+        const { processPayall, postPayLogPanel } = await import("./commands/payall.js");
+        const { postOrderPanel } = await import("./interactions/orderpanel.js");
         const { weekStart } = await import("./lib/utils.js");
+        const { money } = await import("./lib/embeds.js");
+        const { EmbedBuilder } = await import("discord.js");
         const ws = weekStart();
 
-        const rows = await db.execute("SELECT guild_id, payday_channel_id, log_channel_id, orders_channel_id FROM guild_config");
+        const rows = await db.execute("SELECT guild_id, payday_channel_id FROM guild_config");
         for (const row of rows.rows) {
-          const guildId = String(row[0] ?? "");
+          const guildId      = String(row[0] ?? "");
+          const payLogsChanId = row[1] ? String(row[1]) : null;
           if (!guildId) continue;
           try {
-            const guild = await client.guilds.fetch(guildId);
+            const guild  = await client.guilds.fetch(guildId);
             const result = await processPayall(guild as any, ws, client.user!.id);
-            if (!result) { console.log(`[TDC] 💸 No unpaid orders for guild ${guildId}`); continue; }
 
-            const { grandCommission, totalRevenue, mechanicCount, totalToBill } = result;
-            const { money } = await import("./lib/embeds.js");
-            const { EmbedBuilder } = await import("discord.js");
-
-            const announceChanId = (row[1] ?? row[2] ?? row[3]) ? String(row[1] ?? row[2] ?? row[3]) : null;
-            if (announceChanId) {
-              const ch = await guild.channels.fetch(announceChanId).catch(() => null);
-              if (ch?.isTextBased()) {
-                const paydayEmbed = new EmbedBuilder()
-                  .setTitle("💸  IT'S PAYDAY! — NEW WEEK STARTS NOW")
-                  .setColor(0xffd700)
-                  .setDescription(
-                    "# 🎉  PAYDAY IS HERE!\n\n" +
-                    "All crew have been paid for this week's work.\n" +
-                    "**Order numbers have been reset — fresh start for everyone!**\n\n" +
-                    "> 💪 Keep grinding. New week, new money.\n" +
-                    "> 📅 **Payday is every Monday** — stay clocked in, stay stacking."
-                  )
-                  .addFields(
-                    { name: "👥 Crew Paid",              value: String(mechanicCount), inline: true },
-                    { name: "💵 Total Revenue",           value: money(totalRevenue),   inline: true },
-                    { name: "💰 Total Commissions Out",   value: money(grandCommission),inline: true },
-                    { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: false }
-                  )
-                  .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-                  .setTimestamp();
-                await (ch as any).send({ content: "@everyone", embeds: [paydayEmbed] });
+            if (!result) {
+              console.log(`[TDC] 💸 No unpaid orders for guild ${guildId} — sending new week only`);
+              // Still send new week + fresh order panel even if no orders to pay
+              const profiles = await db.execute(
+                "SELECT discord_id, sales_channel_id, display_name, commission_rate FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''"
+              );
+              for (const pr of profiles.rows) {
+                const salesChanId = pr[1] ? String(pr[1]) : null;
+                if (!salesChanId) continue;
+                try {
+                  const ch = await guild.channels.fetch(salesChanId).catch(() => null);
+                  if (!ch?.isTextBased()) continue;
+                  await (ch as any).send({
+                    content:
+                      "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+                      "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                      "> 💪 **Fresh start. New money. New orders.**\n" +
+                      "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+                      "> 📅 **Payday is every Monday** — stay clocked in, stay stacking.\n" +
+                      "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                  });
+                  await postOrderPanel(ch as any, String(pr[0] ?? ""), String(pr[2] ?? ""), Number(pr[3] ?? 0.3));
+                } catch { /* ignore */ }
               }
+              continue;
             }
-            console.log(`[TDC] 💸 Auto-payday complete for guild ${guildId} — ${mechanicCount} crew, $${totalToBill.toFixed(0)} billed`);
+
+            const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts } = result;
+
+            // Notify each mechanic in their personal sales channel
+            let notified = 0;
+            for (const p of payouts) {
+              if (!p.salesChanId) continue;
+              try {
+                const ch = await guild.channels.fetch(p.salesChanId).catch(() => null);
+                if (!ch?.isTextBased()) continue;
+                await (ch as any).send({
+                  content:
+                    `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `> 📋 **${p.orders} orders** completed this week\n` +
+                    (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
+                    `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+                    `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `**Bill the company: ${money(p.amount)}** 🏢\n` +
+                    `Keep grinding, ${p.name}! 🏁`
+                });
+                await (ch as any).send({
+                  content:
+                    "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                    "> 💪 **Fresh start. New money. New orders.**\n" +
+                    "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+                    "> 📅 **Payday is every Monday** — stay clocked in, stay stacking.\n" +
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                });
+                const { getProfile } = await import("./db.js");
+                const profile = await getProfile(p.mechanicId);
+                await postOrderPanel(ch as any, p.mechanicId, profile?.display_name ?? p.name, profile?.commission_rate ?? p.rate);
+                notified++;
+              } catch { /* ignore */ }
+            }
+
+            // Post payroll log to the pay-logs channel
+            if (payLogsChanId) {
+              try {
+                const ch = await guild.channels.fetch(payLogsChanId).catch(() => null);
+                if (ch?.isTextBased()) {
+                  const payLines = payouts.map(p => {
+                    const hrsNote = p.hours > 0 ? ` · ${p.hours.toFixed(1)}h` : "";
+                    return `**${p.name}** · ${p.orders} orders${hrsNote} · ${(p.rate * 100).toFixed(0)}% → **${money(p.amount)}**`;
+                  });
+                  const logEmbed = new EmbedBuilder()
+                    .setTitle("💸  AUTO PAYDAY — New Week Started")
+                    .setColor(0xffd700)
+                    .setDescription(
+                      `**Pay period:** Week of \`${ws}\`\n` +
+                      `**Total revenue:** ${money(totalRevenue)}\n\n` +
+                      `✅ Pay messages sent to **${notified}** mechanic(s).`
+                    )
+                    .addFields(
+                      { name: `🔩 Crew Paid (${mechanicCount})`,    value: payLines.join("\n") || "None", inline: false },
+                      { name: "💰 Total Commission Out",             value: money(grandCommission),        inline: true  },
+                      { name: "🏢 Total Billed to Company",         value: `**${money(totalToBill)}**`,   inline: true  }
+                    )
+                    .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+                    .setTimestamp();
+                  await (ch as any).send({ embeds: [logEmbed] });
+                }
+              } catch { /* ignore */ }
+            }
+
+            console.log(`[TDC] 💸 Auto-payday complete for guild ${guildId} — ${mechanicCount} crew, $${totalToBill.toFixed(0)} billed, ${notified} notified`);
           } catch (err) {
             console.error(`[TDC] Payday auto-run failed for guild ${guildId}:`, err);
           }
@@ -348,56 +412,7 @@ function scheduleWeeklyLeaderboard(client: Client) {
   console.log("[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)");
 }
 
-// ── Monday NEW WEEK message scheduler ──────────────────────────────────────────
-function scheduleNewWeekMessage(client: Client) {
-  let firedThisWeek = false;
-
-  const tick = async () => {
-    const now = new Date();
-    if (now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
-      if (firedThisWeek) return;
-      firedThisWeek = true;
-      console.log("[TDC] 📅 Sending NEW WEEK messages to all sales channels...");
-      try {
-        const profiles = await db.execute("SELECT discord_id, sales_channel_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''");
-        for (const row of profiles.rows) {
-          const salesChanId = row[1] ? String(row[1]) : null;
-          if (!salesChanId) continue;
-          try {
-            const guilds = await db.execute("SELECT DISTINCT guild_id FROM guild_config");
-            for (const gRow of guilds.rows) {
-              const guildId = String(gRow[0] ?? "");
-              if (!guildId) continue;
-              try {
-                const guild = await client.guilds.fetch(guildId);
-                const ch = await guild.channels.fetch(salesChanId).catch(() => null);
-                if (!ch?.isTextBased()) continue;
-                await (ch as any).send({
-                  content:
-                    "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
-                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-                    "> 💪 **Fresh start. New money. New orders.**\n" +
-                    "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
-                    "> 📈 Make this week your best one yet.\n" +
-                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                });
-                break;
-              } catch { /* guild or channel not accessible */ }
-            }
-          } catch { /* ignore */ }
-        }
-        console.log("[TDC] 📅 NEW WEEK messages sent.");
-      } catch (err) {
-        console.error("[TDC] NEW WEEK scheduler error:", err);
-      }
-    } else {
-      firedThisWeek = false;
-    }
-  };
-
-  setInterval(tick, 5 * 60 * 1000);
-  console.log("[TDC] 📅 NEW WEEK scheduler started (fires every Monday midnight UTC)");
-}
+// NOTE: NEW WEEK messages + order panel re-post are handled by scheduleWeeklyPayday above.
 
 // ── Timeclock panel repost scheduler ───────────────────────────────────────────
 // Module-level timer guard — prevents duplicate intervals if the Ready event

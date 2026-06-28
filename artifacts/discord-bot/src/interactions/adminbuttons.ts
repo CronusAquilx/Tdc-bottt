@@ -232,7 +232,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `📋 Clock Logs: ${ch((config as any)?.clocklog_channel_id)}\n` +
         `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-        `📚 Training: ${ch((config as any)?.training_channel_id)}`
+        `📚 Training: ${ch((config as any)?.training_channel_id)}\n` +
+        `💸 Pay Logs: ${ch(config?.payday_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -249,7 +250,10 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:leaderboard").setLabel("🏆 Leaderboard").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:trainingch").setLabel("📚 Training").setStyle(ButtonStyle.Secondary),
     );
-    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:paylogs").setLabel("💸 Pay Logs").setStyle(ButtonStyle.Primary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     return true;
   }
 
@@ -619,7 +623,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     try {
       const ch = await guild.channels.create({ name: cfg.name, type: ChannelType.GuildText, topic: cfg.topic }) as TextChannel;
       await setGuildConfig(guild.id, cfg.field, ch.id);
-      await postChannelPanel(ch, chanType);
+      await postChannelPanel(ch, chanType, guild);
       await interaction.followUp({ content: `✅ **#${cfg.name}** created → <#${ch.id}>`, ephemeral: true });
     } catch (err: any) {
       await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
@@ -634,7 +638,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
@@ -646,12 +650,13 @@ export const CHANNEL_MAP: Record<string, {
   leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
   trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
   clocklogch:  { field: "clocklog_channel_id",     name: "tdc-clock-logs",  topic: "Tokyo Drift Customs — Clock in/out logs",    label: "Clock Logs"  },
+  paylogs:     { field: "payday_channel_id",       name: "tdc-pay-logs",    topic: "Tokyo Drift Customs — Payroll logs & payday panels", label: "Pay Logs" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Panel embeds posted when channels are created or attached
 // ─────────────────────────────────────────────────────────────────────────────
-async function postChannelPanel(channel: TextChannel, chanType: string) {
+async function postChannelPanel(channel: TextChannel, chanType: string, guild?: import("discord.js").Guild) {
   if (chanType === "loach") {
     await postLoaPanel(channel);
   } else if (chanType === "rafflech") {
@@ -659,8 +664,11 @@ async function postChannelPanel(channel: TextChannel, chanType: string) {
   } else if (chanType === "trainingch") {
     const { postTrainingPanel } = await import("./training.js");
     await postTrainingPanel(channel);
+  } else if (chanType === "paylogs") {
+    const { postPayLogPanel } = await import("../commands/payall.js");
+    await postPayLogPanel(channel, guild);
   }
-  // orders, jobs, logs, archive — no panel needed
+  // orders, jobs, logs, archive, clocklogch — no panel needed
 }
 
 export async function postLoaPanel(channel: TextChannel) {

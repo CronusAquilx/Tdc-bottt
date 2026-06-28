@@ -956,7 +956,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Pay All confirm ───────────────────────────────────────────────────────
   if (ns === "payall" && action === "confirm") {
-    if (!(await requireRole(interaction, "owner"))) return;
+    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
 
     const ws = weekStart();
@@ -967,39 +967,83 @@ export async function handleButton(interaction: ButtonInteraction) {
       return;
     }
 
-    const { grandCommission, totalRevenue, mechanicCount, totalToBill } = result;
+    const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts } = result;
+    const { postOrderPanel } = await import("./orderpanel.js");
 
-    // Post big payday announcement
+    let notified = 0;
+    let failed   = 0;
+
+    // ── Notify each mechanic in their personal sales channel ─────────────────
+    if (interaction.guild) {
+      for (const p of payouts) {
+        if (!p.salesChanId) { failed++; continue; }
+        try {
+          const ch = await interaction.guild.channels.fetch(p.salesChanId).catch(() => null);
+          if (!ch?.isTextBased()) { failed++; continue; }
+
+          // Pay notification
+          await (ch as any).send({
+            content:
+              `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `> 📋 **${p.orders} orders** completed this week\n` +
+              (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
+              `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+              `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `**Bill the company: ${money(p.amount)}** 🏢\n` +
+              `Keep grinding, ${p.name}! 🏁`
+          });
+
+          // New Week announcement
+          await (ch as any).send({
+            content:
+              "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+              "> 💪 **Fresh start. New money. New orders.**\n" +
+              "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+              "> 📅 **Payday is every Monday** — stay clocked in, stay stacking.\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          });
+
+          // Re-post the order panel so they can start fresh
+          const profile2 = await getProfile(p.mechanicId);
+          await postOrderPanel(ch as any, p.mechanicId, profile2?.display_name ?? p.name, profile2?.commission_rate ?? p.rate);
+
+          notified++;
+        } catch { failed++; }
+      }
+    }
+
+    // ── Post payroll log to pay-logs channel ──────────────────────────────────
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      const announceChanId = config?.payday_channel_id ?? config?.log_channel_id ?? config?.orders_channel_id;
-      if (announceChanId) {
+      const payLogsChanId = config?.payday_channel_id;
+      if (payLogsChanId) {
         try {
-          const ch = await interaction.guild.channels.fetch(announceChanId);
+          const ch = await interaction.guild.channels.fetch(payLogsChanId);
           if (ch?.isTextBased()) {
-            const paydayEmbed = new EmbedBuilder()
-              .setTitle("💸  IT'S PAYDAY! — NEW WEEK STARTS NOW")
+            const payLines = payouts.map(p => {
+              const hrsNote = p.hours > 0 ? ` · ${p.hours.toFixed(1)}h` : "";
+              return `**${p.name}** · ${p.orders} orders${hrsNote} · ${(p.rate * 100).toFixed(0)}% → **${money(p.amount)}**`;
+            });
+            const logEmbed = new EmbedBuilder()
+              .setTitle("💸  PAYROLL PROCESSED — New Week Started")
               .setColor(0xffd700)
               .setDescription(
-                "# 🎉  PAYDAY IS HERE!\n\n" +
-                "All crew have been paid for this week's work.\n" +
-                "**Order numbers have been reset — fresh start for everyone!**\n\n" +
-                "> 💪 Keep grinding. New week, new money.\n" +
-                "> 📅 **Payday is every Monday** — stay clocked in, stay stacking."
+                `**Pay period:** Week of \`${ws}\`\n` +
+                `**Total revenue:** ${money(totalRevenue)}\n\n` +
+                `✅ Pay messages sent to **${notified}** mechanic(s).` +
+                (failed > 0 ? `\n⚠️ ${failed} skipped (no sales channel).` : "")
               )
               .addFields(
-                { name: "👥 Crew Paid",           value: String(mechanicCount),    inline: true },
-                { name: "💵 Total Revenue",        value: money(totalRevenue),      inline: true },
-                { name: "💰 Total Commissions Out",value: money(grandCommission),   inline: true },
-                { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: false }
+                { name: `🔩 Crew Paid (${mechanicCount})`,       value: payLines.join("\n") || "None", inline: false },
+                { name: "💰 Total Commission Out",                value: money(grandCommission),        inline: true  },
+                { name: "🏢 Total Billed to Company",            value: `**${money(totalToBill)}**`,   inline: true  }
               )
               .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
               .setTimestamp();
-
-            await (ch as any).send({
-              content: "@everyone",
-              embeds: [paydayEmbed]
-            });
+            await (ch as any).send({ embeds: [logEmbed] });
           }
         } catch { /* ignore */ }
       }
@@ -1014,7 +1058,8 @@ export async function handleButton(interaction: ButtonInteraction) {
         "• All completed orders marked as **paid**\n" +
         "• Weekly stats reset to **zero**\n" +
         "• Order numbers reset to **TDC-0001**\n" +
-        "• Payday announcement posted ✅"
+        `• Pay messages sent to **${notified}** sales channels ✅\n` +
+        "• Each mechanic's sales channel has their new order panel ✅"
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();
