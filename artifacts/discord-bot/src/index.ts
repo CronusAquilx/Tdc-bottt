@@ -27,6 +27,7 @@ import { data as setrankData,     execute as setrankExecute     } from "./comman
 import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { data as clearData,       execute as clearExecute       } from "./commands/clear.js";
 import { data as newweekData,     execute as newweekExecute     } from "./commands/newweek.js";
+import { data as deleteorderData, execute as deleteorderExecute } from "./commands/deleteorder.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -99,6 +100,7 @@ const commandDefs = [
   { data: managerData,     execute: managerExecute     },
   { data: clearData,            execute: clearExecute            },
   { data: newweekData,          execute: newweekExecute          },
+  { data: deleteorderData,      execute: deleteorderExecute      },
   { data: timeclockManageData,  execute: timeclockManageExecute  },
 ];
 

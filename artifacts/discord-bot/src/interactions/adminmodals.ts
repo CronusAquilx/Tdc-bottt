@@ -353,5 +353,29 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     return true;
   }
 
+  // ── Payroll: Fix Pay Period Start ─────────────────────────────────────────
+  if (section === "payroll" && action === "setperiod") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ ephemeral: true });
+
+    const raw = interaction.fields.getTextInputValue("perioddate").trim();
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(raw)) {
+      await interaction.editReply({ content: "❌ Invalid date format. Use **YYYY-MM-DD** (e.g. `2026-06-23`)." });
+      return true;
+    }
+
+    const { setSetting } = await import("../db.js");
+    await setSetting("order_number_reset_ts", `${raw}T00:00:00.000Z`);
+
+    await interaction.editReply({
+      content:
+        `✅ **Pay period start fixed!**\n\n` +
+        `All orders created on or after **${raw}** will now count toward the current pay period commission.\n\n` +
+        `Each mechanic's commission total will update the next time an order embed is refreshed.`
+    });
+    return true;
+  }
+
   return false;
 }

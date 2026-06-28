@@ -27,7 +27,7 @@ export interface Order {
   id: string;
   order_number: string;
   mechanic_id: string;
-  status: "draft" | "submitted" | "complete" | "approved" | "paid" | "rejected" | "archived";
+  status: "draft" | "submitted" | "complete" | "approved" | "paid" | "rejected" | "archived" | "voided";
   items: OrderItem[];
   parts_cost: number;
   total: number;

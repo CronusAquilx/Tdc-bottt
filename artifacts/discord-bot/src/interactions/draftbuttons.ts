@@ -9,12 +9,13 @@ import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 
-// Use completed_at so orders started before a reset but finished after it still count toward
-// the current pay period. Fall back to created_at for older rows that lack completed_at.
+// Use created_at as the anchor for pay period filtering — it never changes, unlike completed_at
+// which is overwritten by orderpay:confirm (SET completed_at = datetime('now')).
+// Using completed_at caused orders paid before a reset_ts to silently fall out of the commission window.
 // Both sides are wrapped in datetime() so SQLite normalises ISO-8601 and YYYY-MM-DD HH:MM:SS
 // strings to the same format before comparing — prevents lexical mis-ordering.
 const SINCE_RESET_SQL =
-  `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  `datetime(created_at) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
 const DONE_STATUSES = `status IN ('complete', 'approved', 'paid')`;
 
