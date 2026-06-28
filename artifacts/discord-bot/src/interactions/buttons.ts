@@ -643,8 +643,12 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
       args: [guildId]
     });
-    // Reset ALL profiles hours (not just those with orders)
-    await db.execute("UPDATE profiles SET hours_worked_this_week = 0");
+    // Reset ALL profiles hours + clear labour snapshots so /setpay amounts
+    // carry forward correctly into the new pay period after the week is cleared.
+    // Without this, mechanics with a /setpay snapshot from before the clear
+    // would see their new orders give zero extra commission until new labour
+    // exceeded the old (now irrelevant) snapshot value.
+    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
     await setSetting("order_number_reset_ts", new Date().toISOString());
     const count = Number(r.rowsAffected ?? 0);
     const draftCount = Number(drafts.rowsAffected ?? 0);
@@ -683,8 +687,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
       args: [mechId, guildId]
     });
-    // Reset hours
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id = ?", args: [mechId] });
+    // Reset hours + clear labour snapshot so /setpay carries forward correctly
+    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0 WHERE discord_id = ?", args: [mechId] });
     const count = Number(r.rowsAffected ?? 0);
     const draftCount = Number(drafts.rowsAffected ?? 0);
     const embed = new EmbedBuilder()

@@ -48,6 +48,23 @@ if (!token) {
   process.exit(1);
 }
 
+// ── Global crash guards ────────────────────────────────────────────────────────
+// Log all unhandled rejections so they appear in Render logs instead of
+// disappearing silently. Node 18+ exits on unhandledRejection by default;
+// we intercept, log, then let the normal exit happen so Render can restart.
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("[TDC] 💥 Unhandled promise rejection:", reason);
+  // Do NOT suppress — let Node exit so the supervisor restarts the process cleanly.
+});
+
+// Uncaught exceptions leave the process in an undefined state.
+// Log clearly then exit(1) so Render's supervisor restarts us immediately.
+process.on("uncaughtException", (err: Error) => {
+  console.error("[TDC] 💥 Uncaught exception — restarting:", err);
+  // Short delay to flush the log line before the process dies.
+  setTimeout(() => process.exit(1), 500);
+});
+
 // Guard: only connect to Discord when running on Render (the live deployment).
 // This prevents the Replit dev environment from spinning up a second bot instance
 // that would cause duplicate command responses and double event handling.
@@ -195,6 +212,23 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 
+// ── Discord gateway error / disconnect events ──────────────────────────────────
+client.on(Events.Error, (err) => {
+  console.error("[TDC] 🔌 Discord client error:", err);
+});
+
+client.on(Events.ShardDisconnect, (event, id) => {
+  console.warn(`[TDC] 🔌 Shard ${id} disconnected (code ${event.code}) — Discord.js will auto-reconnect.`);
+});
+
+client.on(Events.ShardReconnecting, (id) => {
+  console.log(`[TDC] 🔄 Shard ${id} reconnecting to Discord...`);
+});
+
+client.on(Events.ShardResume, (id, replayed) => {
+  console.log(`[TDC] ✅ Shard ${id} resumed (${replayed} events replayed).`);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
@@ -243,6 +277,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 // ── Weekly payday scheduler ─────────────────────────────────────────────────────
 function scheduleWeeklyPayday(client: Client) {
+  // In-memory guard: prevents double-fire within a single process run.
+  // DB guard below: prevents double-fire across restarts (survives crashes).
   let firedThisWeek = false;
 
   const tick = async () => {
@@ -250,6 +286,29 @@ function scheduleWeeklyPayday(client: Client) {
     // Fire on Monday UTC between 00:00–00:05
     if (now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
       if (firedThisWeek) return;
+
+      // ── DB-backed deduplication (survives bot restarts) ───────────────────────
+      // If the bot crashes and restarts on Monday morning, firedThisWeek resets to
+      // false and the scheduler would fire again — wiping all /setpay adjustments.
+      // We persist the run date in app_settings so a restart never double-fires.
+      const { getSetting, setSetting } = await import("./db.js");
+      const todayStr = now.toISOString().split("T")[0]; // "2026-06-30"
+      try {
+        const lastRun = await getSetting("last_auto_payday_date");
+        if (lastRun === todayStr) {
+          firedThisWeek = true; // sync flag so we stop checking
+          console.log(`[TDC] 💸 Auto-payday already ran today (${todayStr}) — skipping.`);
+          return;
+        }
+        // We do NOT write the dedup key here — we write it AFTER the work
+        // completes. If the bot crashes mid-run, the next restart retries safely:
+        // processPayall only touches orders with status 'complete'/'approved',
+        // so it's idempotent for orders already marked 'paid'.
+      } catch (err) {
+        console.error("[TDC] ⚠️ Could not read last_auto_payday_date — skipping auto-payday to be safe:", err);
+        return;
+      }
+
       firedThisWeek = true;
       console.log("[TDC] 💸 Running automatic Monday payday...");
       try {
@@ -261,6 +320,7 @@ function scheduleWeeklyPayday(client: Client) {
         const ws = weekStart();
 
         const rows = await db.execute("SELECT guild_id, payday_channel_id FROM guild_config");
+        let anyGuildProcessed = false;
         for (const row of rows.rows) {
           const guildId      = String(row[0] ?? "");
           const payLogsChanId = row[1] ? String(row[1]) : null;
@@ -268,6 +328,7 @@ function scheduleWeeklyPayday(client: Client) {
           try {
             const guild  = await client.guilds.fetch(guildId);
             const result = await processPayall(guild as any, ws, client.user!.id);
+            anyGuildProcessed = true;
 
             if (!result) {
               console.log(`[TDC] 💸 No unpaid orders for guild ${guildId} — sending new week only`);
@@ -362,9 +423,21 @@ function scheduleWeeklyPayday(client: Client) {
               } catch { /* ignore */ }
             }
 
-            console.log(`[TDC] 💸 Auto-payday complete for guild ${guildId} — ${mechanicCount} crew, $${totalToBill.toFixed(0)} billed, ${notified} notified`);
+            console.log(`[TDC] 💸 Auto-payday complete for guild ${guildId} — ${mechanicCount} crew, ${totalToBill.toFixed(0)} billed, ${notified} notified`);
           } catch (err) {
             console.error(`[TDC] Payday auto-run failed for guild ${guildId}:`, err);
+          }
+        }
+
+        // Write dedup key AFTER all payroll work completes.
+        // If the bot crashed mid-run above, the key won't be written and the next
+        // restart will safely retry (processPayall only acts on unpaid orders).
+        if (anyGuildProcessed) {
+          try {
+            await setSetting("last_auto_payday_date", todayStr);
+            console.log(`[TDC] 💸 Auto-payday dedup key written for ${todayStr}.`);
+          } catch (e) {
+            console.error("[TDC] ⚠️ Failed to write last_auto_payday_date:", e);
           }
         }
       } catch (err) {
