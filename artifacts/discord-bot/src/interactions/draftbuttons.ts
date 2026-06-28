@@ -35,7 +35,9 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
     sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
     args: [userId]
   });
-  const weekCommission = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
+  const baseCommission   = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
+  const commAdj          = profile?.commission_adjustment ?? 0;
+  const weekCommission   = baseCommission + commAdj;
 
   let crewCut = 0;
   let crewCutRate = 0;
@@ -43,13 +45,21 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
 
   // Only managers/owners get a crew cut — trainer crew cut is removed
   if (roleLevel === "manager" || roleLevel === "owner") {
-    crewCutRate = config?.manager_crew_rate ?? 0.20;
-    const r = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
-      args: [userId]
-    });
-    crewCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
-    crewCutLabel = "Manager Cut";
+    const manualCut = profile?.manager_cut_adjustment ?? 0;
+    if (manualCut > 0) {
+      // Use the manually-set dollar amount directly
+      crewCut      = manualCut;
+      crewCutRate  = profile?.manager_override_rate ?? 0.20;
+      crewCutLabel = "Manager Cut";
+    } else {
+      crewCutRate = config?.manager_crew_rate ?? 0.20;
+      const r = await db.execute({
+        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
+        args: [userId]
+      });
+      crewCut      = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
+      crewCutLabel = "Manager Cut";
+    }
   }
 
   return { rate, weekCommission, crewCut, crewCutRate, crewCutLabel };
