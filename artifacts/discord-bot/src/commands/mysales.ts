@@ -29,10 +29,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const periodStart = period === "month" ? monthStart : ws;
   const yearStart = `${now.getFullYear()}-01-01`;
 
-  const [periodR, todayR, ytdR] = await Promise.all([
+  // For commission calculation we MUST use order_number_reset_ts as the period boundary
+  // so it matches the snapshot taken when /setpay was run. weekStart() and order_number_reset_ts
+  // diverge after a mid-week payday, causing the snapshot formula to break.
+  const SINCE_RESET_SQL = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+
+  const [periodR, todayR, ytdR, resetPeriodR] = await Promise.all([
     db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [interaction.user.id, periodStart] }),
     db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) = ?", args: [interaction.user.id, today] }),
-    db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [interaction.user.id, yearStart] })
+    db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?", args: [interaction.user.id, yearStart] }),
+    // This is the authoritative pay-period query for commission (uses reset_ts not weekStart)
+    db.execute({ sql: `SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET_SQL}`, args: [interaction.user.id] })
   ]);
 
   const sum = (rows: any[]) => rows.reduce((s: any, row: any) => ({
@@ -40,20 +47,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     labour: s.labour + Number(row[1] ?? 0)
   }), { total: 0, labour: 0 });
 
-  const periodTotals = sum(periodR.rows);
-  const todayTotals  = sum(todayR.rows);
-  const ytdTotals    = sum(ytdR.rows);
+  const periodTotals    = sum(periodR.rows);
+  const todayTotals     = sum(todayR.rows);
+  const ytdTotals       = sum(ytdR.rows);
+  const resetPeriodTotals = sum(resetPeriodR.rows);
 
   const rate       = profile.commission_rate;
   const adjustment = profile.commission_adjustment ?? 0;
+  const snapshot   = profile.commission_labour_snapshot ?? 0;
 
-  // If setpay was run: weekCommission = adjustment + (labour AFTER snapshot) × rate
-  // Otherwise: totalLabour × rate
-  const snapshot = profile.commission_labour_snapshot ?? 0;
-  const labourAfterSetpay = Math.max(0, periodTotals.labour - (period === "week" ? snapshot : 0));
+  // Always use the reset-period labour for commission calculation so the snapshot formula works.
+  // The display stats (orders count, revenue) still use the calendar-week/month period.
+  const commLabour = period === "week" ? resetPeriodTotals.labour : periodTotals.labour;
+  const labourAfterSetpay = Math.max(0, commLabour - (period === "week" ? snapshot : 0));
   const weekCommission = (adjustment > 0 && period === "week")
     ? adjustment + labourAfterSetpay * rate
-    : periodTotals.labour * rate;
+    : commLabour * rate;
 
   const embed = buildDashboardEmbed(
     profile.display_name, profile.status,
