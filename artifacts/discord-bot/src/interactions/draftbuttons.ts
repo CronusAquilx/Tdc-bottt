@@ -35,11 +35,18 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
     sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
     args: [userId]
   });
-  const baseCommission   = Number(weekLabourR.rows[0]?.[0] ?? 0) * rate;
-  const commAdj          = profile?.commission_adjustment ?? 0;
-  // commission_adjustment is ADDITIVE — stacks on top of the order-based calculation
-  // (same as manager_cut_adjustment). Orders still grow the total; the adjustment is a bonus.
-  const weekCommission   = baseCommission + commAdj;
+  const totalLabour = Number(weekLabourR.rows[0]?.[0] ?? 0);
+  const commAdj     = profile?.commission_adjustment ?? 0;
+  const snapshot    = profile?.commission_labour_snapshot ?? 0;
+
+  // How commission works:
+  // - If no setpay has been run (commAdj = 0): weekCommission = totalLabour × rate
+  // - If setpay was run: weekCommission = commAdj + (labour earned AFTER setpay) × rate
+  //   The snapshot captures the labour total at setpay time, so new orders add on top.
+  const labourAfterSetpay = Math.max(0, totalLabour - snapshot);
+  const weekCommission    = commAdj > 0
+    ? commAdj + labourAfterSetpay * rate
+    : totalLabour * rate;
 
   let crewCut = 0;
   let crewCutRate = 0;
@@ -52,11 +59,15 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
       sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
       args: [userId]
     });
-    const percentageCut = Number(r.rows[0]?.[0] ?? 0) * crewCutRate;
-    const manualBonus   = profile?.manager_cut_adjustment ?? 0;
-    // manager_cut_adjustment is ADDITIVE — it stacks on top of the % cut so
-    // the cut still grows as orders come in
-    crewCut      = percentageCut + manualBonus;
+    const totalCrewLabour    = Number(r.rows[0]?.[0] ?? 0);
+    const manualBonus        = profile?.manager_cut_adjustment ?? 0;
+    const managerSnapshot    = profile?.manager_labour_snapshot ?? 0;
+    const crewLabourAfterSet = Math.max(0, totalCrewLabour - managerSnapshot);
+    // If a manual bonus was set: bonus + (crew labour AFTER setpay) × rate
+    // Otherwise: totalCrewLabour × rate
+    crewCut      = manualBonus > 0
+      ? manualBonus + crewLabourAfterSet * crewCutRate
+      : totalCrewLabour * crewCutRate;
     crewCutLabel = "Manager Cut";
   }
 

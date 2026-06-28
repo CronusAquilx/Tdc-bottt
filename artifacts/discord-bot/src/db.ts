@@ -218,6 +218,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN clocklog_channel_id TEXT");
   await safeAlter("ALTER TABLE profiles ADD COLUMN commission_adjustment REAL DEFAULT 0");
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_cut_adjustment REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN commission_labour_snapshot REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN manager_labour_snapshot REAL DEFAULT 0");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_msg_id TEXT");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_chan_id TEXT");
   // Ensure the owner/manager has manager role in the DB so they always get manager cut + admin access
@@ -363,22 +365,24 @@ export async function nextOrderNumber(): Promise<string> {
 }
 
 export async function getProfile(discordId: string) {
-  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate, commission_adjustment, manager_cut_adjustment FROM profiles WHERE discord_id = ?", args: [discordId] });
+  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate, commission_adjustment, manager_cut_adjustment, commission_labour_snapshot, manager_labour_snapshot FROM profiles WHERE discord_id = ?", args: [discordId] });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
-    discord_id:               String(row[0] ?? ""),
-    display_name:             String(row[1] ?? ""),
-    sales_channel_id:         row[2] ? String(row[2]) : null,
-    commission_rate:          Number(row[3] ?? 0.3),
-    hours_worked_this_week:   Number(row[4] ?? 0),
-    status:                   String(row[5] ?? "offline"),
-    created_at:               String(row[6] ?? ""),
-    in_city_id:               row[7] ? String(row[7]) : null,
-    manager_id:               row[8] ? String(row[8]) : null,
-    manager_override_rate:    Number(row[9] ?? 0.20),
-    commission_adjustment:    Number(row[10] ?? 0),
-    manager_cut_adjustment:   Number(row[11] ?? 0),
+    discord_id:                    String(row[0] ?? ""),
+    display_name:                  String(row[1] ?? ""),
+    sales_channel_id:              row[2] ? String(row[2]) : null,
+    commission_rate:               Number(row[3] ?? 0.3),
+    hours_worked_this_week:        Number(row[4] ?? 0),
+    status:                        String(row[5] ?? "offline"),
+    created_at:                    String(row[6] ?? ""),
+    in_city_id:                    row[7] ? String(row[7]) : null,
+    manager_id:                    row[8] ? String(row[8]) : null,
+    manager_override_rate:         Number(row[9] ?? 0.20),
+    commission_adjustment:         Number(row[10] ?? 0),
+    manager_cut_adjustment:        Number(row[11] ?? 0),
+    commission_labour_snapshot:    Number(row[12] ?? 0),
+    manager_labour_snapshot:       Number(row[13] ?? 0),
   };
 }
 

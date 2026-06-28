@@ -57,13 +57,31 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const updates: string[] = [];
   const args: any[] = [];
 
+  // Snapshot the current labour totals at the moment setpay is run.
+  // Commission going forward = adjustment + (labour AFTER this snapshot) × rate.
+  // This means the amount you set is locked in, and new orders add on top cleanly.
+  const SINCE_RESET_SQL = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  const DONE_STATUSES   = `status IN ('complete', 'approved', 'paid')`;
+
   if (commission !== null) {
-    updates.push("commission_adjustment = ?");
-    args.push(commission);
+    // Snapshot how much labour this mechanic has done so far this pay period
+    const snapR = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
+      args: [target.id]
+    });
+    const labourSnapshot = Number(snapR.rows[0]?.[0] ?? 0);
+    updates.push("commission_adjustment = ?", "commission_labour_snapshot = ?");
+    args.push(commission, labourSnapshot);
   }
   if (managerCut !== null) {
-    updates.push("manager_cut_adjustment = ?");
-    args.push(managerCut);
+    // Snapshot the total crew labour so far this pay period
+    const snapR = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
+      args: [target.id]
+    });
+    const managerLabourSnapshot = Number(snapR.rows[0]?.[0] ?? 0);
+    updates.push("manager_cut_adjustment = ?", "manager_labour_snapshot = ?");
+    args.push(managerCut, managerLabourSnapshot);
   }
   if (commissionRate !== null) {
     updates.push("commission_rate = ?");

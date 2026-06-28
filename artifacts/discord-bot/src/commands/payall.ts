@@ -79,13 +79,16 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
 
   if (!mechanicMap.size) return null;
 
-  // Pull commission_adjustment overrides
+  // Pull commission adjustments + snapshots for the snapshot formula
   const adjustSummaryR = await db.execute(
-    "SELECT discord_id, commission_adjustment FROM profiles WHERE commission_adjustment > 0"
+    "SELECT discord_id, commission_adjustment, commission_labour_snapshot FROM profiles"
   );
-  const adjustSummaryMap = new Map<string, number>();
+  const adjustSummaryMap = new Map<string, { adj: number; snapshot: number }>();
   for (const row of adjustSummaryR.rows) {
-    adjustSummaryMap.set(String(row[0] ?? ""), Number(row[1] ?? 0));
+    adjustSummaryMap.set(String(row[0] ?? ""), {
+      adj:      Number(row[1] ?? 0),
+      snapshot: Number(row[2] ?? 0)
+    });
   }
 
   let grandCommission = 0;
@@ -94,15 +97,17 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   const payLines: string[] = [];
 
   for (const [mid, m] of mechanicMap) {
-    const adjustment = adjustSummaryMap.get(mid) ?? 0;
-    // commission_adjustment is ADDITIVE — stacks on top of order-based commission
-    const commission = m.labour * m.rate + adjustment;
+    const { adj = 0, snapshot = 0 } = adjustSummaryMap.get(mid) ?? {};
+    const labourAfterSetpay = Math.max(0, m.labour - snapshot);
+    const commission = adj > 0
+      ? adj + labourAfterSetpay * m.rate
+      : m.labour * m.rate;
     grandCommission += commission;
     totalLabour     += m.labour;
     totalRevenue    += m.revenue;
     const hrsNote    = m.hours > 0 ? ` · ${m.hours.toFixed(1)}h` : "";
-    const rateNote   = adjustment > 0
-      ? `${(m.rate * 100).toFixed(0)}% + $${Math.round(adjustment).toLocaleString()} bonus`
+    const rateNote   = adj > 0
+      ? `set $${Math.round(adj).toLocaleString()} + new orders`
       : `${(m.rate * 100).toFixed(0)}%`;
     payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} · ${rateNote} → **${money(commission)}**`);
   }
@@ -222,11 +227,14 @@ export async function processPayall(
   const { randomUUID } = await import("../lib/utils.js");
 
   const adjustR = await db.execute(
-    "SELECT discord_id, commission_adjustment FROM profiles WHERE commission_adjustment > 0"
+    "SELECT discord_id, commission_adjustment, commission_labour_snapshot FROM profiles"
   );
-  const adjustMap = new Map<string, number>();
+  const adjustMap = new Map<string, { adj: number; snapshot: number }>();
   for (const row of adjustR.rows) {
-    adjustMap.set(String(row[0] ?? ""), Number(row[1] ?? 0));
+    adjustMap.set(String(row[0] ?? ""), {
+      adj:      Number(row[1] ?? 0),
+      snapshot: Number(row[2] ?? 0)
+    });
   }
 
   // Fetch sales channel IDs for notification
@@ -241,9 +249,11 @@ export async function processPayall(
   const payoutResults: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
 
   for (const [mid, m] of mechanicMap) {
-    const adjustment  = adjustMap.get(mid) ?? 0;
-    // commission_adjustment is ADDITIVE — stacks on top of order-based commission
-    const commission  = m.labour * m.rate + adjustment;
+    const { adj = 0, snapshot = 0 } = adjustMap.get(mid) ?? {};
+    const labourAfterSetpay = Math.max(0, m.labour - snapshot);
+    const commission  = adj > 0
+      ? adj + labourAfterSetpay * m.rate
+      : m.labour * m.rate;
     grandCommission  += commission;
     totalLabour      += m.labour;
     totalRevenue     += m.revenue;
@@ -269,8 +279,8 @@ export async function processPayall(
     args: [ws]
   });
 
-  // Reset weekly stats + clear manual pay adjustments for everyone
-  await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0");
+  // Reset weekly stats + clear manual pay adjustments + snapshots for everyone
+  await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
 
   // Reset order number counter
   const { setSetting } = await import("../db.js");

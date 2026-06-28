@@ -289,7 +289,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     // Pull every profile and their current-period labour
     const crewR = await db.execute({
       sql: `SELECT p.discord_id, p.display_name, p.commission_rate, p.commission_adjustment,
-                   COALESCE(SUM(o.labour), 0) AS week_labour, COUNT(o.id) AS order_count
+                   COALESCE(SUM(o.labour), 0) AS week_labour, COUNT(o.id) AS order_count,
+                   p.commission_labour_snapshot
             FROM profiles p
             LEFT JOIN orders o ON o.mechanic_id = p.discord_id
               AND o.status IN ('complete', 'approved', 'paid')
@@ -309,10 +310,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       const override = Number(row[3] ?? 0);
       const labour   = Number(row[4] ?? 0);
       const orders   = Number(row[5] ?? 0);
-      const comm     = labour * rate + override;
+      const snapshot = Number(row[6] ?? 0);
+      const labourAfterSetpay = Math.max(0, labour - snapshot);
+      const comm = override > 0
+        ? override + labourAfterSetpay * rate
+        : labour * rate;
       grandTotal += comm;
       const rateLabel = override > 0
-        ? `${(rate * 100).toFixed(0)}% + $${Math.round(override).toLocaleString()} bonus`
+        ? `set $${Math.round(override).toLocaleString()} + new orders`
         : `${(rate * 100).toFixed(0)}%`;
       const ordNote   = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
       lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(comm).toLocaleString()}**`);

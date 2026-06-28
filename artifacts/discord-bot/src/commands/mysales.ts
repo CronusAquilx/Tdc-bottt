@@ -47,8 +47,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const rate       = profile.commission_rate;
   const adjustment = profile.commission_adjustment ?? 0;
 
-  // commission_adjustment is ADDITIVE — stacks on top of order-based commission
-  const weekCommission = periodTotals.labour * rate + (period === "week" ? adjustment : 0);
+  // If setpay was run: weekCommission = adjustment + (labour AFTER snapshot) × rate
+  // Otherwise: totalLabour × rate
+  const snapshot = profile.commission_labour_snapshot ?? 0;
+  const labourAfterSetpay = Math.max(0, periodTotals.labour - (period === "week" ? snapshot : 0));
+  const weekCommission = (adjustment > 0 && period === "week")
+    ? adjustment + labourAfterSetpay * rate
+    : periodTotals.labour * rate;
 
   const embed = buildDashboardEmbed(
     profile.display_name, profile.status,
