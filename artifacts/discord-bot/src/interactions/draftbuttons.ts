@@ -165,11 +165,25 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       roleLevel = "mechanic";
     }
 
-    // Resume existing draft if one exists — prevents stale state when a user dismisses
-    // an ephemeral message without cancelling the order first.
+    // Clean up any drafts that predate the last pay-period reset — they're stale leftovers
+    // from a clear that may have been interrupted. Always start fresh after a clear.
+    const resetTs = await getSetting("order_number_reset_ts");
+    if (resetTs) {
+      await db.execute({
+        sql: `DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft'
+              AND (guild_id = ? OR guild_id = '')
+              AND datetime(COALESCE(created_at, '2000-01-01')) < datetime(?)`,
+        args: [targetMechanicId, guildId, resetTs]
+      });
+    }
+
+    // Resume an existing draft created AFTER the last reset — prevents duplicate
+    // drafts when a user dismisses an ephemeral without cancelling the order.
     let orderId: string;
     const existingDraftR = await db.execute({
-      sql: "SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '') ORDER BY created_at DESC LIMIT 1",
+      sql: `SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft'
+            AND (guild_id = ? OR guild_id = '')
+            ORDER BY created_at DESC LIMIT 1`,
       args: [targetMechanicId, guildId]
     });
 
