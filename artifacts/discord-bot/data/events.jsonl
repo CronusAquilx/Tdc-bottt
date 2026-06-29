@@ -1,2 +1,4 @@
 {"ts":"2026-06-29T01:30:50.621Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"5bc0f918-f8ee-411f-9403-37dec95ad100","orderNumber":"TDC-0010"}
 {"ts":"2026-06-29T01:31:11.885Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"5bc0f918-f8ee-411f-9403-37dec95ad100","orderNumber":"TDC-0010"}
+{"ts":"2026-06-29T03:31:47.238Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"1291fb15-8dc6-4890-a73a-e1b6a60b6050","orderNumber":"TDC-0081"}
+{"ts":"2026-06-29T03:32:42.396Z","kind":"order_completed","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"1291fb15-8dc6-4890-a73a-e1b6a60b6050","orderNumber":"TDC-0081","amount":118000,"detail":"total=210000 parts=92000"}

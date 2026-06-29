@@ -1,10 +1,9 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, MessageFlags
 } from "discord.js";
-import { db, getProfile, getGuildConfig } from "../db.js";
+import { db, getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
-import { postOrderPanel } from "../interactions/orderpanel.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -136,20 +135,4 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     .setTimestamp();
 
   await interaction.editReply({ embeds: [embed] });
-
-  // Silently re-post a fresh order panel to their sales channel so it reflects the updated rate.
-  // No notice message, no log channel post — just the panel.
-  if (interaction.guild && updatedProfile?.sales_channel_id) {
-    try {
-      const ch = await interaction.guild.channels.fetch(updatedProfile.sales_channel_id).catch(() => null);
-      if (ch?.isTextBased()) {
-        await postOrderPanel(
-          ch as any,
-          target.id,
-          updatedProfile.display_name,
-          updatedProfile.commission_rate ?? 0.3
-        );
-      }
-    } catch { /* ignore */ }
-  }
 }

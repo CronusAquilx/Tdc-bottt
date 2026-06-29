@@ -607,6 +607,20 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       } catch { /* ignore */ }
     }
 
+    // Also post a copy to the guild's orders log channel (orders_channel_id or log_channel_id)
+    if (interaction.guild) {
+      try {
+        const gConfig = await getGuildConfig(guildId);
+        const logChanId = gConfig?.orders_channel_id ?? gConfig?.log_channel_id;
+        if (logChanId && logChanId !== profile?.sales_channel_id) {
+          const logCh = await interaction.guild.channels.fetch(logChanId).catch(() => null);
+          if (logCh?.isTextBased()) {
+            await (logCh as any).send({ embeds: [embed] });
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
     // Log the completion
     logEvent({
       kind: "order_completed",
