@@ -1059,6 +1059,7 @@ export async function handleButton(interaction: ButtonInteraction) {
           if (!ch?.isTextBased()) { failed++; continue; }
 
           // Pay notification
+          const totalPay = p.amount + p.managerCut;
           await (ch as any).send({
             content:
               `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
@@ -1067,8 +1068,10 @@ export async function handleButton(interaction: ButtonInteraction) {
               (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
               `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
               `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
+              (p.managerCut > 0 ? `> 👔 **Manager cut: ${money(p.managerCut)}**\n` : "") +
+              (p.managerCut > 0 ? `> 🏆 **Total pay: ${money(totalPay)}**\n` : "") +
               `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `**Bill the company: ${money(p.amount)}** 🏢\n` +
+              `**Bill the company: ${money(totalPay)}** 🏢\n` +
               `Keep grinding, ${p.name}! 🏁`
           });
 

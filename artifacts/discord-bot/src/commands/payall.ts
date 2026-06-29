@@ -216,7 +216,7 @@ export async function processPayall(
   guild: Guild | null,
   ws: string,
   paidById: string
-): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
+): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
   // Use order_number_reset_ts as the pay-period boundary — same as all other commission calculations
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
@@ -266,7 +266,7 @@ export async function processPayall(
     salesChanMap.set(String(row[0] ?? ""), row[1] ? String(row[1]) : null);
   }
 
-  const payoutResults: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
+  const payoutResults: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
 
   for (const [mid, m] of mechanicMap) {
     const { adj = 0, snapshot = 0 } = adjustMap.get(mid) ?? {};
@@ -285,6 +285,7 @@ export async function processPayall(
     payoutResults.push({
       mechanicId: mid,
       amount: commission,
+      managerCut: 0,
       orders: m.orders,
       hours: m.hours,
       name: m.name,
@@ -314,6 +315,9 @@ export async function processPayall(
       ? manualBonus + crewAfterSnap * overrideRate
       : crewLabour * overrideRate;
     totalManagerCuts += cut;
+    // Attach manager cut to their payout record so the notification shows the full amount
+    const pRecord = payoutResults.find(p => p.mechanicId === managerId);
+    if (pRecord) pRecord.managerCut = cut;
   }
 
   // Mark all unpaid complete orders as paid
