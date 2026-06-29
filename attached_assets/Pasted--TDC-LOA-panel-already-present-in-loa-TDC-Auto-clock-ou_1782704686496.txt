@@ -1,0 +1,100 @@
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+[TDC] Interaction error: LibsqlError: SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: orders.order_number
+    at mapSqliteError (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:372:16)
+    at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:277:15)
+    at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+    ... 2 lines matching cause stack trace ...
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:216:17) {
+  code: 'SQLITE_CONSTRAINT_UNIQUE',
+  rawCode: 2067,
+  [cause]: SqliteError: UNIQUE constraint failed: orders.order_number
+      at convertError (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:51:12)
+      at Statement.run (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:301:13)
+      at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:270:34)
+      at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+      at handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:129:26)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:216:17) {
+    code: 'SQLITE_CONSTRAINT_UNIQUE',
+    rawCode: 2067
+  }
+}
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] Interaction error: LibsqlError: SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: orders.order_number
+    at mapSqliteError (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:372:16)
+    at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:277:15)
+    at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+    ... 2 lines matching cause stack trace ...
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:216:17) {
+  code: 'SQLITE_CONSTRAINT_UNIQUE',
+  rawCode: 2067,
+  [cause]: SqliteError: UNIQUE constraint failed: orders.order_number
+      at convertError (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:51:12)
+      at Statement.run (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:301:13)
+      at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:270:34)
+      at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+      at handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:129:26)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:216:17) {
+    code: 'SQLITE_CONSTRAINT_UNIQUE',
+    rawCode: 2067
+  }
+}
+[TDC] Interaction error: LibsqlError: SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: orders.order_number
+    at mapSqliteError (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:372:16)
+    at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:277:15)
+    at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+    ... 2 lines matching cause stack trace ...
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:218:13) {
+  code: 'SQLITE_CONSTRAINT_UNIQUE',
+  rawCode: 2067,
+  [cause]: SqliteError: UNIQUE constraint failed: orders.order_number
+      at convertError (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:51:12)
+      at Statement.run (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:301:13)
+      at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:270:34)
+      at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+      at handleButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/buttons.js:168:26)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:218:13) {
+    code: 'SQLITE_CONSTRAINT_UNIQUE',
+    rawCode: 2067
+  }
+}
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 10000
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
+[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).
