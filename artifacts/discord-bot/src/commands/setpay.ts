@@ -137,24 +137,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.editReply({ embeds: [embed] });
 
-  // Always re-post a fresh panel and notice to the sales channel for any setpay change
+  // Silently re-post a fresh order panel to their sales channel so it reflects the updated rate.
+  // No notice message, no log channel post — just the panel.
   if (interaction.guild && updatedProfile?.sales_channel_id) {
     try {
       const ch = await interaction.guild.channels.fetch(updatedProfile.sales_channel_id).catch(() => null);
       if (ch?.isTextBased()) {
-        const noticeLines: string[] = [];
-        if (commission !== null)     noticeLines.push(`💵 Running commission set to **${money(commission)}**`);
-        if (managerCut !== null)     noticeLines.push(`👔 Manager cut set to **${money(managerCut)}**`);
-        if (commissionRate !== null) noticeLines.push(`📊 Commission rate updated to **${(commissionRate * 100).toFixed(0)}%**`);
-
-        await (ch as any).send({
-          content:
-            `📢 **Pay Update for ${profile.display_name}**\n` +
-            noticeLines.map(l => `> ${l}`).join("\n") +
-            `\n> *Updated by <@${interaction.user.id}>*`
-        });
-
-        // Always re-post a fresh order panel so the channel shows up-to-date rate/pay info
         await postOrderPanel(
           ch as any,
           target.id,
@@ -164,13 +152,4 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       }
     } catch { /* ignore */ }
   }
-
-  // Log to log channel
-  try {
-    if (!interaction.guild) return;
-    const config = await getGuildConfig(interaction.guild.id);
-    if (!config?.log_channel_id) return;
-    const ch = await interaction.guild.channels.fetch(config.log_channel_id).catch(() => null);
-    if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
-  } catch { /* ignore */ }
 }
