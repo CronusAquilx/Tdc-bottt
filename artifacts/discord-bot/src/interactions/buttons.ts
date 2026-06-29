@@ -656,8 +656,12 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clear: confirm all ────────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "all") {
-    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
+    const callerRole = await detectUserRoleLevel(interaction);
+    if (!["manager", "owner"].includes(callerRole)) {
+      await interaction.editReply({ content: "❌ Managers only.", components: [] });
+      return;
+    }
     const guildId = interaction.guildId ?? "";
     // Archive complete orders
     const r = await db.execute({
@@ -696,8 +700,12 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clear: confirm player ─────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "player") {
-    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
+    const callerRole = await detectUserRoleLevel(interaction);
+    if (!["manager", "owner"].includes(callerRole)) {
+      await interaction.editReply({ content: "❌ Managers only.", components: [] });
+      return;
+    }
     const mechId = rest.slice(1).join(":");
     const guildId = interaction.guildId ?? "";
     const profile = await getProfile(mechId);

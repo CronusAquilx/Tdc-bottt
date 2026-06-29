@@ -246,11 +246,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (err: any) {
     const code = err?.code ?? err?.rawError?.code;
     if (code === 10062) {
-      console.warn(`[TDC] ⚡ Interaction expired before acknowledgement (slow response or restart).`);
+      // Stale interaction — expected on restart, not a real error. Silently drop.
       return;
     }
     if (code === 40060 && ((interaction as any).replied || (interaction as any).deferred)) {
-      console.warn(`[TDC] ⚡ Interaction already acknowledged (duplicate event).`);
+      // Already acknowledged (duplicate event). Silently drop.
       return;
     }
 
