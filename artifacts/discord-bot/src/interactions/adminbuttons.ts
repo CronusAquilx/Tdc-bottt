@@ -286,6 +286,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     if (!(await requireRole(interaction, "manager"))) return true;
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    const SINCE_RESET_BARE = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+
     // Pull every profile and their current-period labour
     const crewR = await db.execute({
       sql: `SELECT p.discord_id, p.display_name, p.commission_rate, p.commission_adjustment,
@@ -302,25 +304,51 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       args: []
     });
 
+    // Fetch manager cuts so they show in their own commission line
+    const managersR = await db.execute(
+      "SELECT p.discord_id, p.manager_override_rate, p.manager_cut_adjustment, p.manager_labour_snapshot FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
+    );
+    const managerCutMap = new Map<string, number>();
+    for (const mrow of managersR.rows) {
+      const managerId    = String(mrow[0] ?? "");
+      const overrideRate = Number(mrow[1] ?? 0.20);
+      const manualBonus  = Number(mrow[2] ?? 0);
+      const managerSnap  = Number(mrow[3] ?? 0);
+      const crewLabourR  = await db.execute({
+        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+        args: [managerId]
+      });
+      const crewLabour    = Number(crewLabourR.rows[0]?.[0] ?? 0);
+      const crewAfterSnap = Math.max(0, crewLabour - managerSnap);
+      const cut = manualBonus > 0
+        ? manualBonus + crewAfterSnap * overrideRate
+        : crewLabour * overrideRate;
+      managerCutMap.set(managerId, cut);
+    }
+
     const lines: string[] = [];
     let grandTotal = 0;
     for (const row of crewR.rows) {
-      const name     = String(row[1] ?? "Unknown");
-      const rate     = Number(row[2] ?? 0.3);
-      const override = Number(row[3] ?? 0);
-      const labour   = Number(row[4] ?? 0);
-      const orders   = Number(row[5] ?? 0);
-      const snapshot = Number(row[6] ?? 0);
+      const discordId = String(row[0] ?? "");
+      const name      = String(row[1] ?? "Unknown");
+      const rate      = Number(row[2] ?? 0.3);
+      const override  = Number(row[3] ?? 0);
+      const labour    = Number(row[4] ?? 0);
+      const orders    = Number(row[5] ?? 0);
+      const snapshot  = Number(row[6] ?? 0);
       const labourAfterSetpay = Math.max(0, labour - snapshot);
-      const comm = override > 0
+      const ownComm = override > 0
         ? override + labourAfterSetpay * rate
         : labour * rate;
-      grandTotal += comm;
+      const managerCut = managerCutMap.get(discordId) ?? 0;
+      const totalComm  = ownComm + managerCut;
+      grandTotal += totalComm;
       const rateLabel = override > 0
         ? `set $${Math.round(override).toLocaleString()} + new orders`
         : `${(rate * 100).toFixed(0)}%`;
-      const ordNote   = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
-      lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(comm).toLocaleString()}**`);
+      const ordNote = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
+      const cutNote = managerCut > 0 ? ` + **$${Math.round(managerCut).toLocaleString()} mgr cut**` : "";
+      lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(ownComm).toLocaleString()}**${cutNote} = **$${Math.round(totalComm).toLocaleString()}**`);
     }
 
     const crewBlock = lines.length ? lines.join("\n") : "*No crew profiles found.*";
@@ -336,7 +364,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       )
       .addFields(
         { name: `👥 Crew (${crewR.rows.length})`, value: crewBlock.slice(0, 1024), inline: false },
-        { name: "💰 Total Commission", value: `**$${Math.round(grandTotal).toLocaleString()}**`, inline: true }
+        { name: "💰 Total to Bill Company", value: `**$${Math.round(grandTotal).toLocaleString()}**`, inline: true }
       )
       .setFooter({ text: FOOTER });
 

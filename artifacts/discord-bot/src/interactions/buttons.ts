@@ -1074,13 +1074,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
           // New Week announcement
           await (ch as any).send({
-            content:
-              "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
-              "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-              "> 💪 **Fresh start. New money. New orders.**\n" +
-              "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
-              "> 📅 **Payday is every Monday** — stay clocked in, stay stacking.\n" +
-              "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            content: "🗓️ **New pay week — let's get it!** 🏁"
           });
 
           // Re-post the order panel so they can start fresh
