@@ -345,24 +345,25 @@ export function splitRoleIds(s: string | null | undefined): string[] {
 }
 
 export async function nextOrderNumber(): Promise<string> {
-  // Respect weekly reset — only count orders created after the last payday reset
-  const resetR = await db.execute("SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'");
-  const resetTs = resetR.rows[0] ? String(resetR.rows[0][0]) : null;
-
-  let r;
-  if (resetTs) {
-    r = await db.execute({
-      sql: "SELECT order_number FROM orders WHERE created_at >= ? ORDER BY rowid DESC LIMIT 1",
-      args: [resetTs]
-    });
-  } else {
-    r = await db.execute("SELECT order_number FROM orders ORDER BY rowid DESC LIMIT 1");
-  }
-
-  if (!r.rows[0]) return "TDC-0001";
-  const num = parseInt(String(r.rows[0][0]).replace("TDC-", ""), 10) + 1;
+  // Atomic sequence counter — avoids UNIQUE constraint collisions from concurrent orders.
+  // Using db.batch() runs both statements in a single write transaction (serialised by SQLite).
+  await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('order_seq', '0')");
+  const results = await db.batch([
+    {
+      sql: "UPDATE app_settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'order_seq'",
+      args: []
+    },
+    {
+      sql: "SELECT value FROM app_settings WHERE key = 'order_seq'",
+      args: []
+    }
+  ], "write");
+  const num = parseInt(String(results[1].rows[0]?.[0] ?? "1"), 10);
   return `TDC-${String(num).padStart(4, "0")}`;
 }
+
+// NOTE: order_seq is intentionally never reset — it is a globally monotonic counter.
+// The pay-period boundary is tracked via order_number_reset_ts in app_settings.
 
 export async function getProfile(discordId: string) {
   const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate, commission_adjustment, manager_cut_adjustment, commission_labour_snapshot, manager_labour_snapshot FROM profiles WHERE discord_id = ?", args: [discordId] });

@@ -177,11 +177,34 @@ export async function handleButton(interaction: ButtonInteraction) {
     const guildId = interaction.guildId ?? "";
     const roleLevel = await detectUserRoleLevel(interaction);
     const newOrderId = randomUUID();
-    const orderNumber = await nextOrderNumber();
 
-    await _db.execute({
-      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-      args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+    // Insert with retry on UNIQUE constraint (rare race on order_number)
+    let orderNumber = await nextOrderNumber();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await _db.execute({
+          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+          args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+        });
+        break;
+      } catch (err: any) {
+        if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+          orderNumber = await nextOrderNumber();
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Log the order creation
+    const { logEvent } = await import("../lib/eventLog.js");
+    logEvent({
+      kind: "order_created",
+      guildId,
+      userId: interaction.user.id,
+      userName: interaction.user.username,
+      orderId: newOrderId,
+      orderNumber
     });
 
     const [catalogStr, draft] = await Promise.all([

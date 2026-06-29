@@ -120,9 +120,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const isManager = clickerRole === "manager" || clickerRole === "owner";
 
     // ── Determine WHO the order is for ────────────────────────────────────────
-    // If a manager clicks New Order in a channel that isn't their own sales
-    // channel, assume they are doing the order on behalf of the mechanic who
-    // owns that channel.
     let targetMechanicId = clickerId;
     let targetDisplayName: string | undefined;
 
@@ -130,7 +127,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       const currentChannelId = interaction.channelId;
       const clickerProfile = await getProfile(clickerId);
 
-      // Check if the current channel belongs to a different mechanic
       if (currentChannelId && currentChannelId !== clickerProfile?.sales_channel_id) {
         const ownerRow = await db.execute({
           sql: "SELECT discord_id, display_name FROM profiles WHERE sales_channel_id = ? LIMIT 1",
@@ -143,11 +139,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       }
     }
 
-    // ── Check clock-in state for the TARGET mechanic (or the clicker if self) ─
-    // Managers doing orders for others don't need to be clocked in themselves;
-    // the order will be attributed to the mechanic. But we still check if the
-    // mechanic themselves is clocked in (for corded mechanics the flow requires it).
-    // For managers acting on behalf: skip the clock-in check.
+    // ── Check clock-in state ───────────────────────────────────────────────────
     if (!isManager || targetMechanicId === clickerId) {
       const active = await db.execute({
         sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
@@ -166,20 +158,42 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const newOrderId = randomUUID();
     const { nextOrderNumber } = await import("../db.js");
-    const orderNumber = await nextOrderNumber();
 
     // Role level stored on the order = the mechanic's role (not the manager's)
     let roleLevel = "mechanic";
     if (targetMechanicId === clickerId) {
       roleLevel = clickerRole;
     } else {
-      // Default to mechanic for the stored role_level (commission is theirs)
       roleLevel = "mechanic";
     }
 
-    await db.execute({
-      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-      args: [newOrderId, orderNumber, targetMechanicId, guildId, roleLevel]
+    // Insert with retry on UNIQUE constraint (rare race condition on order_number)
+    let orderNumber = await nextOrderNumber();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await db.execute({
+          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+          args: [newOrderId, orderNumber, targetMechanicId, guildId, roleLevel]
+        });
+        break; // success
+      } catch (err: any) {
+        if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+          orderNumber = await nextOrderNumber(); // get next available number and retry
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Log the order creation
+    const { logEvent } = await import("../lib/eventLog.js");
+    logEvent({
+      kind: "order_created",
+      guildId,
+      userId: targetMechanicId,
+      userName: targetDisplayName ?? interaction.user.username,
+      orderId: newOrderId,
+      orderNumber
     });
 
     const [catalogStr, draft] = await Promise.all([
@@ -572,6 +586,18 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       } catch { /* ignore */ }
     }
 
+    // Log the completion
+    const { logEvent: logComplete } = await import("../lib/eventLog.js");
+    logComplete({
+      kind: "order_completed",
+      guildId: interaction.guildId ?? "",
+      userId: mechanicId,
+      orderId,
+      orderNumber: completed.order_number,
+      amount: Math.round(completed.labour),
+      detail: `total=${completed.total} parts=${completed.parts_cost}`
+    });
+
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
@@ -585,7 +611,19 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // ── Cancel ──────────────────────────────────────────────────────────────────
   if (action === "cancel") {
     await interaction.deferUpdate();
+    // Fetch order number for the log before deleting
+    const cancelR = await db.execute({ sql: "SELECT order_number, mechanic_id FROM orders WHERE id = ?", args: [orderId] });
     await db.execute({ sql: "DELETE FROM orders WHERE id = ?", args: [orderId] });
+    if (cancelR.rows[0]) {
+      const { logEvent: logCancel } = await import("../lib/eventLog.js");
+      logCancel({
+        kind: "order_cancelled",
+        guildId: interaction.guildId ?? "",
+        userId: String(cancelR.rows[0][1] ?? ""),
+        orderId,
+        orderNumber: String(cancelR.rows[0][0] ?? "")
+      });
+    }
     await interaction.editReply({ content: "❌ Order cancelled.", embeds: [], components: [] });
     return true;
   }

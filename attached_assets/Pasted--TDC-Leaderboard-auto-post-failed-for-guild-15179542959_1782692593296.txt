@@ -1,0 +1,133 @@
+[TDC] Leaderboard auto-post failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:452:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+[TDC] Payday auto-run failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:320:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Leaderboard auto-post failed for guild 1518026957525356635: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:452:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1518026957525356635?with_counts=true'
+}
+[TDC] Payday auto-run failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:320:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Payday auto-run failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:320:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+[TDC] 💸 Auto-payday complete for guild 1518029349079617597 — 7 crew, 1730080 billed, 0 notified
+[TDC] Payday auto-run failed for guild 1518026957525356635: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:320:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1518026957525356635?with_counts=true'
+}
+[TDC] 💸 No unpaid orders for guild 1503609933365514393 — sending new week only
+[TDC] Interaction error: LibsqlError: SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: orders.order_number
+    at mapSqliteError (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:372:16)
+    at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:277:15)
+    at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+    ... 2 lines matching cause stack trace ...
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:232:17) {
+  code: 'SQLITE_CONSTRAINT_UNIQUE',
+  rawCode: 2067,
+  [cause]: SqliteError: UNIQUE constraint failed: orders.order_number
+      at convertError (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:51:12)
+      at Statement.run (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:301:13)
+      at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:270:34)
+      at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+      at handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:135:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:232:17) {
+    code: 'SQLITE_CONSTRAINT_UNIQUE',
+    rawCode: 2067
+  }
+}
+[TDC] 💸 Auto-payday dedup key written for 2026-06-29.
+[TDC] Interaction error: LibsqlError: SQLITE_CONSTRAINT_UNIQUE: UNIQUE constraint failed: orders.order_number
+    at mapSqliteError (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:372:16)
+    at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:277:15)
+    at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+    ... 2 lines matching cause stack trace ...
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:232:17) {
+  code: 'SQLITE_CONSTRAINT_UNIQUE',
+  rawCode: 2067,
+  [cause]: SqliteError: UNIQUE constraint failed: orders.order_number
+      at convertError (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:51:12)
+      at Statement.run (/opt/render/project/src/node_modules/.pnpm/libsql@0.4.7/node_modules/libsql/index.js:301:13)
+      at executeStmt (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:270:34)
+      at Sqlite3Client.execute (file:///opt/render/project/src/node_modules/.pnpm/@libsql+client@0.14.0/node_modules/@libsql/client/lib-esm/sqlite3.js:79:16)
+      at handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:135:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:232:17) {
+    code: 'SQLITE_CONSTRAINT_UNIQUE',
+    rawCode: 2067
+  }
+}

@@ -1,0 +1,639 @@
+ code: 40060,
+  status: 400,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609424371093584/aW50ZXJhY3Rpb246MTUyMDYwOTQyNDM3MTA5MzU4NDoyQ3poSmh1dE5nbEpCdE5VV2Q1c25GQkpTUHl6WlVmUG5IdmdsZDBXSGV5RnphcVlSWFJYUU5aVEZ2NkJzWUxkdzEwbUhvcER5ZGpSYkxrUjdzY2VrWVBodmxaR2xHVWNCdENzTWwxTWVLZHhIWmE2bVFSWkNxY3V1R2lXOXdQVg/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferReply (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async handleButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/buttons.js:380:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:197:13) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609451076358184/aW50ZXJhY3Rpb246MTUyMDYwOTQ1MTA3NjM1ODE4NDpmVFV0Yng4b25nbVdWQWZEUW5rUGk4U2pndUNnaWJHdjdHVEc4Vkp4b3U4N2Q5UXFaTTI0NG03c25ncUJlbldKVDRPYXR4Y0JxaHVSYm1ZejZKQk9vbTNtNnNwTkc4V2owMkg5UE1nRkwwNnBKYU1pZWdrdnpQWGJIY2c0c2xyRA/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferReply (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async handleButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/buttons.js:323:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:197:13) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609461620703334/aW50ZXJhY3Rpb246MTUyMDYwOTQ2MTYyMDcwMzMzNDo2N0NLT1haWXpnMjEwd2V0VEY4R3NGaVlYYnBheXNzNlZSY2pzclJ1QWlEU2xWeHVsVkJSTEZjUXVtU1NiVDFZSUNLbXlxcTJydzh2Y01HUGxzUTM5VzByT0E2WnBWS0JTd3BKR050TzczVUVSU1ZPcmRwTXFRVEkwNjROV2dEVg/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[40060]: Interaction has already been acknowledged.
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferUpdate (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:305:22)
+    at async handleButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/buttons.js:100:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:197:13) {
+  requestBody: { files: undefined, json: { type: 6 } },
+  rawError: {
+    message: 'Interaction has already been acknowledged.',
+    code: 40060
+  },
+  code: 40060,
+  status: 400,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609550875623547/aW50ZXJhY3Rpb246MTUyMDYwOTU1MDg3NTYyMzU0NzpydVBhaGlWZGVPaElwOFR4aVAzbDF4Rnc1RG9TREdOUlNoRk9zQnMxYkdLWFJVa0ZTUTh4a2FmcHo5RGxYRUVUVk5DWjltZWE4VnFFSk01bWtaaFRZSGFuV0kwNE9hWU1tejlwMmw3eDJFS1lsT3Baemw4d3pPbzV2UUdFUmVjNw/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[40060]: Interaction has already been acknowledged.
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async StringSelectMenuInteraction.deferUpdate (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:305:22)
+    at async handleSelect (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/selects.js:474:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:213:13) {
+  requestBody: { files: undefined, json: { type: 6 } },
+  rawError: {
+    message: 'Interaction has already been acknowledged.',
+    code: 40060
+  },
+  code: 40060,
+  status: 400,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609572610379886/aW50ZXJhY3Rpb246MTUyMDYwOTU3MjYxMDM3OTg4Njpuc1NqUE5zd1VHMjZEWjhvY1pBa0kxckhDUVZJaHVKV1lqcURNaGdXek5lYTVUWnIxYjVNRzBtTExUeGZXQ1hYeTl6ZG1XQ0RTY0N0RGxScFF5QTJQY0dheHRhVEI2amFHYTFQemVkMWg2dWJDb3BrVkZYcmhFekVoUkd4czZZVg/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[40060]: Interaction has already been acknowledged.
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferUpdate (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:305:22)
+    at async handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:453:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:195:17) {
+  requestBody: { files: undefined, json: { type: 6 } },
+  rawError: {
+    message: 'Interaction has already been acknowledged.',
+    code: 40060
+  },
+  code: 40060,
+  status: 400,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520609595825983690/aW50ZXJhY3Rpb246MTUyMDYwOTU5NTgyNTk4MzY5MDpqQjNXM1Z4QW9mYUxZUXJmTWNFclhST0dTMmtRNk9aOHI2ZGdlSHc2c0wxb21LWk5TaWUxdTVvOVZadFdkMXBESDhxTkkzdnZUdmZMS2ZCamVOWFJMVVNMcWNZREdqUHN3VGlxYk1laVdUUGxFVjExaVkwM29odHk0eXVWUEtDVQ/callback?with_response=false'
+}
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+    at async ChatInputCommandInteraction.deferReply (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async Object.execute (file:///opt/render/project/src/artifacts/discord-bot/dist/commands/setpay.js:27:5)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:185:17) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520613676678119515/aW50ZXJhY3Rpb246MTUyMDYxMzY3NjY3ODExOTUxNTpyTW5WMUdKWGFudVhuaThIRm8zc1lQbnpXT01tbmt2S0E1ZUs5Z25KejAxYWFYaFA5dXcyZWFnNFZHTGRYTVlhaVo4bjBVdjVsU25rckJyVmcwMkFvamRjVTVScWlTaFphQ3RGcW41NVdMU2Z0dGNWcFBWWkdKZHdUZHFEMnF6cA/callback?with_response=false'
+}
+[TDC] Interaction error: DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferReply (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:60:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:197:17) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1520613770303504516/aW50ZXJhY3Rpb246MTUyMDYxMzc3MDMwMzUwNDUxNjpFQnN0dHJrNFRwOGpRZVRjMUw1RWNKTENZVE9HSFBEWnZHbnVGbGpNb1MxQ3IzN2FOeHh6cDVJdHAxcVc4NVd6U1ZnTTZzNFVQaFNiVm03TlFCMG1ZaFJPOUJQNDB5N3E5WEl3TTI2WVBWcFhTdG1UWnJuY3h2TWRuU1lZS2kyYg/callback?with_response=false'
+}
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] 📅 NEW WEEK scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] 📅 NEW WEEK scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] 📅 NEW WEEK scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+(node:58) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:78) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] Timeclock repost failed for guild 1502776204506173490: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776204506173490?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:76) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] ⏱️ Auto clocked out Ander after 388min
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:76) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] ⏱️ Auto clocked out Ander after 401min
+[TDC] Timeclock repost failed for guild 1502776204506173490: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776204506173490?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776204506173490: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776204506173490?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776204506173490: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776204506173490?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776204506173490: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776204506173490?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1502776461935906948: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1502776461935906948?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
+[TDC] Timeclock repost failed for guild 1517954295922950154: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.repost [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:428:35) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517954295922950154?with_counts=true'
+}
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+(node:58) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⏱️ Auto clocked out Ander after 1227min

@@ -325,9 +325,20 @@ export async function processPayall(
   // Reset weekly stats + clear manual pay adjustments + snapshots for everyone
   await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
 
-  // Reset order number counter
+  // Record pay-period boundary — order_seq counter is NOT reset (globally monotonic).
+  // The reset_ts is used only to scope which orders belong to the current pay period.
   const { setSetting } = await import("../db.js");
   await setSetting("order_number_reset_ts", new Date().toISOString());
+
+  // Log the payout event
+  const { logEvent } = await import("../lib/eventLog.js");
+  logEvent({
+    kind: "payout_processed",
+    guildId: guild?.id,
+    userId: paidById,
+    amount: Math.round(grandCommission + totalManagerCuts),
+    detail: `${mechanicMap.size} crew, ${ordersR.rows.length} orders, week ${ws}`
+  });
 
   return {
     grandCommission,

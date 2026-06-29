@@ -1,0 +1,54 @@
+}
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 3001
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+(node:58) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⏱️ Auto clocked out Ander after 1227min
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+[TDC] 💸 Payday scheduler started (fires every Monday midnight UTC)
+[TDC] ⏰ Timeclock panel repost scheduler started (every 3 hours)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+(node:77) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[TDC] ⚠️ Sent idle warning to 1363222342800511058 (warned: true)
+==> Detected service running on port 3001
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+[TDC] ⏱️ Auto clocked out Ander after 1317min
+[TDC] 💸 Running automatic Monday payday...
+[TDC] Leaderboard auto-post failed for guild 1517946787652960287: DiscordAPIError[10004]: Unknown Guild
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async SequentialHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:417:20)
+    at async SequentialHandler.queueRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/SequentialHandler.ts:169:11)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async GuildManager.fetch (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/managers/GuildManager.js:276:20)
+    at async Timeout.tick [as _onTimeout] (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:452:39) {
+  requestBody: { files: undefined, json: undefined },
+  rawError: { message: 'Unknown Guild', code: 10004 },
+  code: 10004,
+  status: 404,
+  method: 'GET',
+  url: 'https://discord.com/api/v10/guilds/1517946787652960287?with_counts=true'
+}
