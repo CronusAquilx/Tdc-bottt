@@ -345,9 +345,30 @@ export function splitRoleIds(s: string | null | undefined): string[] {
 }
 
 export async function nextOrderNumber(): Promise<string> {
-  // Atomic sequence counter — avoids UNIQUE constraint collisions from concurrent orders.
-  // Using db.batch() runs both statements in a single write transaction (serialised by SQLite).
+  // Ensure the sequence row exists
   await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('order_seq', '0')");
+
+  // Sync the counter up to the highest order number already in the table.
+  // This self-heals if the counter ever falls behind (e.g. after a DB restore
+  // or if orders were inserted via a different path).
+  await db.execute(
+    `UPDATE app_settings
+     SET value = CAST(
+       MAX(
+         CAST(value AS INTEGER),
+         COALESCE(
+           (SELECT MAX(CAST(SUBSTR(order_number, 5) AS INTEGER))
+            FROM orders
+            WHERE order_number LIKE 'TDC-%'
+              AND LENGTH(order_number) >= 8),
+           0
+         )
+       ) AS TEXT
+     )
+     WHERE key = 'order_seq'`
+  );
+
+  // Atomically increment and read the new value
   const results = await db.batch([
     {
       sql: "UPDATE app_settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'order_seq'",
