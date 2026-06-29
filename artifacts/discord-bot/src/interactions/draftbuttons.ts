@@ -247,8 +247,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const currentRoleBtC = await detectUserRoleLevel(interaction);
-    const commData = await getCommissionData(interaction.user.id, guildId, currentRoleBtC);
+    const commData = await getCommissionData(order.mechanic_id, guildId, order.role_level);
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
@@ -262,7 +261,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(currentRoleBtC)
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(order.role_level)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
 
@@ -341,9 +340,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     ]);
     const updated = rowToOrder(ur.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const currentRole = await detectUserRoleLevel(interaction);
-    const commData = await getCommissionData(interaction.user.id, guildId, currentRole);
-    const crewCutInfo = ["trainer","manager","owner"].includes(currentRole)
+    const commData = await getCommissionData(updated.mechanic_id, guildId, updated.role_level);
+    const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -419,9 +417,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     ]);
     const updated2 = rowToOrder(ur2.rows[0]);
     const guildId2 = interaction.guildId ?? "";
-    const currentRole2 = await detectUserRoleLevel(interaction);
-    const commData2 = await getCommissionData(interaction.user.id, guildId2, currentRole2);
-    const crewCutInfo2 = ["trainer","manager","owner"].includes(currentRole2)
+    const commData2 = await getCommissionData(updated2.mechanic_id, guildId2, updated2.role_level);
+    const crewCutInfo2 = ["trainer","manager","owner"].includes(updated2.role_level)
       ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
       : undefined;
     const catalog2 = JSON.parse(catalogStr2 ?? "{}");

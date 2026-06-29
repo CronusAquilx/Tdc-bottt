@@ -1,7 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, rowToTimeclock, hasRole } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildTimeclockEmbed, buildClockOutEmbed, COLORS } from "../lib/embeds.js";
@@ -47,7 +47,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // ── reset-all (owner only) ───────────────────────────────────────────────────
   if (sub === "reset-all") {
     if (!(await requireRole(interaction, "owner"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     // Get all active sessions
     const activeR = await db.execute(
@@ -120,7 +120,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // ── who-is-in ────────────────────────────────────────────────────────────────
   if (sub === "who-is-in") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const activeR = await db.execute(
       `SELECT id, mechanic_id, clock_in_time, warned_at FROM timeclock WHERE clock_out_time IS NULL ORDER BY clock_in_time ASC`
@@ -181,7 +181,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     if (target && target.id !== interaction.user.id) {
       if (!(await requireRole(interaction, "manager"))) return;
     }
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const userId = target?.id ?? interaction.user.id;
     const profile = await getProfile(userId);
@@ -231,7 +231,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   // ── force-out ────────────────────────────────────────────────────────────────
   if (sub === "force-out") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const target = interaction.options.getUser("mechanic", true);
     const reason = interaction.options.getString("reason") ?? "Clocked out by manager";
@@ -311,7 +311,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   // ── review ───────────────────────────────────────────────────────────────────
   if (!(await requireRole(interaction, "trainer"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const target = interaction.options.getUser("mechanic", true);
   const profile = await getProfile(target.id);
   if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
@@ -326,7 +326,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         new ButtonBuilder().setCustomId(`timeclock:approve:${entry.id}`).setLabel("✅ Approve").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`timeclock:reject:${entry.id}`).setLabel("❌ Reject").setStyle(ButtonStyle.Danger)
       );
-      await interaction.followUp({ embeds: [embed], components: [btnRow], ephemeral: true });
+      await interaction.followUp({ embeds: [embed], components: [btnRow], flags: MessageFlags.Ephemeral });
     }
     return;
   }

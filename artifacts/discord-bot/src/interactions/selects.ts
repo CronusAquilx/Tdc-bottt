@@ -3,8 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
-  ChannelType, PermissionFlagsBits, TextChannel,
-} from "discord.js";
+  ChannelType, PermissionFlagsBits, TextChannel, MessageFlags} from "discord.js";
 import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
@@ -23,20 +22,20 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     if (ns === "setup" && action === "setrole") {
       const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
       const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
-      if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", ephemeral: true }); return; }
+      if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", flags: MessageFlags.Ephemeral }); return; }
       const roleIds = interaction.values;
-      if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", flags: MessageFlags.Ephemeral }); return; }
       await setGuildRoleMapping(interaction.guild.id, level, roleIds);
       const levelLabel = level.charAt(0).toUpperCase() + level.slice(1).replace(/_/g, " ");
       const mentions = roleIds.map(id => `<@&${id}>`).join(", ");
-      await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, ephemeral: true });
+      await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, flags: MessageFlags.Ephemeral });
     }
 
     // admin:assignbyrole:pickrole — pick role → fetch members with that role → show multi-select
     if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickrole") {
       if (!(await requireRole(interaction, "manager"))) return;
       const guild = interaction.guild;
-      if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", flags: MessageFlags.Ephemeral }); return; }
       await interaction.deferUpdate();
 
       const roleId = interaction.values[0];
@@ -524,7 +523,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const commData = await getCommissionData(interaction.user.id, guildId, updated.role_level);
+    const commData = await getCommissionData(updated.mechanic_id, guildId, updated.role_level);
     const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
@@ -556,13 +555,13 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catalog = JSON.parse(catalogStr ?? "{}");
     const items: { label: string; category: string; price: number; cost: number; labour: number }[] = catalog.items ?? [];
     const catItems = items.filter(i => i.category === category);
-    if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, ephemeral: true }); return; }
+    if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, flags: MessageFlags.Ephemeral }); return; }
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
     const guildId2 = interaction.guildId ?? "";
-    const commData2 = await getCommissionData(interaction.user.id, guildId2, order.role_level);
+    const commData2 = await getCommissionData(order.mechanic_id, guildId2, order.role_level);
     const crewCutInfo2 = ["trainer","manager","owner"].includes(order.role_level)
       ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
       : undefined;
@@ -620,7 +619,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     }).filter(Boolean);
 
     if (!newItems.length) {
-      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", ephemeral: true });
+      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -640,7 +639,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const updatedR2 = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR2.rows[0]);
     const guildId3 = interaction.guildId ?? "";
-    const commData3 = await getCommissionData(interaction.user.id, guildId3, updated.role_level);
+    const commData3 = await getCommissionData(updated.mechanic_id, guildId3, updated.role_level);
     const crewCutInfo3 = ["trainer","manager","owner"].includes(updated.role_level)
       ? { amount: commData3.crewCut, rate: commData3.crewCutRate, label: commData3.crewCutLabel }
       : undefined;

@@ -1,7 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Guild, TextChannel
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
@@ -15,7 +15,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "manager"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const embed = await buildPayallSummaryEmbed(weekStart(), interaction.guild ?? undefined);
   if (!embed) {

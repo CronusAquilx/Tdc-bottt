@@ -1,7 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
@@ -16,7 +16,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "owner"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const target = interaction.options.getUser("mechanic", true);
   const profile = await getProfile(target.id);
   if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }

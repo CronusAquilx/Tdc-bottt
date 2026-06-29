@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, TextChannel } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, TextChannel , MessageFlags} from "discord.js";
 import { db, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildLeaderboardEmbed, getWeekStart } from "../lib/leaderboard.js";
@@ -10,7 +10,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "manager"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const config = await getGuildConfig(guild.id);

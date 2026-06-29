@@ -5,7 +5,7 @@ import {
   ChannelType, PermissionFlagsBits,
   RoleSelectMenuBuilder, UserSelectMenuBuilder,
   TextChannel
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
@@ -67,7 +67,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Select a mechanic...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
     return true;
   }
 
@@ -84,7 +84,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Select a mechanic...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
     return true;
   }
 
@@ -183,14 +183,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   if (section === "setup" && action === "refresh") {
     await interaction.deferUpdate();
     // Just ack — main panel is now tab-based; no embed to update on the base msg
-    await interaction.followUp({ content: "✅ Panel refreshed.", ephemeral: true });
+    await interaction.followUp({ content: "✅ Panel refreshed.", flags: MessageFlags.Ephemeral });
     return true;
   }
 
   // ── Panel tab: Staff ──────────────────────────────────────────────────────
   if (section === "panel" && action === "staff") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const embed = new EmbedBuilder()
       .setTitle("👥  STAFF MANAGEMENT")
       .setColor(COLORS.primary)
@@ -215,7 +215,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Panel tab: Channels ───────────────────────────────────────────────────
   if (section === "panel" && action === "channels") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const config = await getGuildConfig(guild.id);
     const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
     const embed = new EmbedBuilder()
@@ -260,7 +260,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Panel tab: Raffle ─────────────────────────────────────────────────────
   if (section === "panel" && action === "raffle") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const config = await getGuildConfig(guild.id);
     const ch = (id: string | null | undefined) => id ? `<#${id}>` : "`Not set`";
     const embed = new EmbedBuilder()
@@ -284,7 +284,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Panel tab: Payroll ────────────────────────────────────────────────────
   if (section === "panel" && action === "payroll") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     // Pull every profile and their current-period labour
     const crewR = await db.execute({
@@ -367,14 +367,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Select a crew member...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
     return true;
   }
 
   // ── Panel tab: Config ─────────────────────────────────────────────────────
   if (section === "panel" && action === "config") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const config = await getGuildConfig(guild.id);
     const roMany = (s: string | null | undefined) => {
       const ids = splitRoleIds(s);
@@ -438,7 +438,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder(`Pick all roles for ${level} access (replaces current list)...`)
         .setMinValues(1).setMaxValues(10)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [roleSelect] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [roleSelect] });
     return true;
   }
 
@@ -457,7 +457,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Select a mechanic...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [userSelect] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [userSelect] });
     return true;
   }
 
@@ -480,7 +480,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Pick a manager...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
     return true;
   }
 
@@ -501,7 +501,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:assign:pickmechanic:manual").setLabel("👤 Pick User").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:assign:byrolepicker").setLabel("🔩 By Role").setStyle(ButtonStyle.Secondary),
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
     return true;
   }
 
@@ -520,7 +520,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Select the mechanic role...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [roleRow] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [roleRow] });
     return true;
   }
 
@@ -539,7 +539,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder("Pick a mechanic...")
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
     return true;
   }
 
@@ -598,14 +598,14 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         .setPlaceholder(`Pick a member to make ${roleTarget}...`)
         .setMinValues(1).setMaxValues(1)
     );
-    await interaction.reply({ ephemeral: true, embeds: [embed], components: [sel] });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
     return true;
   }
 
   // ── Sales Channel setup ────────────────────────────────────────────────────
   if (section === "setup" && action === "saleschannel") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const embed = new EmbedBuilder()
       .setTitle("➕  Sales Channel Setup")
       .setColor(COLORS.primary)
@@ -626,7 +626,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Timeclock channel ──────────────────────────────────────────────────────
   if (section === "setup" && action === "timeclock") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const embed = new EmbedBuilder()
       .setTitle("⏰  Timeclock Channel Setup")
       .setColor(COLORS.dark)
@@ -659,9 +659,9 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       }) as TextChannel;
       await postTimeclockPanel(ch);
       await setGuildConfig(guild.id, "timeclock_channel_id", ch.id);
-      await interaction.followUp({ content: `✅ Clock panel created → <#${ch.id}>\n\n💡 **Next step:** Set up a **Clock Logs** channel so clock-in/out records go there instead of the panel.`, ephemeral: true });
+      await interaction.followUp({ content: `✅ Clock panel created → <#${ch.id}>\n\n💡 **Next step:** Set up a **Clock Logs** channel so clock-in/out records go there instead of the panel.`, flags: MessageFlags.Ephemeral });
     } catch (err: any) {
-      await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
+      await interaction.followUp({ content: `❌ Failed: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return true;
   }
@@ -669,7 +669,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Generic channel setups (Orders, Jobs, Logs, Archive, LOA, Raffle) ──────
   if (section === "setup" && action in CHANNEL_MAP) {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cfg = CHANNEL_MAP[action];
     const embed = new EmbedBuilder()
       .setTitle(`📡  ${cfg.label} Channel Setup`)
@@ -693,9 +693,9 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       const ch = await guild.channels.create({ name: cfg.name, type: ChannelType.GuildText, topic: cfg.topic }) as TextChannel;
       await setGuildConfig(guild.id, cfg.field, ch.id);
       await postChannelPanel(ch, chanType, guild);
-      await interaction.followUp({ content: `✅ **#${cfg.name}** created → <#${ch.id}>`, ephemeral: true });
+      await interaction.followUp({ content: `✅ **#${cfg.name}** created → <#${ch.id}>`, flags: MessageFlags.Ephemeral });
     } catch (err: any) {
-      await interaction.followUp({ content: `❌ Failed: ${err.message}`, ephemeral: true });
+      await interaction.followUp({ content: `❌ Failed: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
     return true;
   }

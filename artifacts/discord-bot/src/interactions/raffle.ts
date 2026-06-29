@@ -2,8 +2,7 @@ import {
   ButtonInteraction, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
-  AttachmentBuilder,
-} from "discord.js";
+  AttachmentBuilder, MessageFlags} from "discord.js";
 import { db, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildRaffleEmbed, COLORS } from "../lib/embeds.js";
@@ -151,7 +150,7 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
 
   // ── Enter raffle ─────────────────────────────────────────────────────────────
   if (action === "enter") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const r = await db.execute({ sql: "SELECT * FROM raffles WHERE id = ?", args: [raffleId] });
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Raffle not found." }); return true; }
@@ -204,7 +203,7 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
   // ── Spin the wheel ────────────────────────────────────────────────────────────
   if (action === "spin") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const r = await db.execute({ sql: "SELECT * FROM raffles WHERE id = ?", args: [raffleId] });
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Raffle not found." }); return true; }
@@ -335,7 +334,7 @@ export async function handleRaffleButton(interaction: ButtonInteraction): Promis
 // ── Handle raffle modals ────────────────────────────────────────────────────────
 export async function handleRaffleModal(interaction: any): Promise<boolean> {
   if (!interaction.customId.startsWith("raffle:create")) return false;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const title       = interaction.fields.getTextInputValue("title");
@@ -432,5 +431,5 @@ export async function showRaffleTypeSelector(interaction: ButtonInteraction) {
     new ButtonBuilder().setCustomId("raffle:type:custom").setLabel("✏️  Custom").setStyle(ButtonStyle.Secondary),
   );
 
-  await interaction.reply({ ephemeral: true, embeds: [embed], components: [row] });
+  await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
 }

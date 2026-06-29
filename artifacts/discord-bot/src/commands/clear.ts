@@ -1,7 +1,7 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
@@ -27,7 +27,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "manager"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const sub = interaction.options.getSubcommand();
 

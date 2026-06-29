@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, getSetting, rowToOrder } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildDraftEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
@@ -40,7 +40,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Edit Labour ────────────────────────────────────────────────────────────
   if (ns === "order" && action === "setlabour") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const labourStr = interaction.fields.getTextInputValue("labour").replace(/[$,]/g, "");
     const labour = parseFloat(labourStr);
     if (isNaN(labour) || labour < 0) {
@@ -66,7 +66,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Discount ────────────────────────────────────────────────────────────────
   if (ns === "order" && action === "applydiscount") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const pctStr = interaction.fields.getTextInputValue("percent").replace(/[%\s]/g, "");
     const pct = parseFloat(pctStr);
     if (isNaN(pct) || pct < 1 || pct > 100) {
@@ -116,7 +116,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Body Parts ──────────────────────────────────────────────────────────────
   if (ns === "order" && action === "addextras") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const qtyStr = interaction.fields.getTextInputValue("quantity").trim();
     const qty = parseInt(qtyStr, 10);
     if (isNaN(qty) || qty <= 0) {
@@ -155,7 +155,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Admin: payroll set individual pay ─────────────────────────────────────
   if (ns === "admin" && action === "payroll" && extra.startsWith("setpay:")) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (!(await requireRole(interaction, "manager"))) return;
     const memberId = extra.replace("setpay:", "");
     const amountStr = interaction.fields.getTextInputValue("amount").replace(/[$,\s]/g, "");
@@ -195,7 +195,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Job apply modal ────────────────────────────────────────────────────────
   if (ns === "job" && action === "applymodal") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const jobId = extra;
     const message = interaction.fields.getTextInputValue("message");
     const experience = interaction.fields.getTextInputValue("experience");

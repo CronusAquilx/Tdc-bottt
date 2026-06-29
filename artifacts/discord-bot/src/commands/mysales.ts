@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
 import { db, getProfile } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildDashboardEmbed, money, COLORS } from "../lib/embeds.js";
@@ -16,7 +16,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "mechanic"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const period = interaction.options.getString("period") ?? "week";
   const profile = await getProfile(interaction.user.id);

@@ -1,5 +1,5 @@
 import {
-  SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder
+  SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, MessageFlags
 } from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
@@ -35,8 +35,8 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if (!(await requireRole(interaction, "manager"))) return;
-  await interaction.deferReply({ ephemeral: true });
 
   const target         = interaction.options.getUser("user", true);
   const commission     = interaction.options.getNumber("commission");

@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, statusEmoji } from "../lib/embeds.js";
@@ -56,7 +56,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "add") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       const target = interaction.options.getUser("user", true);
       const role = interaction.options.getString("role", true);
@@ -86,7 +86,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "remove") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target = interaction.options.getUser("user", true);
     const profile = await getProfile(target.id);
     if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
@@ -107,7 +107,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "list") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const roles = ["owner", "manager", "trainer", "mechanic"];
     const embed = new EmbedBuilder()
       .setTitle("👥 Tokyo Drift Customs — Crew")
@@ -131,7 +131,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "status") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target = interaction.options.getUser("user", true);
     const status = interaction.options.getString("status", true);
     const profile = await getProfile(target.id);
@@ -143,7 +143,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "setcityid") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target  = interaction.options.getUser("user", true);
     const cityId  = interaction.options.getString("city_id", true).trim();
     const profile = await getProfile(target.id);
@@ -160,7 +160,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "mycityid") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cityId  = interaction.options.getString("city_id", true).trim();
     const profile = await getProfile(interaction.user.id);
     if (!profile) { await interaction.editReply({ content: "❌ You're not in the crew yet." }); return; }

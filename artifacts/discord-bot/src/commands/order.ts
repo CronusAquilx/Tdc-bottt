@@ -8,7 +8,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getUserRole, rowToOrder } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildOrderEmbed, COLORS, money, statusEmoji } from "../lib/embeds.js";
@@ -58,7 +58,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (sub === "list") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const role = await getUserRole(interaction.user.id);
     const isManager = role === "owner" || role === "manager";
     const status = interaction.options.getString("status");
@@ -100,7 +100,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   if (sub === "view") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const orderNum = interaction.options.getString("order_number", true).toUpperCase();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE order_number = ?", args: [orderNum] });
     if (!r.rows[0]) { await interaction.editReply({ content: `❌ Order **${orderNum}** not found.` }); return; }

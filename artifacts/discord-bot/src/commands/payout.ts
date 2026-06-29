@@ -1,6 +1,6 @@
 import {
   SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getUserRole } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
@@ -17,7 +17,7 @@ const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "mechanic"))) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const targetUser = interaction.options.getUser("mechanic");
   const role = await getUserRole(interaction.user.id);

@@ -2,7 +2,7 @@ import {
   ModalSubmitInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig, setGuildCrewRate, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
@@ -20,7 +20,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Job Post ───────────────────────────────────────────────────────────────
   if (section === "jobpost") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const title = interaction.fields.getTextInputValue("title");
     const body  = interaction.fields.getTextInputValue("body");
@@ -60,7 +60,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Commission: set trainer crew cut % ───────────────────────────────────
   if (section === "commission" && action === "trainerrate") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
     if (isNaN(pct) || pct < 0 || pct > 100) {
@@ -81,7 +81,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Commission: set manager crew cut % ───────────────────────────────────
   if (section === "commission" && action === "managerrate") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
     if (isNaN(pct) || pct < 0 || pct > 100) {
@@ -103,7 +103,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   if (section === "commission" && action === "set") {
     const mechanicId = parts[3];
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
@@ -155,7 +155,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   if (section === "commission" && action === "setoverride") {
     const managerId = parts[3];
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const rateStr = interaction.fields.getTextInputValue("override_rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
@@ -202,7 +202,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Sales Channel: Create New ──────────────────────────────────────────────
   if (section === "saleschan" && action === "new") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const mechanicId = interaction.fields.getTextInputValue("mechanic_id").trim();
     const profile = await getProfile(mechanicId);
@@ -266,7 +266,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Sales Channel: Attach Existing ────────────────────────────────────────
   if (section === "saleschan" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const mechanicId = interaction.fields.getTextInputValue("mechanic_id").trim();
     const channelId  = interaction.fields.getTextInputValue("channel_id").trim();
@@ -305,7 +305,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Timeclock: Attach Existing ─────────────────────────────────────────────
   if (section === "timeclock" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
     let ch: any;
@@ -329,7 +329,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     const cfg = CHANNEL_MAP[chanType];
     if (!cfg) return false;
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
     let ch: any;

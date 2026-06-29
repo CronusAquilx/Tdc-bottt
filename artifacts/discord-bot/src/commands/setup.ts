@@ -3,7 +3,7 @@ import {
   ChannelType, EmbedBuilder,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   PermissionFlagsBits, TextChannel
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { getGuildConfig } from "../db.js";
 import { COLORS } from "../lib/embeds.js";
 
@@ -16,7 +16,7 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(s => s.setName("status").setDescription("Show current bot configuration"));
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const sub = interaction.options.getSubcommand();
   const guild = interaction.guild!;
 

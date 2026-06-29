@@ -4,7 +4,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   EmbedBuilder, ChannelType, PermissionFlagsBits,
   OverwriteType, TextChannel
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
@@ -69,7 +69,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     try {
       await interaction.channel?.delete();
     } catch {
-      await interaction.followUp({ content: "❌ Failed to delete channel.", ephemeral: true });
+      await interaction.followUp({ content: "❌ Failed to delete channel.", flags: MessageFlags.Ephemeral });
     }
     return true;
   }
@@ -82,7 +82,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
 
     if (!(await requireRole(interaction, "trainer"))) return true;
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const guild = interaction.guild!;
     const config = await getGuildConfig(guild.id);
 
@@ -197,7 +197,7 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
 
   if (action === "modal") {
     const guild = interaction.guild!;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const yourName       = interaction.fields.getTextInputValue("your_name").trim();
     const timeAvailable  = interaction.fields.getTextInputValue("time_available").trim();
