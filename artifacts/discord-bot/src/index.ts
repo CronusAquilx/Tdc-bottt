@@ -249,8 +249,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Stale interaction — expected on restart, not a real error. Silently drop.
       return;
     }
-    if (code === 40060 && ((interaction as any).replied || (interaction as any).deferred)) {
-      // Already acknowledged (duplicate event). Silently drop.
+    if (code === 40060) {
+      // Already acknowledged (duplicate event or double-fire). Silently drop.
       return;
     }
 

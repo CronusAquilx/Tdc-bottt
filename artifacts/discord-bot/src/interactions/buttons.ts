@@ -23,6 +23,25 @@ function parseUtc(s: string): number {
   return new Date(norm).getTime();
 }
 
+/** After any clock-out, edit the idle-warning message to remove its buttons
+ *  so mechanics can't click "Stay Clocked In" on a closed shift. */
+async function clearWarnMessage(
+  entry: { id: string; warn_msg_id: string | null; warn_chan_id: string | null },
+  client: import("discord.js").Client
+) {
+  const mem    = warnedMechanics.get(entry.id);
+  const msgId  = mem?.msgId  ?? entry.warn_msg_id;
+  const chanId = mem?.chanId ?? entry.warn_chan_id;
+  if (!msgId || !chanId) return;
+  try {
+    const ch = await client.channels.fetch(chanId).catch(() => null);
+    if (ch && ch.isTextBased()) {
+      const msg = await (ch as any).messages.fetch(msgId).catch(() => null);
+      if (msg) await msg.edit({ components: [] });
+    }
+  } catch { /* ignore — DM closed or message deleted */ }
+}
+
 export async function handleButton(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const id = rest.join(":");
@@ -365,9 +384,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
-    // Clear any in-memory warn/stay state for this shift
+    // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
+    await clearWarnMessage(entry, interaction.client);
 
     // Edit original clock-in message or post new clock-out
     const profile = await getProfile(interaction.user.id);
@@ -499,9 +519,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
-    // Clear any in-memory warn/stay state for this shift
+    // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
+    await clearWarnMessage(entry, interaction.client);
 
     const ordersThisShift = await db.execute({
       sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?",
@@ -1250,6 +1271,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     warnedMechanics.delete(entry.id);
     stayedIn.delete(targetId);
+    await clearWarnMessage(entry, interaction.client);
 
     const profile = await getProfile(targetId);
     const name    = profile?.display_name ?? `<@${targetId}>`;

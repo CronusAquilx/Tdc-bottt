@@ -1,0 +1,182 @@
+# Critical Bugs to Fix - Order System & Time Clock
+
+These are critical issues that must be fixed. The goal is for this bot to be as reliable as MEE6, Dyno, Carl-bot, etc. Every interaction must stay synchronized with the database and never restore old state.
+
+## Bug #1 - Order State Reverting
+
+### Reproduction
+
+1. Create an order.
+2. Open the order.
+3. Close the order.
+4. Repeat opening and closing several times.
+5. Eventually the order randomly reverts back to an older state.
+
+The order status should NEVER revert once it has been updated.
+
+### Additional Discovery
+
+Another way to reproduce:
+
+1. Create an order.
+2. Instead of pressing **Cancel Order**, press **Dismiss Message**.
+3. Continue opening and closing orders several times.
+4. The order eventually restores an old version.
+
+This strongly suggests stale interaction data, cached message components, race conditions, or outdated database writes.
+
+### Required Fix
+
+The order system must use a single source of truth (database only).
+
+Every button press must:
+
+* Read the newest database record.
+* Verify the current state.
+* Apply the update.
+* Save immediately.
+* Refresh the message from the newest database values.
+
+Never trust cached interaction data.
+
+Use optimistic locking or version numbers to reject outdated writes.
+
+Disable buttons while processing so duplicate interactions cannot happen.
+
+Every database write should be atomic (transaction if supported).
+
+Never recreate order objects from cached embeds or message data.
+
+Log:
+
+* previous state
+* new state
+* interaction id
+* message id
+* user id
+* timestamp
+
+to help diagnose future issues.
+
+---
+
+# Bug #2 - Clock Out Timer Keeps Running
+
+If an admin force clocks someone out, the timer continues saying things like:
+
+"120 minutes"
+
+even though they are already clocked out.
+
+This means the timer, interval, scheduled job, collector, or reminder task is not being cleaned up.
+
+### Required Fix
+
+When a user clocks out:
+
+* cancel every timer
+* clear every interval
+* remove scheduled reminders
+* remove active session
+* delete any active timer references
+
+No timer should continue running after clock out.
+
+---
+
+# Bug #3 - Old Clock Sessions Resume
+
+Sometimes a user clocks in and the bot resumes an old clock session instead of starting a new one.
+
+This indicates old session data is still being stored.
+
+### Required Fix
+
+Clock In should:
+
+1. Check if an active session exists.
+2. If none exists:
+
+   * Generate a brand new session ID.
+   * Create a fresh session.
+3. Never reuse previous sessions.
+4. Never restore archived sessions.
+5. Archive completed sessions separately from active sessions.
+
+There should only ever be ONE active session per user.
+
+---
+
+# Architecture Improvements
+
+Refactor the order and clock systems into proper state machines.
+
+Allowed Order States:
+
+Pending
+→ Open
+→ Closed
+→ Cancelled
+
+Invalid transitions should be rejected.
+
+Allowed Clock States:
+
+Clocked Out
+→ Clocked In
+→ Break
+→ Resume
+→ Clocked Out
+
+No other transitions should be possible.
+
+---
+
+# Database Improvements
+
+Use transactions for writes.
+
+Add updatedAt timestamps.
+
+Add version numbers for optimistic locking.
+
+Reject stale writes.
+
+Always fetch fresh data before updating.
+
+Never rely on cached interaction objects.
+
+---
+
+# Logging
+
+Create detailed logs for every interaction:
+
+* Interaction ID
+* User ID
+* Order ID
+* Previous State
+* New State
+* Timestamp
+* Database Version
+* Session ID
+* Processing Time
+* Success/Failure
+
+---
+
+# Goal
+
+The final product should be production-grade and behave like bots such as MEE6, Dyno, Carl-bot, and Ticket Tool.
+
+It must be impossible for:
+
+* old data to overwrite new data
+* timers to survive after clock out
+* sessions to resume unexpectedly
+* duplicate interactions
+* stale cached messages
+* race conditions
+* inconsistent database state
+
+The system should always use the latest database state as the single source of truth and remain stable under rapid button presses, simultaneous interactions, and long uptimes.

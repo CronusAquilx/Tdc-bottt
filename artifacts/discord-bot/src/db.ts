@@ -470,5 +470,7 @@ export function rowToTimeclock(row: unknown): import("./types.js").Timeclock {
     created_at:       String(c(8)  ?? ""),
     clock_message_id: c(9)  ? String(c(9))  : null,
     clock_channel_id: c(10) ? String(c(10)) : null,
+    warn_msg_id:      c(14) ? String(c(14)) : null,
+    warn_chan_id:     c(15) ? String(c(15)) : null,
   };
 }

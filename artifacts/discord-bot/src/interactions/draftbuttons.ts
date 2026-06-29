@@ -157,8 +157,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       }
     }
 
-    const newOrderId = randomUUID();
-
     // Role level stored on the order = the mechanic's role (not the manager's)
     let roleLevel = "mechanic";
     if (targetMechanicId === clickerId) {
@@ -167,37 +165,48 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       roleLevel = "mechanic";
     }
 
-    // Insert with retry on UNIQUE constraint (rare race condition on order_number)
-    let orderNumber = await nextOrderNumber();
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await db.execute({
-          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-          args: [newOrderId, orderNumber, targetMechanicId, guildId, roleLevel]
-        });
-        break; // success
-      } catch (err: any) {
-        if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
-          orderNumber = await nextOrderNumber(); // get next available number and retry
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    // Log the order creation
-    logEvent({
-      kind: "order_created",
-      guildId,
-      userId: targetMechanicId,
-      userName: targetDisplayName ?? interaction.user.username,
-      orderId: newOrderId,
-      orderNumber
+    // Resume existing draft if one exists — prevents stale state when a user dismisses
+    // an ephemeral message without cancelling the order first.
+    let orderId: string;
+    const existingDraftR = await db.execute({
+      sql: "SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '') ORDER BY created_at DESC LIMIT 1",
+      args: [targetMechanicId, guildId]
     });
+
+    if (existingDraftR.rows[0]) {
+      orderId = String(existingDraftR.rows[0][0]);
+    } else {
+      // No existing draft — create a fresh one with retry on UNIQUE constraint
+      orderId = randomUUID();
+      let orderNumber = await nextOrderNumber();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await db.execute({
+            sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+            args: [orderId, orderNumber, targetMechanicId, guildId, roleLevel]
+          });
+          break;
+        } catch (err: any) {
+          if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+            orderNumber = await nextOrderNumber();
+            continue;
+          }
+          throw err;
+        }
+      }
+      logEvent({
+        kind: "order_created",
+        guildId,
+        userId: targetMechanicId,
+        userName: targetDisplayName ?? interaction.user.username,
+        orderId,
+        orderNumber
+      });
+    }
 
     const [catalogStr, draft] = await Promise.all([
       getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
     const commData = await getCommissionData(targetMechanicId, guildId, roleLevel);
     let catalog: any = {};
@@ -212,7 +221,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     }
 
     const catSelect = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectcategory:${newOrderId}`)
+      .setCustomId(`order:selectcategory:${orderId}`)
       .setPlaceholder("Pick a service category...")
       .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
@@ -229,7 +238,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        ...mainDraftButtonRows(newOrderId)
+        ...mainDraftButtonRows(orderId)
       ]
     });
     return true;

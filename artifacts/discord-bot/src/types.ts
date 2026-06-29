@@ -54,6 +54,8 @@ export interface Timeclock {
   created_at: string;
   clock_message_id: string | null;
   clock_channel_id: string | null;
+  warn_msg_id: string | null;
+  warn_chan_id: string | null;
 }
 
 export interface Payout {
