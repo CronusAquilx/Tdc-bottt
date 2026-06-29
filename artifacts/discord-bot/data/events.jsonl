@@ -7,3 +7,11 @@
 {"ts":"2026-06-29T04:03:54.827Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":"chowbabyy","orderId":"ce9cfbb1-9cc6-4b86-acb0-c8b7351224c8","orderNumber":"TDC-0084"}
 {"ts":"2026-06-29T04:05:17.047Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":"chowbabyy","orderId":"2b8b8327-c0db-42fa-a9fe-b1dfb84a0b91","orderNumber":"TDC-0085"}
 {"ts":"2026-06-29T04:05:35.882Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":"chowbabyy","orderId":"d569eb49-7c1d-471e-8981-019638c45c4d","orderNumber":"TDC-0086"}
+{"ts":"2026-06-29T04:18:09.224Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"d9c0777c-efa3-47ef-8c7d-8d8cd11ca5e9","orderNumber":"TDC-0087"}
+{"ts":"2026-06-29T04:18:13.710Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"d9c0777c-efa3-47ef-8c7d-8d8cd11ca5e9","orderNumber":"TDC-0087"}
+{"ts":"2026-06-29T04:18:28.015Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"c7420722-cefe-4c98-a755-b4ae90a6b54c","orderNumber":"TDC-0088"}
+{"ts":"2026-06-29T04:18:30.941Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"c7420722-cefe-4c98-a755-b4ae90a6b54c","orderNumber":"TDC-0088"}
+{"ts":"2026-06-29T04:18:32.738Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"c8f18eb8-8f7c-4ded-bf3c-422ad2036c94","orderNumber":"TDC-0089"}
+{"ts":"2026-06-29T04:18:34.925Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"c8f18eb8-8f7c-4ded-bf3c-422ad2036c94","orderNumber":"TDC-0089"}
+{"ts":"2026-06-29T04:18:36.825Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"c1e8fa67-6384-4122-9198-2fe56d533613","orderNumber":"TDC-0090"}
+{"ts":"2026-06-29T04:18:40.515Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"733fa551-32f6-4701-9c1c-f7efcf0b2600","orderNumber":"TDC-0091"}
