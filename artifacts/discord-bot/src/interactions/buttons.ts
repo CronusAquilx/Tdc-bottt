@@ -1,15 +1,19 @@
 import {
-  ButtonInteraction, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle
+  ButtonInteraction, EmbedBuilder, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock } from "../db.js";
-import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, COLORS, money } from "../lib/embeds.js";
+import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock, getSetting, setSetting, nextOrderNumber } from "../db.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
+import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, buildDraftEmbed, buildPayoutEmbed, buildDashboardEmbed, statusEmoji, COLORS, money } from "../lib/embeds.js";
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 import { autoClockOut } from "../lib/autoClockOut.js";
 import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
-import { getCommissionData } from "./draftbuttons.js";
+import { postOrderPanel } from "./orderpanel.js";
+import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
+import { logEvent } from "../lib/eventLog.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -25,7 +29,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock-warning: Stay Clocked In ────────────────────────────────────────
   if (ns === "clockwarn" && action === "stayin") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const tcId = id;
 
     // Verify this timeclock entry exists and belongs to the user clicking
@@ -59,7 +63,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock-warning: Clock Out Now ──────────────────────────────────────────
   if (ns === "clockwarn" && action === "clockout") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const tcId = id;
 
     // Find the timeclock entry — also fetch warned_at (index 11) for stale-shift detection
@@ -168,12 +172,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     // Immediately open the new order draft
-    const { db: _db, getSetting, rowToOrder, nextOrderNumber } = await import("../db.js");
-    const { detectUserRoleLevel } = await import("../lib/roles.js");
-    const { buildDraftEmbed } = await import("../lib/embeds.js");
-    const { mainDraftButtonRows, getCommissionData } = await import("./draftbuttons.js");
-    const { StringSelectMenuBuilder: SSB2, StringSelectMenuOptionBuilder: SSOB2 } = await import("discord.js");
-
     const guildId = interaction.guildId ?? "";
     const roleLevel = await detectUserRoleLevel(interaction);
     const newOrderId = randomUUID();
@@ -182,7 +180,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     let orderNumber = await nextOrderNumber();
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        await _db.execute({
+        await db.execute({
           sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
           args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
         });
@@ -197,7 +195,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     // Log the order creation
-    const { logEvent } = await import("../lib/eventLog.js");
     logEvent({
       kind: "order_created",
       guildId,
@@ -209,16 +206,23 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     const [catalogStr, draft] = await Promise.all([
       getSetting("parts_catalog"),
-      _db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
     const commData = await getCommissionData(interaction.user.id, guildId, roleLevel);
-    const catalog = JSON.parse(catalogStr ?? "{}");
-    const categories: string[] = catalog.categories ?? [];
+    let catalog: any = {};
+    try { catalog = JSON.parse(catalogStr ?? "{}"); } catch { /* use empty */ }
+    const categories: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
+      ? catalog.categories : [];
 
-    const catSelect = new SSB2()
+    if (categories.length === 0) {
+      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
+      return;
+    }
+
+    const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${newOrderId}`)
       .setPlaceholder("Pick a service category...")
-      .addOptions(categories.map((cat: string) => new SSOB2().setLabel(cat).setValue(cat)));
+      .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(roleLevel)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
@@ -227,7 +231,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.editReply({
       embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
-        new ActionRowBuilder<InstanceType<typeof SSB2>>().addComponents(catSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(newOrderId)
       ]
     });
@@ -278,7 +282,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       await interaction.followUp({
         content: `⚠️ **You're already clocked in!**${sinceTs} Clock out first.`,
         components: [clockOutBtn],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -322,7 +326,7 @@ export async function handleButton(interaction: ButtonInteraction) {
         .setStyle(ButtonStyle.Primary)
     );
     await interaction.message.edit({ components: [clockOutRow, payRow] });
-    await interaction.followUp({ content: "✅ Clocked in!", ephemeral: true });
+    await interaction.followUp({ content: "✅ Clocked in!", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -335,7 +339,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [interaction.user.id]
     });
     if (!active.rows[0]) {
-      await interaction.followUp({ content: "❌ You're not clocked in!", ephemeral: true });
+      await interaction.followUp({ content: "❌ You're not clocked in!", flags: MessageFlags.Ephemeral });
       const clockInRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
@@ -404,13 +408,13 @@ export async function handleButton(interaction: ButtonInteraction) {
         .setStyle(ButtonStyle.Primary)
     );
     await interaction.message.edit({ components: [clockInRow, payRow] });
-    await interaction.followUp({ content: `✅ Clocked out! **${hrs}h ${m}m**`, ephemeral: true });
+    await interaction.followUp({ content: `✅ Clocked out! **${hrs}h ${m}m**`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     // Atomic insert — only inserts if no active shift exists (prevents race condition)
     const tcId = randomUUID();
@@ -473,7 +477,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock Out from panel ───────────────────────────────────────────────────
   if (ns === "clockout" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const active = await db.execute({
       sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
@@ -558,7 +562,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Check Time (how long clocked in) ──────────────────────────────────────
   if (ns === "checktime" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const active = await db.execute({
       sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
@@ -581,7 +585,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Close Channel (trainer+) ───────────────────────────────────────────────
   if (ns === "closechan" && action === "panel") {
     if (!(await requireRole(interaction, "trainer"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = interaction.channel;
     if (!channel || !interaction.guild) {
       await interaction.editReply({ content: "❌ Could not find this channel." });
@@ -655,7 +659,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const guildId = interaction.guildId ?? "";
-    const { setSetting } = await import("../db.js");
     // Archive complete orders
     const r = await db.execute({
       sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
@@ -741,7 +744,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Order Pay: start (manager+ pay button on order embed) ─────────────────
   if (ns === "orderpay" && action === "start") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const mechId = id;
     const profile = await getProfile(mechId);
     if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
@@ -790,14 +793,14 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const profile = await getProfile(id);
-    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", ephemeral: true }); return; }
+    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", flags: MessageFlags.Ephemeral }); return; }
     const ws = weekStart();
     const SINCE_RESET_OP = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
       sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
       args: [id]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
     const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
     // Snapshot-aware commission
     const commAdj_op    = profile.commission_adjustment ?? 0;
@@ -824,7 +827,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
       created_at: String(payRow[9] ?? "")
     };
-    const { buildPayoutEmbed } = await import("../lib/embeds.js");
     const approver = await getProfile(interaction.user.id);
     const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Manager", weekEnd, profile.commission_rate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -859,7 +861,6 @@ export async function handleButton(interaction: ButtonInteraction) {
         : await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status != 'draft' ORDER BY created_at DESC", args: [interaction.user.id] });
 
     const rows = r.rows.map(row => rowToOrder(row));
-    const { statusEmoji } = await import("../lib/embeds.js");
     const { items, total, pages } = paginate(rows, page, 10);
     const lines = await Promise.all(items.map(async o => {
       const p = await getProfile(o.mechanic_id);
@@ -884,10 +885,10 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Order not found.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Order not found.", flags: MessageFlags.Ephemeral }); return; }
     const order = rowToOrder(r.rows[0]);
     if (!["paid", "complete", "approved"].includes(order.status)) {
-      await interaction.followUp({ content: "❌ Only completed or paid orders can be archived.", ephemeral: true });
+      await interaction.followUp({ content: "❌ Only completed or paid orders can be archived.", flags: MessageFlags.Ephemeral });
       return;
     }
     await db.execute({ sql: "UPDATE orders SET status = 'archived' WHERE id = ?", args: [id] });
@@ -917,7 +918,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
       args: [mechId, ws]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "ℹ️ No paid orders to archive.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "ℹ️ No paid orders to archive.", flags: MessageFlags.Ephemeral }); return; }
     await db.execute({
       sql: "UPDATE orders SET status = 'archived' WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
       args: [mechId, ws]
@@ -947,14 +948,14 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "owner"))) return;
     await interaction.deferUpdate();
     const profile = await getProfile(id);
-    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", ephemeral: true }); return; }
+    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", flags: MessageFlags.Ephemeral }); return; }
     const ws = weekStart();
     const SINCE_RESET_PC = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
       sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
       args: [id]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
     const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
     // Snapshot-aware commission — matches /setpay + /payall formula
     const commAdj_pc    = profile.commission_adjustment ?? 0;
@@ -981,7 +982,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
       created_at: String(payRow[9] ?? "")
     };
-    const { buildPayoutEmbed } = await import("../lib/embeds.js");
     const approver = await getProfile(interaction.user.id);
     const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Owner", weekEnd, profile.commission_rate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1014,12 +1014,11 @@ export async function handleButton(interaction: ButtonInteraction) {
     const result = await processPayall(interaction.guild, ws, interaction.user.id);
 
     if (!result) {
-      await interaction.followUp({ content: "❌ No unpaid orders found to process.", ephemeral: true });
+      await interaction.followUp({ content: "❌ No unpaid orders found to process.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts } = result;
-    const { postOrderPanel } = await import("./orderpanel.js");
 
     let notified = 0;
     let failed   = 0;
@@ -1127,7 +1126,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Schedule Payday now ────────────────────────────────────────────────────
   if (ns === "payall" && action === "schedulenow") {
     if (!(await requireRole(interaction, "owner"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const ws = weekStart();
     const embed = await buildPayallSummaryEmbed(ws, interaction.guild ?? undefined);
     if (!embed) {
@@ -1145,7 +1144,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Sales view detailed ───────────────────────────────────────────────────
   if (ns === "sales" && action === "viewdetailed") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const profile = await getProfile(id);
     if (!profile) { await interaction.editReply({ content: "❌ Profile not found." }); return; }
     const ws = weekStart();
@@ -1167,7 +1166,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     const weekCommission = commAdj_vd > 0
       ? commAdj_vd + labourAfter_vd * profile.commission_rate
       : weekLabour * profile.commission_rate;
-    const { buildDashboardEmbed } = await import("../lib/embeds.js");
     const embed = buildDashboardEmbed(profile.display_name, profile.status, todayR.rows.length, todayRev, weekR.rows.length, weekRev, profile.hours_worked_this_week, weekCommission, ytdR.rows.length, ytdRev, ytdCommission);
     await interaction.editReply({ embeds: [embed] });
     return;
@@ -1178,7 +1176,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "owner"))) return;
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT title, discord_message_id FROM jobs WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Job not found.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Job not found.", flags: MessageFlags.Ephemeral }); return; }
     const [title, msgId] = [String(r.rows[0][0]), String(r.rows[0][1] ?? "")];
     await db.execute({ sql: "DELETE FROM jobs WHERE id = ?", args: [id] });
     if (msgId && interaction.guild) {
@@ -1200,15 +1198,14 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Job apply ──────────────────────────────────────────────────────────────
   if (ns === "job" && action === "apply") {
     const r = await db.execute({ sql: "SELECT title FROM jobs WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.reply({ content: "❌ This job posting no longer exists.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.reply({ content: "❌ This job posting no longer exists.", flags: MessageFlags.Ephemeral }); return; }
     const title = String(r.rows[0][0]);
-    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
     const modal = new ModalBuilder().setCustomId(`job:applymodal:${id}`).setTitle(`Apply — ${title.slice(0, 40)}`);
     modal.addComponents(
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("message").setLabel("Why do you want this position?").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
       ),
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("experience").setLabel("Relevant experience (optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200)
       )
     );
@@ -1219,7 +1216,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Manager force clock-out button (from /timeclock who-is-in) ────────────
   if (ns === "tcmgr" && action === "forceout") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const targetId = id;
 
     const activeR = await db.execute({
@@ -1245,7 +1242,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [mins / 60, targetId]
     });
 
-    const { warnedMechanics, stayedIn } = await import("../lib/warnState.js");
     warnedMechanics.delete(entry.id);
     stayedIn.delete(targetId);
 
@@ -1255,7 +1251,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     const m = Math.round(mins % 60);
 
     // Edit clock-in message in the timeclock channel if we have it
-    const { buildClockOutEmbed } = await import("../lib/embeds.js");
     const clockEmbed = buildClockOutEmbed(name, entry.clock_in_time, new Date().toISOString().replace("T", " ").slice(0, 19), mins, 0);
     if (entry.clock_message_id && entry.clock_channel_id && interaction.guild) {
       try {
@@ -1319,8 +1314,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Settings catalog ───────────────────────────────────────────────────────
   if (ns === "settings" && action === "viewcatalog") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
-    const { getSetting } = await import("../db.js");
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const catalog = JSON.parse((await getSetting("parts_catalog")) ?? "{}");
     const items: any[] = catalog.items ?? [];
     const grouped: Record<string, string[]> = {};

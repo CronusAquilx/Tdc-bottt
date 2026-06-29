@@ -1,0 +1,25 @@
+When I set my pay and the new panel sent and I clicked new order it said Something went wrong.Pleaae try again please fix this it's doing it for everyone
+QW
+qweqeqeqeqszvv
+qweqeqeqeqszvv
+23 minutes ago
+No errors in the logs means it's failing silently inside the handler. Let me dig into the order panel and new order handler to find the root cause:
+The error is getting caught and logged as [TDC] Interaction error: — let me pull the actual error message from live logs, and simultaneously check whether the db.batch() call in nextOrderNumber is the culprit:
+The 10062 error means Discord killed the interaction before the bot even called deferReply — the handler chain is taking too long before it gets to the button. Let me see what the earlier handlers do that could be adding latency:
+The handlers before handleDraftButton run sequentially. Let me check if any of them do slow DB work before returning false for non-matching buttons:
+The order_seq is missing from the live DB (hasn't been created yet since no orders ran with the new code). Let me check all recent bot log files for the actual error:
+Let me read all the log files and look deeper into the handler to find what exactly is throwing:
+All three expired interactions are from the SAME bot run — these are genuine timing issues, not restart artifacts. Let me read training.ts fully to check for a missing early exit, plus look at requireRole to understand the full timing picture:
+The training.ts handler is clean (all conditions gate on ns === "training" before doing anything async). The root cause of the 10062 errors is that Discord's gateway is delivering the interaction event, but by the time the bot's HTTP deferReply POST reaches Discord's API it's already past 3 seconds — a network timing issue that's made worse by the deprecated ephemeral: true API going through an extra compatibility shim in discord.js v14.26.
+
+The fix: replace ephemeral: true with flags: MessageFlags.Ephemeral everywhere in draftbuttons.ts (removes the shim overhead), and add a per-handler catch inside the order:newpanel block so any error after the defer is logged precisely:
+Replacing all deprecated ephemeral: true with flags: MessageFlags.Ephemeral across both files in parallel:
+Now replacing all the deprecated ephemeral: true usages in both files at once:
+Those remaining ephemeral: true usages are in editReply/followUp calls. Let me fix those and all the same in buttons.ts in parallel:
+Fixing all remaining files at once with a single sed pass across the whole src tree:
+The other files' deprecation warnings are cosmetic (they go through a shim but still work). The two critical handler files are fixed. Let me typecheck and rebuild now:
+Bot is up clean. Now I need to find the actual failure. The logs show the errors happened during my development restarts — but to be sure the handler works properly for everyone going forward, let me add precise error logging inside order:newpanel so future failures are fully visible, and also verify the handler itself can't throw an unlogged error:
+Found the real bug. On line 210, if categories is empty (or the catalog parse fails for any reason), catSelect.addOptions([]) creates a SelectMenu with 0 options — Discord rejects that with a form validation error, which the global catch turns into "Something went wrong." This can also happen if getSetting("parts_catalog") returns something JSON-unparseable. Fixing it now with a safe guard, plus cleaning up the dynamic imports (convert them to static top-level imports):
+Now removing the dynamic imports inside the handler and adding the empty-categories guard:
+Now fixing the same dynamic imports in buttons.ts for the clockin:then:order path, then typecheck and rebuild all at once:
+Converting the critical dynamic imports in buttons.ts to static imports and adding the empty-categories guard, then typechecking — all in parallel:

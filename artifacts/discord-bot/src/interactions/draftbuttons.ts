@@ -1,13 +1,14 @@
 import {
-  ButtonInteraction,
+  ButtonInteraction, MessageFlags,
   ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getSetting, rowToOrder, getGuildConfig } from "../db.js";
+import { db, getProfile, getSetting, rowToOrder, getGuildConfig, nextOrderNumber } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
+import { logEvent } from "../lib/eventLog.js";
 
 // Use completed_at so orders started before a reset but finished after it still count toward
 // the current pay period. Fall back to created_at for older rows that lack completed_at.
@@ -110,7 +111,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── "Create New Order" button from pinned panel ────────────────────────────
   if (ns === "order" && action === "newpanel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (!(await requireRole(interaction, "mechanic"))) return true;
 
@@ -157,7 +158,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     }
 
     const newOrderId = randomUUID();
-    const { nextOrderNumber } = await import("../db.js");
 
     // Role level stored on the order = the mechanic's role (not the manager's)
     let roleLevel = "mechanic";
@@ -186,7 +186,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     }
 
     // Log the order creation
-    const { logEvent } = await import("../lib/eventLog.js");
     logEvent({
       kind: "order_created",
       guildId,
@@ -201,13 +200,21 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
     const commData = await getCommissionData(targetMechanicId, guildId, roleLevel);
-    const catalog = JSON.parse(catalogStr ?? "{}");
-    const categories: string[] = catalog.categories ?? [];
+    let catalog: any = {};
+    try { catalog = JSON.parse(catalogStr ?? "{}"); } catch { /* use empty catalog */ }
+    const categories: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
+      ? catalog.categories
+      : [];
+
+    if (categories.length === 0) {
+      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
+      return true;
+    }
 
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${newOrderId}`)
       .setPlaceholder("Pick a service category...")
-      .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
+      .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const crewCutInfo = commData.crewCut > 0 || roleLevel === "trainer" || roleLevel === "manager" || roleLevel === "owner"
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
@@ -245,6 +252,11 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const catalog = JSON.parse(catalogStr ?? "{}");
     const categories: string[] = catalog.categories ?? [];
 
+    if (categories.length === 0) {
+      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
+      return true;
+    }
+
     const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${orderId}`)
       .setPlaceholder("Add more services...")
@@ -266,7 +278,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Remove Items — show current order items as a select ────────────────────
   if (action === "removeitems") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const r = await db.execute({ sql: "SELECT items FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return true;
     const items: any[] = JSON.parse(String(r.rows[0][0] ?? "[]"));
@@ -335,22 +347,28 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
-    const catSelect = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Add more services...")
-      .addOptions((catalog.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
+    const maxPerfCats: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
+      ? catalog.categories : [];
+    const maxPerfComponents = maxPerfCats.length > 0
+      ? [
+          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`order:selectcategory:${orderId}`)
+              .setPlaceholder("Add more services...")
+              .addOptions(maxPerfCats.map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)))
+          ),
+          ...mainDraftButtonRows(orderId)
+        ]
+      : mainDraftButtonRows(orderId);
 
     // Update the original order embed
     await interaction.editReply({
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
-      components: [
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        ...mainDraftButtonRows(orderId)
-      ]
+      components: maxPerfComponents
     });
     // Show ephemeral breakdown of what was applied
     await interaction.followUp({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       content:
         "⚡ **Max Performance Package applied!**\n\n" +
         `> 🔧 Engine 4 — $70,000\n` +
@@ -407,22 +425,28 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
       : undefined;
     const catalog2 = JSON.parse(catalogStr2 ?? "{}");
-    const catSelect2 = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Add more services...")
-      .addOptions((catalog2.categories ?? []).map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
+    const fullPkgCats: string[] = Array.isArray(catalog2.categories) && catalog2.categories.length > 0
+      ? catalog2.categories : [];
+    const fullPkgComponents = fullPkgCats.length > 0
+      ? [
+          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId(`order:selectcategory:${orderId}`)
+              .setPlaceholder("Add more services...")
+              .addOptions(fullPkgCats.map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)))
+          ),
+          ...mainDraftButtonRows(orderId)
+        ]
+      : mainDraftButtonRows(orderId);
 
     // Update the original order embed
     await interaction.editReply({
       embeds: [buildDraftEmbed(updated2, commData2.weekCommission, commData2.rate, crewCutInfo2)],
-      components: [
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect2),
-        ...mainDraftButtonRows(orderId)
-      ]
+      components: fullPkgComponents
     });
     // Show ephemeral breakdown of what was applied
     await interaction.followUp({
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
       content:
         "📦 **Full Build Package applied! ($224,800)**\n\n" +
         "**⚡ Performance**\n" +
@@ -508,7 +532,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const order = rowToOrder(r.rows[0]);
 
     if (!order.items.length) {
-      await interaction.followUp({ content: "❌ Add at least one service before completing the order.", ephemeral: true });
+      await interaction.followUp({ content: "❌ Add at least one service before completing the order.", flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -587,8 +611,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     }
 
     // Log the completion
-    const { logEvent: logComplete } = await import("../lib/eventLog.js");
-    logComplete({
+    logEvent({
       kind: "order_completed",
       guildId: interaction.guildId ?? "",
       userId: mechanicId,
@@ -615,8 +638,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const cancelR = await db.execute({ sql: "SELECT order_number, mechanic_id FROM orders WHERE id = ?", args: [orderId] });
     await db.execute({ sql: "DELETE FROM orders WHERE id = ?", args: [orderId] });
     if (cancelR.rows[0]) {
-      const { logEvent: logCancel } = await import("../lib/eventLog.js");
-      logCancel({
+      logEvent({
         kind: "order_cancelled",
         guildId: interaction.guildId ?? "",
         userId: String(cancelR.rows[0][1] ?? ""),
