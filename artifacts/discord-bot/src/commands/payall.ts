@@ -56,30 +56,44 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
     e.labour += labour; e.orders += 1; e.revenue += total;
   }
 
-  // Pull ALL profiles — the source of truth for who is in the crew.
-  // This ensures people with setpay (commission_adjustment > 0) show up even with no orders.
-  const allProfilesR = await db.execute(
-    "SELECT discord_id, display_name, commission_rate, hours_worked_this_week, commission_adjustment, commission_labour_snapshot FROM profiles"
-  );
-  const adjustSummaryMap = new Map<string, { adj: number; snapshot: number }>();
-  for (const row of allProfilesR.rows) {
-    const mid = String(row[0] ?? "");
-    const adj      = Number(row[4] ?? 0);
-    const snapshot = Number(row[5] ?? 0);
-    adjustSummaryMap.set(mid, { adj, snapshot });
-    if (!mechanicMap.has(mid)) {
-      mechanicMap.set(mid, {
-        name:    String(row[1] ?? "Unknown"),
-        rate:    Number(row[2] ?? 0.3),
-        labour:  0,
-        orders:  0,
-        revenue: 0,
-        hours:   Number(row[3] ?? 0)
-      });
-    }
+  // Also include anyone with mechanic/trainer guild roles (even if no orders this week)
+  if (guild) {
+    try {
+      const config = await getGuildConfig(guild.id);
+      const roleIds = [
+        ...splitRoleIds(config?.mechanic_role_id),
+        ...splitRoleIds(config?.trainer_role_id)
+      ];
+      for (const roleId of roleIds) {
+        try {
+          const role = await guild.roles.fetch(roleId).catch(() => null);
+          if (!role) continue;
+          for (const [memberId] of role.members) {
+            if (mechanicMap.has(memberId)) continue;
+            const profile = await getProfile(memberId);
+            const name = profile?.display_name ?? "Unknown";
+            const rate = profile?.commission_rate ?? 0.3;
+            const hours = profile?.hours_worked_this_week ?? 0;
+            mechanicMap.set(memberId, { name, rate, labour: 0, orders: 0, revenue: 0, hours });
+          }
+        } catch { /* role not found */ }
+      }
+    } catch { /* ignore */ }
   }
 
   if (!mechanicMap.size) return null;
+
+  // Pull commission adjustments + snapshots for the snapshot formula
+  const adjustSummaryR = await db.execute(
+    "SELECT discord_id, commission_adjustment, commission_labour_snapshot FROM profiles"
+  );
+  const adjustSummaryMap = new Map<string, { adj: number; snapshot: number }>();
+  for (const row of adjustSummaryR.rows) {
+    adjustSummaryMap.set(String(row[0] ?? ""), {
+      adj:      Number(row[1] ?? 0),
+      snapshot: Number(row[2] ?? 0)
+    });
+  }
 
   let grandCommission = 0;
   let totalLabour     = 0;
@@ -202,23 +216,17 @@ export async function processPayall(
   guild: Guild | null,
   ws: string,
   paidById: string
-): Promise<{
-  grandCommission: number;
-  totalRevenue: number;
-  mechanicCount: number;
-  totalToBill: number;
-  payouts: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }>;
-  notifyZero: Array<{ mechanicId: string; name: string; salesChanId: string; rate: number }>;
-} | null> {
+): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
+  // Use order_number_reset_ts as the pay-period boundary — same as all other commission calculations
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
-  // Orders-based mechanic map
   const ordersR = await db.execute({
     sql: `SELECT o.mechanic_id, o.labour, o.total, p.display_name, p.commission_rate, p.hours_worked_this_week
           FROM orders o JOIN profiles p ON o.mechanic_id = p.discord_id
           WHERE o.status IN ('complete','approved') AND ${SINCE_RESET}`,
     args: []
   });
+  if (!ordersR.rows.length) return null;
 
   const mechanicMap = new Map<string, { name: string; rate: number; labour: number; orders: number; revenue: number; hours: number }>();
   for (const row of ordersR.rows) {
@@ -233,71 +241,51 @@ export async function processPayall(
     e.labour += labour; e.orders += 1; e.revenue += total;
   }
 
-  // Pull ALL profiles:
-  // - Build adjust/sales maps
-  // - Add setpay-only people (adj > 0, no orders) to the paying list
-  // - Collect everyone else with a sales channel for new-week-only notifications
-  const allProfilesR = await db.execute(
-    "SELECT discord_id, display_name, commission_rate, hours_worked_this_week, commission_adjustment, commission_labour_snapshot, sales_channel_id FROM profiles"
-  );
-  const adjustMap    = new Map<string, { adj: number; snapshot: number }>();
-  const salesChanMap = new Map<string, string | null>();
-  const notifyZero: Array<{ mechanicId: string; name: string; salesChanId: string; rate: number }> = [];
-
-  for (const row of allProfilesR.rows) {
-    const mid      = String(row[0] ?? "");
-    const name     = String(row[1] ?? "Unknown");
-    const rate     = Number(row[2] ?? 0.3);
-    const hours    = Number(row[3] ?? 0);
-    const adj      = Number(row[4] ?? 0);
-    const snapshot = Number(row[5] ?? 0);
-    const chanId   = row[6] ? String(row[6]) : null;
-
-    adjustMap.set(mid, { adj, snapshot });
-    salesChanMap.set(mid, chanId);
-
-    if (!mechanicMap.has(mid)) {
-      if (adj > 0) {
-        // Has setpay but no completed orders this period — still gets paid
-        mechanicMap.set(mid, { name, rate, labour: 0, orders: 0, revenue: 0, hours });
-      } else if (chanId) {
-        // $0 commission — add to new-week-only notification list
-        notifyZero.push({ mechanicId: mid, name, salesChanId: chanId, rate });
-      }
-    }
-  }
-
-  // Nothing at all to process
-  if (!mechanicMap.size && !notifyZero.length) return null;
-
   let grandCommission = 0;
   let totalLabour     = 0;
   let totalRevenue    = 0;
   const { randomUUID } = await import("../lib/utils.js");
-  const payoutResults: Array<{ mechanicId: string; amount: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
+
+  const adjustR = await db.execute(
+    "SELECT discord_id, commission_adjustment, commission_labour_snapshot FROM profiles"
+  );
+  const adjustMap = new Map<string, { adj: number; snapshot: number }>();
+  for (const row of adjustR.rows) {
+    adjustMap.set(String(row[0] ?? ""), {
+      adj:      Number(row[1] ?? 0),
+      snapshot: Number(row[2] ?? 0)
+    });
+  }
+
+  // Fetch sales channel IDs for notification
+  const salesChanR = await db.execute(
+    "SELECT discord_id, sales_channel_id FROM profiles"
+  );
+  const salesChanMap = new Map<string, string | null>();
+  for (const row of salesChanR.rows) {
+    salesChanMap.set(String(row[0] ?? ""), row[1] ? String(row[1]) : null);
+  }
+
+  const payoutResults: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
 
   for (const [mid, m] of mechanicMap) {
     const { adj = 0, snapshot = 0 } = adjustMap.get(mid) ?? {};
     const labourAfterSetpay = Math.max(0, m.labour - snapshot);
-    const commission = adj > 0
+    const commission  = adj > 0
       ? adj + labourAfterSetpay * m.rate
       : m.labour * m.rate;
-    grandCommission += commission;
-    totalLabour     += m.labour;
-    totalRevenue    += m.revenue;
-
-    // Only write a DB payout record if there is actual money
-    if (commission > 0) {
-      const payoutId = randomUUID();
-      await db.execute({
-        sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
-        args: [payoutId, mid, ws, Math.round(commission), m.orders, m.hours, m.orders, paidById]
-      });
-    }
-
+    grandCommission  += commission;
+    totalLabour      += m.labour;
+    totalRevenue     += m.revenue;
+    const payoutId = randomUUID();
+    await db.execute({
+      sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
+      args: [payoutId, mid, ws, commission, m.orders, m.hours, m.orders, paidById]
+    });
     payoutResults.push({
       mechanicId: mid,
-      amount: Math.round(commission),
+      amount: commission,
+      managerCut: 0,
       orders: m.orders,
       hours: m.hours,
       name: m.name,
@@ -321,27 +309,28 @@ export async function processPayall(
       sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
       args: [managerId]
     });
-    const crewLabour    = Number(crewLabourR.rows[0]?.[0] ?? 0);
+    const crewLabour   = Number(crewLabourR.rows[0]?.[0] ?? 0);
     const crewAfterSnap = Math.max(0, crewLabour - managerSnap);
     const cut = manualBonus > 0
       ? manualBonus + crewAfterSnap * overrideRate
       : crewLabour * overrideRate;
     totalManagerCuts += cut;
+    // Attach manager cut to their payout record so the notification shows the full amount
+    const pRecord = payoutResults.find(p => p.mechanicId === managerId);
+    if (pRecord) pRecord.managerCut = cut;
   }
 
   // Mark all unpaid complete orders as paid
   await db.execute({
-    sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE status IN ('complete','approved') AND ${SINCE_RESET_BARE}`,
+    sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE status IN ('complete','approved') AND ${SINCE_RESET_BARE.replace(/o\./g, "")}`,
     args: []
   });
-
-  // Full clear — delete all draft orders so the week truly resets
-  await db.execute("DELETE FROM orders WHERE status = 'draft'");
 
   // Reset weekly stats + clear manual pay adjustments + snapshots for everyone
   await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
 
-  // Record pay-period boundary
+  // Record pay-period boundary — order_seq counter is NOT reset (globally monotonic).
+  // The reset_ts is used only to scope which orders belong to the current pay period.
   const { setSetting } = await import("../db.js");
   await setSetting("order_number_reset_ts", new Date().toISOString());
 
@@ -358,9 +347,8 @@ export async function processPayall(
   return {
     grandCommission,
     totalRevenue,
-    mechanicCount: payoutResults.filter(p => p.amount > 0).length,
+    mechanicCount: mechanicMap.size,
     totalToBill: grandCommission + totalManagerCuts,
-    payouts: payoutResults,
-    notifyZero
+    payouts: payoutResults
   };
 }

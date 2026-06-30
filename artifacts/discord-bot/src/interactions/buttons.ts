@@ -1045,20 +1045,12 @@ export async function handleButton(interaction: ButtonInteraction) {
       return;
     }
 
-    const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts, notifyZero } = result;
+    const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts } = result;
 
     let notified = 0;
     let failed   = 0;
 
-    const NEW_WEEK_MSG =
-      "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
-      "> 💪 **Fresh start. New money. New orders.**\n" +
-      "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
-      "> 📅 **Payday is every Monday** — stay clocked in, stay stacking.\n" +
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-
-    // ── Notify each mechanic who has commission (or setpay) in their sales channel ──
+    // ── Notify each mechanic in their personal sales channel ─────────────────
     if (interaction.guild) {
       for (const p of payouts) {
         if (!p.salesChanId) { failed++; continue; }
@@ -1066,23 +1058,27 @@ export async function handleButton(interaction: ButtonInteraction) {
           const ch = await interaction.guild.channels.fetch(p.salesChanId).catch(() => null);
           if (!ch?.isTextBased()) { failed++; continue; }
 
-          if (p.amount > 0) {
-            // Pay notification + bill — only sent when there's actual money
-            await (ch as any).send({
-              content:
-                `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                (p.orders > 0 ? `> 📋 **${p.orders} order${p.orders === 1 ? "" : "s"}** completed this week\n` : "") +
-                (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
-                `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
-                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `**Bill the company: ${money(p.amount)}** 🏢\n` +
-                `Keep grinding, ${p.name}! 🏁`
-            });
-          }
+          // Pay notification
+          const totalPay = p.amount + p.managerCut;
+          await (ch as any).send({
+            content:
+              `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `> 📋 **${p.orders} orders** completed this week\n` +
+              (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
+              `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+              `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
+              (p.managerCut > 0 ? `> 👔 **Manager cut: ${money(p.managerCut)}**\n` : "") +
+              (p.managerCut > 0 ? `> 🏆 **Total pay: ${money(totalPay)}**\n` : "") +
+              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `**Bill the company: ${money(totalPay)}** 🏢\n` +
+              `Keep grinding, ${p.name}! 🏁`
+          });
 
-          // New Week announcement — sent to everyone (with or without pay)
-          await (ch as any).send({ content: NEW_WEEK_MSG });
+          // New Week announcement
+          await (ch as any).send({
+            content: "🗓️ **New pay week — let's get it!** 🏁"
+          });
 
           // Re-post the order panel so they can start fresh
           const profile2 = await getProfile(p.mechanicId);
@@ -1090,18 +1086,6 @@ export async function handleButton(interaction: ButtonInteraction) {
 
           notified++;
         } catch { failed++; }
-      }
-
-      // ── Notify $0 earners — new week message + fresh panel only ─────────────
-      for (const p of notifyZero) {
-        try {
-          const ch = await interaction.guild.channels.fetch(p.salesChanId).catch(() => null);
-          if (!ch?.isTextBased()) continue;
-          await (ch as any).send({ content: NEW_WEEK_MSG });
-          const profile2 = await getProfile(p.mechanicId);
-          await postOrderPanel(ch as any, p.mechanicId, profile2?.display_name ?? p.name, profile2?.commission_rate ?? p.rate);
-          notified++;
-        } catch { /* ignore */ }
       }
     }
 
