@@ -40,6 +40,7 @@ export interface Order {
   approved_by: string | null;
   completed_at: string | null;
   role_level: string;
+  customer_name: string;
 }
 
 export interface Timeclock {

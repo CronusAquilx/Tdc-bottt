@@ -8,7 +8,7 @@ import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
-import { postTimeclockPanel, postLoaPanel, postRafflePanel, CHANNEL_MAP } from "./adminbuttons.js";
+import { postTimeclockPanel, postLoaPanel, postRafflePanel, postLifetimeEarningsPanel, CHANNEL_MAP } from "./adminbuttons.js";
 
 export async function handleAdminModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const parts = interaction.customId.split(":");
@@ -347,9 +347,18 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
       await postLoaPanel(ch as TextChannel);
     } else if (chanType === "rafflech") {
       await postRafflePanel(ch as TextChannel);
+    } else if (chanType === "lifetimeearnings") {
+      await postLifetimeEarningsPanel(ch as TextChannel);
+    } else if (chanType === "trainingch") {
+      const { postTrainingPanel } = await import("./training.js");
+      await postTrainingPanel(ch as TextChannel);
+    } else if (chanType === "paylogs") {
+      const { postPayLogPanel } = await import("../commands/payall.js");
+      await postPayLogPanel(ch as TextChannel, guild);
     }
 
-    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${chanType === "loach" || chanType === "rafflech" ? " and panel posted." : "."}` });
+    const panelTypes = ["loach", "rafflech", "lifetimeearnings", "trainingch", "paylogs"];
+    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${panelTypes.includes(chanType) ? " and panel posted." : "."}` });
     return true;
   }
 

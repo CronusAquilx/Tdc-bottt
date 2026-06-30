@@ -222,16 +222,12 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN manager_labour_snapshot REAL DEFAULT 0");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_msg_id TEXT");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_chan_id TEXT");
-  // Ensure the owner/manager has manager role in the DB so they always get manager cut + admin access
+  await safeAlter("ALTER TABLE orders ADD COLUMN customer_name TEXT NOT NULL DEFAULT ''");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
+  // Remove the hardcoded Ander account — no longer seeded on startup
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
-  await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'manager')", args: ["1363222342800511058"] });
-  // Seed their commission rate at 40% (upsert so display_name is preserved if profile exists)
-  await db.execute({
-    sql: `INSERT INTO profiles (discord_id, display_name, commission_rate)
-          VALUES (?, 'Manager', 0.4)
-          ON CONFLICT(discord_id) DO UPDATE SET commission_rate = 0.4`,
-    args: ["1363222342800511058"]
-  });
+  await db.execute({ sql: "DELETE FROM profiles WHERE discord_id = ?", args: ["1363222342800511058"] });
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
@@ -272,38 +268,40 @@ export async function getGuildConfig(guildId: string) {
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
-                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id
+                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id,
+                 lifetime_earnings_channel_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
-    guild_id:                String(row[0]  ?? ""),
-    orders_channel_id:       row[1]  ? String(row[1])  : null,
-    jobs_channel_id:         row[2]  ? String(row[2])  : null,
-    log_channel_id:          row[3]  ? String(row[3])  : null,
-    archive_channel_id:      row[4]  ? String(row[4])  : null,
-    owner_role_id:           row[5]  ? String(row[5])  : null,
-    manager_role_id:         row[6]  ? String(row[6])  : null,
-    trainer_role_id:         row[7]  ? String(row[7])  : null,
-    mechanic_role_id:        row[8]  ? String(row[8])  : null,
-    timeclock_channel_id:    row[9]  ? String(row[9])  : null,
-    loa_channel_id:          row[10] ? String(row[10]) : null,
-    raffle_channel_id:       row[11] ? String(row[11]) : null,
-    leaderboard_channel_id:  row[12] ? String(row[12]) : null,
-    training_channel_id:     row[13] ? String(row[13]) : null,
-    needs_training_role_id:  row[14] ? String(row[14]) : null,
-    payday_channel_id:       row[15] ? String(row[15]) : null,
-    trainer_crew_rate:       row[16] != null ? Number(row[16]) : 0.10,
-    manager_crew_rate:       row[17] != null ? Number(row[17]) : 0.20,
-    clocklog_channel_id:     row[18] ? String(row[18]) : null,
+    guild_id:                      String(row[0]  ?? ""),
+    orders_channel_id:             row[1]  ? String(row[1])  : null,
+    jobs_channel_id:               row[2]  ? String(row[2])  : null,
+    log_channel_id:                row[3]  ? String(row[3])  : null,
+    archive_channel_id:            row[4]  ? String(row[4])  : null,
+    owner_role_id:                 row[5]  ? String(row[5])  : null,
+    manager_role_id:               row[6]  ? String(row[6])  : null,
+    trainer_role_id:               row[7]  ? String(row[7])  : null,
+    mechanic_role_id:              row[8]  ? String(row[8])  : null,
+    timeclock_channel_id:          row[9]  ? String(row[9])  : null,
+    loa_channel_id:                row[10] ? String(row[10]) : null,
+    raffle_channel_id:             row[11] ? String(row[11]) : null,
+    leaderboard_channel_id:        row[12] ? String(row[12]) : null,
+    training_channel_id:           row[13] ? String(row[13]) : null,
+    needs_training_role_id:        row[14] ? String(row[14]) : null,
+    payday_channel_id:             row[15] ? String(row[15]) : null,
+    trainer_crew_rate:             row[16] != null ? Number(row[16]) : 0.10,
+    manager_crew_rate:             row[17] != null ? Number(row[17]) : 0.20,
+    clocklog_channel_id:           row[18] ? String(row[18]) : null,
+    lifetime_earnings_channel_id:  row[19] ? String(row[19]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id" | "lifetime_earnings_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
@@ -453,6 +451,7 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     approved_by:      c(13) ? String(c(13)) : null,
     completed_at:     c(14) ? String(c(14)) : null,
     role_level:       c(16) ? String(c(16)) : "mechanic",
+    customer_name:    c(17) ? String(c(17)) : "",
   };
 }
 

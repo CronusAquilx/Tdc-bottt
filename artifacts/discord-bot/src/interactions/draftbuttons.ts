@@ -110,151 +110,24 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   const orderId = rest.join(":");
 
   // ── "Create New Order" button from pinned panel ────────────────────────────
+  // Show customer name modal FIRST — showModal must be the very first response (no defer before it)
   if (ns === "order" && action === "newpanel") {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    if (!(await requireRole(interaction, "mechanic"))) return true;
-
-    const clickerId = interaction.user.id;
-    const guildId = interaction.guildId ?? "";
-    const clickerRole = await detectUserRoleLevel(interaction);
-    const isManager = clickerRole === "manager" || clickerRole === "owner";
-
-    // ── Determine WHO the order is for ────────────────────────────────────────
-    let targetMechanicId = clickerId;
-    let targetDisplayName: string | undefined;
-
-    if (isManager) {
-      const currentChannelId = interaction.channelId;
-      const clickerProfile = await getProfile(clickerId);
-
-      if (currentChannelId && currentChannelId !== clickerProfile?.sales_channel_id) {
-        const ownerRow = await db.execute({
-          sql: "SELECT discord_id, display_name FROM profiles WHERE sales_channel_id = ? LIMIT 1",
-          args: [currentChannelId]
-        });
-        if (ownerRow.rows[0]) {
-          targetMechanicId = String(ownerRow.rows[0][0] ?? clickerId);
-          targetDisplayName = String(ownerRow.rows[0][1] ?? "");
-        }
-      }
-    }
-
-    // ── Check clock-in state ───────────────────────────────────────────────────
-    if (!isManager || targetMechanicId === clickerId) {
-      const active = await db.execute({
-        sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
-        args: [clickerId]
-      });
-
-      if (!active.rows[0]) {
-        const promptEmbed = buildClockInPromptEmbed();
-        const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId("clockin:then:order").setLabel("🟢  Clock In & Start Order").setStyle(ButtonStyle.Success)
-        );
-        await interaction.editReply({ embeds: [promptEmbed], components: [clockRow] });
-        return true;
-      }
-    }
-
-    // Role level stored on the order = the mechanic's role (not the manager's)
-    let roleLevel = "mechanic";
-    if (targetMechanicId === clickerId) {
-      roleLevel = clickerRole;
-    } else {
-      roleLevel = "mechanic";
-    }
-
-    // Clean up any drafts that predate the last pay-period reset — they're stale leftovers
-    // from a clear that may have been interrupted. Always start fresh after a clear.
-    const resetTs = await getSetting("order_number_reset_ts");
-    if (resetTs) {
-      await db.execute({
-        sql: `DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft'
-              AND (guild_id = ? OR guild_id = '')
-              AND datetime(COALESCE(created_at, '2000-01-01')) < datetime(?)`,
-        args: [targetMechanicId, guildId, resetTs]
-      });
-    }
-
-    // Resume an existing draft created AFTER the last reset — prevents duplicate
-    // drafts when a user dismisses an ephemeral without cancelling the order.
-    let orderId: string;
-    const existingDraftR = await db.execute({
-      sql: `SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft'
-            AND (guild_id = ? OR guild_id = '')
-            ORDER BY created_at DESC LIMIT 1`,
-      args: [targetMechanicId, guildId]
-    });
-
-    if (existingDraftR.rows[0]) {
-      orderId = String(existingDraftR.rows[0][0]);
-    } else {
-      // No existing draft — create a fresh one with retry on UNIQUE constraint
-      orderId = randomUUID();
-      let orderNumber = await nextOrderNumber();
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          await db.execute({
-            sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-            args: [orderId, orderNumber, targetMechanicId, guildId, roleLevel]
-          });
-          break;
-        } catch (err: any) {
-          if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
-            orderNumber = await nextOrderNumber();
-            continue;
-          }
-          throw err;
-        }
-      }
-      logEvent({
-        kind: "order_created",
-        guildId,
-        userId: targetMechanicId,
-        userName: targetDisplayName ?? interaction.user.username,
-        orderId,
-        orderNumber
-      });
-    }
-
-    const [catalogStr, draft] = await Promise.all([
-      getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }).then(r => rowToOrder(r.rows[0]))
-    ]);
-    const commData = await getCommissionData(targetMechanicId, guildId, roleLevel);
-    let catalog: any = {};
-    try { catalog = JSON.parse(catalogStr ?? "{}"); } catch { /* use empty catalog */ }
-    const categories: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
-      ? catalog.categories
-      : [];
-
-    if (categories.length === 0) {
-      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
-      return true;
-    }
-
-    const catSelect = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectcategory:${orderId}`)
-      .setPlaceholder("Pick a service category...")
-      .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
-
-    const crewCutInfo = commData.crewCut > 0 || roleLevel === "trainer" || roleLevel === "manager" || roleLevel === "owner"
-      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
-      : undefined;
-
-    const onBehalfNote = (isManager && targetMechanicId !== clickerId)
-      ? `\n\n> 📋 **Creating order on behalf of ${targetDisplayName ?? `<@${targetMechanicId}>`}**`
-      : "";
-
-    await interaction.editReply({
-      content: onBehalfNote || undefined,
-      embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
-      components: [
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
-        ...mainDraftButtonRows(orderId)
-      ]
-    });
+    const modal = new ModalBuilder()
+      .setCustomId("order:startorder")
+      .setTitle("📋  New Order — Customer Name");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("customer_name")
+          .setLabel("Customer Name")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(100)
+          .setPlaceholder("e.g. John Smith")
+      )
+    );
+    await interaction.showModal(modal);
     return true;
   }
 
@@ -544,6 +417,30 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Complete Order ──────────────────────────────────────────────────────────
   if (action === "submit") {
+    // Customer name is required — check BEFORE any defer (showModal must be first response)
+    const nameR = await db.execute({ sql: "SELECT customer_name FROM orders WHERE id = ?", args: [orderId] });
+    if (!nameR.rows[0]) return true;
+    const existingCustName = String(nameR.rows[0][0] ?? "").trim();
+    if (!existingCustName) {
+      const modal = new ModalBuilder()
+        .setCustomId(`order:setcustomer:${orderId}`)
+        .setTitle("Customer Name Required");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("customer_name")
+            .setLabel("Customer Name")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(100)
+            .setPlaceholder("e.g. John Smith")
+        )
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
+
     await interaction.deferUpdate();
     if (!(await requireRole(interaction, "mechanic"))) return true;
 

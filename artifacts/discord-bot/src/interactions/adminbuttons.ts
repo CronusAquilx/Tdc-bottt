@@ -197,6 +197,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setDescription(
         "**Crew & shift management tools.**\n\n" +
         "• **Sales Channel** — create or attach a mechanic's personal order channel\n" +
+        "• **Resend Panel** — re-post a stuck order panel to a mechanic's channel\n" +
         "• **Job Post** — post a hiring ad to the jobs channel\n" +
         "• **LOA** — submit a Leave of Absence request\n" +
         "• **Timeclock** — set up the clock-in/clock-out channel"
@@ -204,11 +205,30 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:setup:saleschannel").setLabel("➕  Sales Channel").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:saleschan:resend").setLabel("🔄  Resend Panel").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:setup:timeclock").setLabel("⏰  Timeclock").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:setup:jobpost").setLabel("📢  Post Job Ad").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("admin:setup:loa").setLabel("🌴  Submit LOA").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [row1] });
+    return true;
+  }
+
+  // ── Sales Channel: Resend order panel ─────────────────────────────────────
+  if (section === "saleschan" && action === "resend") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("🔄  Resend Order Panel")
+      .setColor(COLORS.primary)
+      .setDescription("Pick the mechanic whose order panel you want to re-post to their sales channel.")
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:saleschan:pickmechanic:resend")
+        .setPlaceholder("Select a mechanic...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
     return true;
   }
 
@@ -229,11 +249,12 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `🗃️ Archive: ${ch(config?.archive_channel_id)}\n` +
         `🌴 LOA: ${ch(config?.loa_channel_id)}\n` +
         `⏰ Clock Panel: ${ch(config?.timeclock_channel_id)}\n` +
-        `📋 Clock Logs: ${ch((config as any)?.clocklog_channel_id)}\n` +
+        `📋 Clock Logs: ${ch(config?.clocklog_channel_id)}\n` +
         `🎰 Raffle: ${ch(config?.raffle_channel_id)}\n` +
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
-        `📚 Training: ${ch((config as any)?.training_channel_id)}\n` +
-        `💸 Pay Logs: ${ch(config?.payday_channel_id)}`
+        `📚 Training: ${ch(config?.training_channel_id)}\n` +
+        `💸 Pay Logs: ${ch(config?.payday_channel_id)}\n` +
+        `🏆 Lifetime Earnings: ${ch(config?.lifetime_earnings_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -252,6 +273,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     );
     const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:setup:paylogs").setLabel("💸 Pay Logs").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:setup:lifetimeearnings").setLabel("🏆 Lifetime Earnings").setStyle(ButtonStyle.Primary),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     return true;
@@ -292,7 +314,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     const crewR = await db.execute({
       sql: `SELECT p.discord_id, p.display_name, p.commission_rate, p.commission_adjustment,
                    COALESCE(SUM(o.labour), 0) AS week_labour, COUNT(o.id) AS order_count,
-                   p.commission_labour_snapshot
+                   p.commission_labour_snapshot, p.current_pay_status
             FROM profiles p
             LEFT JOIN orders o ON o.mechanic_id = p.discord_id
               AND o.status IN ('complete', 'approved', 'paid')
@@ -344,11 +366,13 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       const totalComm  = ownComm + managerCut;
       grandTotal += totalComm;
       const rateLabel = override > 0
-        ? `set $${Math.round(override).toLocaleString()} + new orders`
+        ? `set ${Math.round(override).toLocaleString()} + new orders`
         : `${(rate * 100).toFixed(0)}%`;
       const ordNote = orders > 0 ? ` · ${orders} order${orders === 1 ? "" : "s"}` : " · no orders";
-      const cutNote = managerCut > 0 ? ` + **$${Math.round(managerCut).toLocaleString()} mgr cut**` : "";
-      lines.push(`**${name}**${ordNote} · ${rateLabel} → **$${Math.round(ownComm).toLocaleString()}**${cutNote} = **$${Math.round(totalComm).toLocaleString()}**`);
+      const cutNote = managerCut > 0 ? ` + **${Math.round(managerCut).toLocaleString()} mgr cut**` : "";
+      const payStatus = row[7] ? String(row[7]) : "pending";
+      const payEmoji  = payStatus === "paid" ? "💚" : "🔴";
+      lines.push(`${payEmoji} **${name}**${ordNote} · ${rateLabel} → **${Math.round(ownComm).toLocaleString()}**${cutNote} = **${Math.round(totalComm).toLocaleString()}**`);
     }
 
     const crewBlock = lines.length ? lines.join("\n") : "*No crew profiles found.*";
@@ -374,22 +398,112 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setTitle("💸  PAYROLL")
       .setColor(0xffd700)
       .setDescription(
-        "**Current pay period commission summary.**\n\n" +
-        "Use **💰 Set Individual Pay** to manually override someone's commission for this period.\n" +
-        "Use **📅 Pay All** to process payroll, notify crew, and reset the week.\n\n" +
+        "**Current pay period commission summary.**  💚 = paid  🔴 = pending\n\n" +
+        "• **Set Individual Pay** — override a mechanic's commission for this period\n" +
+        "• **Pay All** — process payroll, notify crew, and log payouts\n" +
+        "• **Mark Paid / Pending** — track who's been paid this week\n" +
+        "• **Start New Week** — clear, reset stats, and send the new week message\n\n" +
         "💡 *You can also use `/payall` or `/pay @user` commands directly.*"
       )
       .addFields(
         ...crewFields,
-        { name: "💰 Total to Bill Company", value: `**$${Math.round(grandTotal).toLocaleString()}**`, inline: true }
+        { name: "💰 Total to Bill Company", value: `**${Math.round(grandTotal).toLocaleString()}**`, inline: true }
       )
       .setFooter({ text: FOOTER });
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:payroll:setpay").setLabel("💰 Set Individual Pay").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅 Pay All").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:payroll:lifetimeearnings").setLabel("🏆 Lifetime Earnings").setStyle(ButtonStyle.Secondary),
+    );
+    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:payroll:markpaid").setLabel("💚 Mark Paid").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:payroll:markunpaid").setLabel("🔴 Mark Pending").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("admin:payroll:newweek").setLabel("🔄 Start New Week").setStyle(ButtonStyle.Primary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    return true;
+  }
+
+  // ── Payroll: mark individual as paid ─────────────────────────────────────
+  if (section === "payroll" && action === "markpaid") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("💚  Mark as Paid")
+      .setColor(COLORS.approved)
+      .setDescription("Pick the crew member to mark as **paid** this week.\n\n💡 *This does not process a payout — use **Pay All** for that.*")
+      .setFooter({ text: FOOTER });
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:payroll:pickmarkpaid")
+        .setPlaceholder("Select a crew member...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
+    return true;
+  }
+
+  // ── Payroll: mark individual as pending ───────────────────────────────────
+  if (section === "payroll" && action === "markunpaid") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("🔴  Mark as Pending")
+      .setColor(COLORS.warning)
+      .setDescription("Pick the crew member to mark as **pending** (not yet paid) this week.")
+      .setFooter({ text: FOOTER });
+    const sel = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:payroll:pickmarkunpaid")
+        .setPlaceholder("Select a crew member...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [sel] });
+    return true;
+  }
+
+  // ── Payroll: start new week confirmation ──────────────────────────────────
+  if (section === "payroll" && action === "newweek") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const embed = new EmbedBuilder()
+      .setTitle("🔄  Start New Week — Confirm")
+      .setColor(COLORS.warning)
+      .setDescription(
+        "This will:\n\n" +
+        "• 🗃️ Archive all completed orders and delete all drafts\n" +
+        "• 📊 Reset everyone's hours, commission, and stat snapshots to zero\n" +
+        "• 🔴 Reset everyone's pay status to **Pending**\n" +
+        "• 📢 Send a new week message to every sales channel\n" +
+        "• 🏆 Post a fresh leaderboard (if channel is configured)\n\n" +
+        "⚠️ **Run Pay All first if you want everyone paid before the reset!**"
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("payroll:newweek:confirm").setLabel("✅ Start New Week").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("payroll:newweek:cancel").setLabel("❌ Cancel").setStyle(ButtonStyle.Secondary)
     );
     await interaction.editReply({ embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Payroll: post lifetime earnings to configured channel ─────────────────
+  if (section === "payroll" && action === "lifetimeearnings") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = await getGuildConfig(guild.id);
+    const chanId = config?.lifetime_earnings_channel_id;
+    if (!chanId) {
+      await interaction.editReply({ content: "❌ Lifetime Earnings channel not set up yet. Use the **Channels** tab to configure it first." });
+      return true;
+    }
+    try {
+      const ch = await guild.channels.fetch(chanId);
+      if (!ch?.isTextBased()) throw new Error("Not a text channel");
+      await postLifetimeEarningsPanel(ch as TextChannel);
+      await interaction.editReply({ content: `✅ Lifetime Earnings posted to <#${chanId}>` });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Failed to post: ${err?.message ?? "Unknown error"}` });
+    }
     return true;
   }
 
@@ -752,19 +866,20 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id" | "lifetime_earnings_channel_id";
   name: string; topic: string; label: string;
 }> = {
-  orders:      { field: "orders_channel_id",      name: "tdc-orders",      topic: "Tokyo Drift Customs — Order submissions",    label: "Orders"      },
-  jobs:        { field: "jobs_channel_id",         name: "tdc-jobs",        topic: "Tokyo Drift Customs — Job postings",         label: "Jobs"        },
-  logs:        { field: "log_channel_id",          name: "tdc-logs",        topic: "Tokyo Drift Customs — System logs",          label: "Logs"        },
-  archive:     { field: "archive_channel_id",      name: "tdc-archive",     topic: "Tokyo Drift Customs — Archived orders",      label: "Archive"     },
-  loach:       { field: "loa_channel_id",          name: "tdc-loa",         topic: "Tokyo Drift Customs — Leave of Absence",     label: "LOA"         },
-  rafflech:    { field: "raffle_channel_id",       name: "tdc-raffle",      topic: "Tokyo Drift Customs — Raffles",              label: "Raffle"      },
-  leaderboard: { field: "leaderboard_channel_id",  name: "tdc-leaderboard", topic: "Tokyo Drift Customs — Weekly Leaderboard",   label: "Leaderboard" },
-  trainingch:  { field: "training_channel_id",     name: "tdc-training",    topic: "Tokyo Drift Customs — Training Sessions",    label: "Training"    },
-  clocklogch:  { field: "clocklog_channel_id",     name: "tdc-clock-logs",  topic: "Tokyo Drift Customs — Clock in/out logs",    label: "Clock Logs"  },
-  paylogs:     { field: "payday_channel_id",       name: "tdc-pay-logs",    topic: "Tokyo Drift Customs — Payroll logs & payday panels", label: "Pay Logs" },
+  orders:           { field: "orders_channel_id",             name: "tdc-orders",           topic: "Tokyo Drift Customs — Order submissions",             label: "Orders"           },
+  jobs:             { field: "jobs_channel_id",               name: "tdc-jobs",             topic: "Tokyo Drift Customs — Job postings",                 label: "Jobs"             },
+  logs:             { field: "log_channel_id",                name: "tdc-logs",             topic: "Tokyo Drift Customs — System logs",                  label: "Logs"             },
+  archive:          { field: "archive_channel_id",            name: "tdc-archive",          topic: "Tokyo Drift Customs — Archived orders",              label: "Archive"          },
+  loach:            { field: "loa_channel_id",                name: "tdc-loa",              topic: "Tokyo Drift Customs — Leave of Absence",             label: "LOA"              },
+  rafflech:         { field: "raffle_channel_id",             name: "tdc-raffle",           topic: "Tokyo Drift Customs — Raffles",                      label: "Raffle"           },
+  leaderboard:      { field: "leaderboard_channel_id",        name: "tdc-leaderboard",      topic: "Tokyo Drift Customs — Weekly Leaderboard",           label: "Leaderboard"      },
+  trainingch:       { field: "training_channel_id",           name: "tdc-training",         topic: "Tokyo Drift Customs — Training Sessions",            label: "Training"         },
+  clocklogch:       { field: "clocklog_channel_id",           name: "tdc-clock-logs",       topic: "Tokyo Drift Customs — Clock in/out logs",            label: "Clock Logs"       },
+  paylogs:          { field: "payday_channel_id",             name: "tdc-pay-logs",         topic: "Tokyo Drift Customs — Payroll logs & payday panels", label: "Pay Logs"         },
+  lifetimeearnings: { field: "lifetime_earnings_channel_id",  name: "tdc-lifetime-earnings",topic: "Tokyo Drift Customs — All-time earnings tracker",    label: "Lifetime Earnings"},
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -781,8 +896,49 @@ async function postChannelPanel(channel: TextChannel, chanType: string, guild?: 
   } else if (chanType === "paylogs") {
     const { postPayLogPanel } = await import("../commands/payall.js");
     await postPayLogPanel(channel, guild);
+  } else if (chanType === "lifetimeearnings") {
+    await postLifetimeEarningsPanel(channel);
   }
   // orders, jobs, logs, archive, clocklogch — no panel needed
+}
+
+export async function buildLifetimeEarningsEmbed(): Promise<EmbedBuilder> {
+  const r = await db.execute({
+    sql: `SELECT p.discord_id, p.display_name,
+                 COALESCE(SUM(po.amount), 0) AS total_paid,
+                 COUNT(po.id) AS payout_count
+          FROM profiles p
+          LEFT JOIN payouts po ON po.mechanic_id = p.discord_id
+          GROUP BY p.discord_id
+          ORDER BY total_paid DESC`,
+    args: []
+  });
+  const fmt = (n: number) => `${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const lines = r.rows.map((row, i) => {
+    const name  = String(row[1] ?? "Unknown");
+    const total = Number(row[2] ?? 0);
+    const count = Number(row[3] ?? 0);
+    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `**${i + 1}.**`;
+    return `${medal}  **${name}** — ${fmt(total)} across ${count} payout${count !== 1 ? "s" : ""}`;
+  });
+  const grandTotal = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+  return new EmbedBuilder()
+    .setTitle("🏆  LIFETIME EARNINGS — TOKYO DRIFT CUSTOMS")
+    .setColor(COLORS.gold)
+    .setDescription(lines.length ? lines.join("\n") : "*No payouts recorded yet.*")
+    .addFields({ name: "💰 Total Paid Out (All Time)", value: `**${fmt(grandTotal)}**`, inline: false })
+    .setFooter({ text: "東京ドリフトカスタム  ·  All-time earnings" })
+    .setTimestamp();
+}
+
+export async function postLifetimeEarningsPanel(channel: TextChannel) {
+  const embed = await buildLifetimeEarningsEmbed();
+  const refreshRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("lifetime:refresh").setLabel("🔄  Refresh").setStyle(ButtonStyle.Secondary)
+  );
+  const msg = await channel.send({ embeds: [embed], components: [refreshRow] });
+  try { await msg.pin(); } catch { /* ignore */ }
+  return msg;
 }
 
 export async function postLoaPanel(channel: TextChannel) {

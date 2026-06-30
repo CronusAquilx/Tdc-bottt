@@ -161,6 +161,28 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const mechanicId = interaction.values[0];
       const guild = interaction.guild!;
 
+      if (type === "resend") {
+        await interaction.deferUpdate();
+        const profile = await getProfile(mechanicId);
+        if (!profile) {
+          await interaction.editReply({ content: "❌ That user isn't in the crew. Add them via `/crew add` first.", components: [] });
+          return;
+        }
+        if (!profile.sales_channel_id) {
+          await interaction.editReply({ content: `❌ **${profile.display_name}** doesn't have a sales channel set up yet.`, components: [] });
+          return;
+        }
+        try {
+          const ch = await guild.channels.fetch(profile.sales_channel_id);
+          if (!ch?.isTextBased()) throw new Error("Not a text channel");
+          await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+          await interaction.editReply({ content: `✅ Order panel re-posted to <#${profile.sales_channel_id}> for **${profile.display_name}**.`, embeds: [], components: [] });
+        } catch (err: any) {
+          await interaction.editReply({ content: `❌ Could not post panel — check bot permissions in <#${profile.sales_channel_id}>. ${err?.message ?? ""}`, embeds: [], components: [] });
+        }
+        return;
+      }
+
       if (type === "new") {
         await interaction.deferUpdate();
 
@@ -216,6 +238,31 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
         await interaction.update({ embeds: [embed], components: [chanRow] });
       }
+    }
+
+    // ── Admin: payroll — mark individual as paid / pending ───────────────────
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmarkpaid") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ User not found in crew.", embeds: [], components: [] });
+        return;
+      }
+      await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'paid' WHERE discord_id = ?", args: [memberId] });
+      await interaction.update({ content: `✅ **${profile.display_name}** marked as 💚 **paid** this week.`, embeds: [], components: [] });
+    }
+
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmarkunpaid") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ User not found in crew.", embeds: [], components: [] });
+        return;
+      }
+      await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'pending' WHERE discord_id = ?", args: [memberId] });
+      await interaction.update({ content: `✅ **${profile.display_name}** marked as 🔴 **pending** this week.`, embeds: [], components: [] });
     }
 
     // ── Admin: payroll — pick member to set individual pay ───────────────────

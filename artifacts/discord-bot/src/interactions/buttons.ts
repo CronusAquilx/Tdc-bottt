@@ -213,6 +213,14 @@ export async function handleButton(interaction: ButtonInteraction) {
       }
     }
 
+    // Apply any pending customer name (stored before clock-in was required)
+    const pendingNameKey = `pending_customer_name_${interaction.user.id}`;
+    const pendingName = await getSetting(pendingNameKey);
+    if (pendingName) {
+      await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [pendingName, newOrderId] });
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingNameKey] });
+    }
+
     // Log the order creation
     logEvent({
       kind: "order_created",
@@ -1139,6 +1147,106 @@ export async function handleButton(interaction: ButtonInteraction) {
       .setTimestamp();
 
     await interaction.editReply({ embeds: [summaryEmbed], components: [] });
+    return;
+  }
+
+  // ── Payroll: Start New Week confirm ──────────────────────────────────────
+  if (ns === "payroll" && action === "newweek" && rest[0] === "confirm") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferUpdate();
+    const guildId = interaction.guildId ?? "";
+
+    // 1. Archive complete orders + delete drafts
+    const archived = await db.execute({
+      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
+      args: [guildId]
+    });
+    await db.execute({
+      sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
+      args: [guildId]
+    });
+
+    // 2. Reset all profile stats (hours, commission, snapshots)
+    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
+
+    // 3. Reset pay status to pending for everyone
+    await db.execute("UPDATE profiles SET current_pay_status = 'pending'");
+
+    // 4. Mark the new pay-period start
+    await setSetting("order_number_reset_ts", new Date().toISOString());
+
+    // 5. Send new week messages to all sales channels
+    let sent = 0;
+    let failed = 0;
+    if (interaction.guild) {
+      const profiles = await db.execute(
+        "SELECT discord_id, sales_channel_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''"
+      );
+      for (const row of profiles.rows) {
+        const salesChanId = row[1] ? String(row[1]) : null;
+        if (!salesChanId) continue;
+        try {
+          const ch = await interaction.guild.channels.fetch(salesChanId).catch(() => null);
+          if (!ch?.isTextBased()) { failed++; continue; }
+          await (ch as any).send({
+            content:
+              "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+              "> 💪 **Fresh start. New money. New orders.**\n" +
+              "> 🏁 Clock in and get grinding — it's a brand new week at **Tokyo Drift Customs!**\n" +
+              "> 📈 Make this week your best one yet.\n" +
+              "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          });
+          sent++;
+        } catch { failed++; }
+      }
+    }
+
+    // 6. Post leaderboard to the leaderboard channel (pre-reset snapshot)
+    let leaderboardPosted = false;
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guildId ?? "");
+      const lbChanId = config?.leaderboard_channel_id;
+      if (lbChanId) {
+        try {
+          const lbCh = await interaction.guild.channels.fetch(lbChanId).catch(() => null);
+          if (lbCh?.isTextBased()) {
+            const { postLeaderboard } = await import("../commands/leaderboard.js");
+            await postLeaderboard(lbCh as any);
+            leaderboardPosted = true;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🗓️  NEW WEEK STARTED")
+      .setColor(COLORS.approved)
+      .setDescription(
+        `🗃️ **${Number(archived.rowsAffected ?? 0)}** order(s) archived, drafts cleared.\n` +
+        "📊 All stats reset to zero.\n" +
+        "🔴 All pay statuses reset to **pending**.\n" +
+        `📢 New week message sent to **${sent}** sales channel(s).\n` +
+        (failed > 0 ? `⚠️ ${failed} channel(s) skipped (bot may lack permissions).\n` : "") +
+        (leaderboardPosted ? "🏆 Leaderboard posted.\n" : "")
+      )
+      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+      .setTimestamp();
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
+
+  if (ns === "payroll" && action === "newweek" && rest[0] === "cancel") {
+    await interaction.update({ content: "❌ Cancelled.", embeds: [], components: [] });
+    return;
+  }
+
+  // ── Lifetime Earnings: refresh embed ─────────────────────────────────────
+  if (ns === "lifetime" && action === "refresh") {
+    await interaction.deferUpdate();
+    const { buildLifetimeEarningsEmbed } = await import("./adminbuttons.js");
+    const embed = await buildLifetimeEarningsEmbed();
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 
