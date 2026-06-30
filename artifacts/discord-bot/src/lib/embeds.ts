@@ -77,6 +77,7 @@ export function buildOrderEmbed(
 
   const dateTs = Math.floor(new Date(order.created_at).getTime() / 1000);
   const noteBlock = order.notes ? `\n📋 **Notes:** ${order.notes.slice(0, 300)}` : "";
+  const customerBlock = order.customer_name ? `\n👤 **Customer:** ${order.customer_name}` : "";
 
   const thisOrderCommission = Math.round(order.labour * commissionRate);
   const commissionPct = (commissionRate * 100).toFixed(0);
@@ -85,7 +86,7 @@ export function buildOrderEmbed(
     .setTitle(`🏁  ${order.order_number}  ·  ${statusLabel[order.status] ?? order.status.toUpperCase()}`)
     .setColor(statusColor(order.status))
     .setDescription(
-      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${noteBlock}`
+      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${customerBlock}${noteBlock}`
     )
     .addFields(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
@@ -198,10 +199,14 @@ export function buildDraftEmbed(
     );
   }
 
+  const draftCustomerLine = order.customer_name
+    ? `👤 **Customer:** ${order.customer_name}\n`
+    : "";
+
   return new EmbedBuilder()
     .setTitle(`📝  Draft Order  ·  ${order.order_number}`)
     .setColor(COLORS.draft)
-    .setDescription("Select a category below to add services. Hit **✅ Complete Order** when done.")
+    .setDescription(`${draftCustomerLine}Select a category below to add services. Hit **✅ Complete Order** when done.`)
     .addFields(...fields)
     .setFooter({ text: FOOTER_TEXT })
     .setTimestamp();

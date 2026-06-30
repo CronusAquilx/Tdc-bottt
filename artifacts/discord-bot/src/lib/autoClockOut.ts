@@ -3,8 +3,8 @@ import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
 import { warnedMechanics } from "./warnState.js";
 
-const WARN_AFTER_MINS         = 120;
-const AUTO_OUT_AFTER_WARN_MINS = 30;
+const WARN_AFTER_MINS         = 45;
+const AUTO_OUT_AFTER_WARN_MINS = 15;
 
 function parseUtc(s: string): number {
   if (!s) return 0;
@@ -17,7 +17,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 export function startAutoClockOutMonitor(client: Client) {
   if (timer) clearInterval(timer);
   timer = setInterval(() => checkIdleMechanics(client), 5 * 60 * 1000);
-  console.log("[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)");
+  console.log("[TDC] ⏱️ Auto clock-out monitor started (warn: 45 min idle, auto-out: +15 min)");
 }
 
 async function checkIdleMechanics(client: Client) {

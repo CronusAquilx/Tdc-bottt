@@ -265,8 +265,23 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
-  // ── Clock In from order embed (toggles to Clock Out) ─────────────────────
+  // ── Clock In from order embed — redirect to timeclock channel ───────────────
   if (ns === "clockin" && action === "order") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = interaction.guild
+      ? await getGuildConfig(interaction.guild.id)
+      : null;
+    const tcChanId = config?.timeclock_channel_id;
+    await interaction.editReply({
+      content: tcChanId
+        ? `⏰ Clock in using the dedicated panel in <#${tcChanId}>.`
+        : "⏰ Use the **Clock Panel** channel to clock in."
+    });
+    return;
+  }
+
+  // ── Clock In from order embed (old handler — kept for compatibility, redirects) ─
+  if (ns === "clockin" && action === "order_DISABLED") {
     await interaction.deferUpdate();
 
     // Atomic insert — prevents race condition where two clicks both pass a SELECT check
@@ -357,8 +372,23 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
-  // ── Clock Out from order embed (toggles to Clock In) ─────────────────────
+  // ── Clock Out from order embed — redirect to timeclock channel ──────────────
   if (ns === "clockout" && action === "order") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = interaction.guild
+      ? await getGuildConfig(interaction.guild.id)
+      : null;
+    const tcChanId = config?.timeclock_channel_id;
+    await interaction.editReply({
+      content: tcChanId
+        ? `⏰ Clock out using the dedicated panel in <#${tcChanId}>.`
+        : "⏰ Use the **Clock Panel** channel to clock out."
+    });
+    return;
+  }
+
+  // ── Clock Out from order embed (old handler — kept for compatibility, redirects) ─
+  if (ns === "clockout" && action === "order_DISABLED") {
     await interaction.deferUpdate();
 
     const active = await db.execute({

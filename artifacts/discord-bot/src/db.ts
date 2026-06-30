@@ -229,6 +229,19 @@ export async function initDb() {
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
   await db.execute({ sql: "DELETE FROM profiles WHERE discord_id = ?", args: ["1363222342800511058"] });
 
+  // On every startup, close any open timeclock sessions — prevents "already clocked in" ghost state
+  // after bot restarts. Crew will simply clock back in from the panel.
+  await db.execute({
+    sql: `UPDATE timeclock
+          SET clock_out_time = datetime('now'),
+              duration_minutes = ROUND((strftime('%s','now') - strftime('%s', REPLACE(clock_in_time,' ','T') || 'Z')) / 60.0, 2),
+              status = 'approved',
+              warned_at = NULL, stayed_in_at = NULL
+          WHERE clock_out_time IS NULL`,
+    args: []
+  });
+  await db.execute({ sql: "UPDATE profiles SET status = 'offline' WHERE status IN ('online','on_break')", args: [] });
+
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
   await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });

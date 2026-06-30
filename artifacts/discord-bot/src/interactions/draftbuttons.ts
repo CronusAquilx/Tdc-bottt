@@ -492,23 +492,11 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       crewCutInfo
     );
 
-    const activeTC = await db.execute({
-      sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
-      args: [mechanicId]
-    });
-    const isClockedIn = !!activeTC.rows[0];
-
     const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("order:newpanel")
         .setLabel("📋  New Order")
         .setStyle(ButtonStyle.Success),
-      isClockedIn
-        ? new ButtonBuilder().setCustomId("clockout:order").setLabel("🔴  Clock Out").setStyle(ButtonStyle.Danger)
-        : new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
-    );
-
-    const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`orderpay:start:${mechanicId}`)
         .setLabel("💸  Pay")
@@ -520,7 +508,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       try {
         const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
         if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow, payRow] });
+          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
           postedTo = profile.sales_channel_id;
           await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
         }
