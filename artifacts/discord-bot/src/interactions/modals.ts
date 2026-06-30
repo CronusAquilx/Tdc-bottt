@@ -313,13 +313,27 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
 
     if (amount === 0) {
-      await db.execute({ sql: "UPDATE orders SET customer_total_override = NULL WHERE id = ?", args: [extra] });
+      // Reset: restore total to parts_cost + labour, clear override marker
+      await db.execute({
+        sql: "UPDATE orders SET customer_total_override = NULL, total = parts_cost + labour WHERE id = ?",
+        args: [extra]
+      });
     } else {
-      await db.execute({ sql: "UPDATE orders SET customer_total_override = ? WHERE id = ?", args: [amount, extra] });
+      // Set custom total: adjust labour so it absorbs the difference (commission recalculates naturally)
+      await db.execute({
+        sql: `UPDATE orders
+              SET customer_total_override = ?,
+                  total = ?,
+                  labour = MAX(0, ? - parts_cost)
+              WHERE id = ?`,
+        args: [amount, amount, amount, extra]
+      });
     }
 
     const { order: updated, weekCommission, rate, crewCutInfo: cciT, catSelect } = await refreshDraftView(extra);
-    const resetNote = amount === 0 ? "\n✅ Total reset to calculated value." : `\n✅ Customer total set to **$${amount.toLocaleString("en-US")}** — commission still based on labour.`;
+    const resetNote = amount === 0
+      ? "\n✅ Total reset to calculated value."
+      : `\n✅ Customer total set to **$${amount.toLocaleString("en-US")}** — labour adjusted, commission updated.`;
     await interaction.editReply({
       content: resetNote,
       embeds: [buildDraftEmbed(updated, weekCommission, rate, cciT)],

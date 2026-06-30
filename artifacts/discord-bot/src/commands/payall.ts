@@ -335,6 +335,7 @@ export async function refreshPayLogPanel(guild: Guild | null): Promise<void> {
     const embed      = await buildPayLogPanelEmbed(guild);
     const components = buildPayLogButtons();
 
+    // 1) Try by stored message ID
     const msgId = await getSetting(payLogMsgKey(guild.id));
     if (msgId) {
       const msg = await (ch as any).messages.fetch(msgId).catch(() => null);
@@ -344,7 +345,20 @@ export async function refreshPayLogPanel(guild: Guild | null): Promise<void> {
       }
     }
 
-    // Panel message not found — post a fresh one
+    // 2) Stored ID is stale — scan the channel for an existing panel (survives DB wipes / redeploys)
+    try {
+      const recent = await (ch as any).messages.fetch({ limit: 30 });
+      const existing = [...recent.values()].find((m: any) =>
+        m.author?.bot && m.embeds?.[0]?.title?.includes("PAY LOG")
+      );
+      if (existing) {
+        await (existing as any).edit({ embeds: [embed], components });
+        await setSetting(payLogMsgKey(guild.id), (existing as any).id);
+        return;
+      }
+    } catch { /* fallthrough to post new */ }
+
+    // 3) Nothing found — post a fresh panel and pin it
     const newMsg = await (ch as any).send({ embeds: [embed], components });
     try { await (newMsg as any).pin(); } catch { /* ignore */ }
     await setSetting(payLogMsgKey(guild.id), (newMsg as any).id);
