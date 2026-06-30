@@ -540,6 +540,13 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       detail: `total=${completed.total} parts=${completed.parts_cost}`
     });
 
+    // Fire-and-forget: refresh the pay log panel so it reflects this order immediately
+    if (interaction.guild) {
+      import("../commands/payall.js")
+        .then(m => m.refreshPayLogPanel(interaction.guild!))
+        .catch(() => {});
+    }
+
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`

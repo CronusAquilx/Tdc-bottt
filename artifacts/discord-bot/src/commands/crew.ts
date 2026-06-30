@@ -61,17 +61,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const target = interaction.options.getUser("user", true);
       const role = interaction.options.getString("role", true);
       const displayName = interaction.options.getString("display_name", true);
+      const existingProfile = await getProfile(target.id);
+      const isNew = !existingProfile;
       await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [target.id, displayName] });
-      await db.execute({ sql: "UPDATE profiles SET display_name = ?, commission_rate = 0.3 WHERE discord_id = ?", args: [displayName, target.id] });
+      await db.execute({ sql: "UPDATE profiles SET display_name = ? WHERE discord_id = ?", args: [displayName, target.id] });
       await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
       await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [target.id, role] });
       const caller = await getProfile(interaction.user.id);
+      const updatedProfile = await getProfile(target.id);
+      const rateStr = `${Math.round((updatedProfile?.commission_rate ?? 0.3) * 100)}%`;
       const embed = new EmbedBuilder()
         .setTitle("✅ Crew Member Added")
         .setColor(COLORS.approved)
         .addFields(
           { name: "User", value: displayName, inline: true },
           { name: "Role", value: role.toUpperCase(), inline: true },
+          { name: "Commission", value: isNew ? `${rateStr} (default)` : `${rateStr} (preserved)`, inline: true },
           { name: "Added By", value: caller?.display_name ?? interaction.user.username, inline: true }
         )
         .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();

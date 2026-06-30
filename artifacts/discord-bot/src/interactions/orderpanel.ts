@@ -32,7 +32,12 @@ function buildPanelRow(mechanicId: string): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
-export async function postOrderPanel(channel: TextChannel, mechanicId: string, displayName: string, commissionRate: number) {
+export async function postOrderPanel(
+  channel: TextChannel,
+  mechanicId: string,
+  displayName: string,
+  commissionRate: number
+): Promise<{ message: any; pinned: boolean; updated: boolean }> {
   const embed = buildPanelEmbed(displayName, commissionRate);
   const row = buildPanelRow(mechanicId);
 
@@ -46,12 +51,16 @@ export async function postOrderPanel(channel: TextChannel, mechanicId: string, d
     );
     if (existing) {
       await existing.edit({ embeds: [embed], components: [row] });
-      return existing;
+      return { message: existing, pinned: true, updated: true };
     }
   } catch { /* ignore — channel may not allow pin fetch */ }
 
   // No existing panel found — post a new one and pin it.
   const msg = await channel.send({ embeds: [embed], components: [row] });
-  try { await msg.pin(); } catch { /* ignore */ }
-  return msg;
+  let pinned = false;
+  try {
+    await msg.pin();
+    pinned = true;
+  } catch { /* no ManageMessages permission */ }
+  return { message: msg, pinned, updated: false };
 }

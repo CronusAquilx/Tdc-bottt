@@ -219,6 +219,13 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     logEvent({ kind: "order_completed", guildId, userId: mechanicId, orderId, orderNumber: completed.order_number, amount: Math.round(completed.labour), detail: `total=${completed.total} parts=${completed.parts_cost}` });
 
+    // Fire-and-forget: refresh the pay log panel so it reflects this order immediately
+    if (interaction.guild) {
+      import("../commands/payall.js")
+        .then(m => m.refreshPayLogPanel(interaction.guild!))
+        .catch(() => {});
+    }
+
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
