@@ -353,6 +353,23 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 
     const crewBlock = lines.length ? lines.join("\n") : "*No crew profiles found.*";
 
+    // Split lines across multiple fields so no one gets cut off (Discord 1024 char limit per field)
+    const crewFields: { name: string; value: string; inline: boolean }[] = [];
+    let chunk = "";
+    let chunkIndex = 0;
+    for (const line of lines) {
+      const addition = (chunk ? "\n" : "") + line;
+      if (chunk.length + addition.length > 1020) {
+        crewFields.push({ name: chunkIndex === 0 ? `👥 Crew (${crewR.rows.length})` : "​", value: chunk, inline: false });
+        chunk = line;
+        chunkIndex++;
+      } else {
+        chunk += addition;
+      }
+    }
+    if (chunk) crewFields.push({ name: chunkIndex === 0 ? `👥 Crew (${crewR.rows.length})` : "​", value: chunk, inline: false });
+    if (!crewFields.length) crewFields.push({ name: `👥 Crew (0)`, value: "*No crew profiles found.*", inline: false });
+
     const embed = new EmbedBuilder()
       .setTitle("💸  PAYROLL")
       .setColor(0xffd700)
@@ -363,7 +380,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         "💡 *You can also use `/payall` or `/pay @user` commands directly.*"
       )
       .addFields(
-        { name: `👥 Crew (${crewR.rows.length})`, value: crewBlock.slice(0, 1024), inline: false },
+        ...crewFields,
         { name: "💰 Total to Bill Company", value: `**$${Math.round(grandTotal).toLocaleString()}**`, inline: true }
       )
       .setFooter({ text: FOOTER });

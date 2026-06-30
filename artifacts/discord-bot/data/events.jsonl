@@ -15,3 +15,7 @@
 {"ts":"2026-06-29T04:18:34.925Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1220987252616728616","orderId":"c8f18eb8-8f7c-4ded-bf3c-422ad2036c94","orderNumber":"TDC-0089"}
 {"ts":"2026-06-29T04:18:36.825Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"c1e8fa67-6384-4122-9198-2fe56d533613","orderNumber":"TDC-0090"}
 {"ts":"2026-06-29T04:18:40.515Z","kind":"order_created","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","orderId":"733fa551-32f6-4701-9c1c-f7efcf0b2600","orderNumber":"TDC-0091"}
+{"ts":"2026-06-29T15:27:35.862Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":"chowbabyy","orderId":"cd958955-445f-43ea-a522-dedce400838b","orderNumber":"TDC-0092"}
+{"ts":"2026-06-29T15:27:55.346Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1363222342800511058","orderId":"cd958955-445f-43ea-a522-dedce400838b","orderNumber":"TDC-0092"}
+{"ts":"2026-06-29T15:28:56.122Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":"chowbabyy","orderId":"d93a9dc2-c827-434a-b454-96c0650973cc","orderNumber":"TDC-0093"}
+{"ts":"2026-06-29T15:29:00.550Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1363222342800511058","orderId":"d93a9dc2-c827-434a-b454-96c0650973cc","orderNumber":"TDC-0093"}
