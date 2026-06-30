@@ -38,26 +38,23 @@ function getWeekBounds(): { start: Date; end: Date; label: string } {
 }
 
 export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): EmbedBuilder {
-  const { label } = getWeekBounds();
-
   const embed = new EmbedBuilder()
-    .setTitle("🏆  WEEKLY LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
+    .setTitle("🏆  ALL-TIME LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
     .setColor(COLORS.gold);
 
   if (!entries.length) {
     embed
       .setDescription(
-        `## Week of ${label}\n\n` +
-        "```\n  No orders completed yet this week.\n  Get to work! 🔧\n```"
+        "## All-Time Customer Revenue\n\n" +
+        "```\n  No completed orders yet.\n  Get to work! 🔧\n```"
       )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
+      .setFooter({ text: "東京ドリフトカスタム  ·  All completed orders  ·  Last updated" })
       .setTimestamp(updatedAt);
     return embed;
   }
 
   const topRev = entries[0]!.total_revenue;
 
-  // Top 3 on separate lines with big callout, rest compact
   const topSection = entries.slice(0, 3).map((e, i) => {
     const bar   = buildBar(e.total_revenue, topRev, 14);
     const place = PLACE_ICONS[i] ?? `${i + 1}.`;
@@ -72,32 +69,30 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
   }).join("\n");
 
   embed.setDescription(
-    `## Week of ${label}\n\n` +
+    "## All-Time Customer Revenue\n\n" +
     topSection +
     (restSection ? `\n\n${restSection}` : "")
   );
 
-  // Leader callout field
   const leader = entries[0]!;
   const runnerUp = entries[1];
   const gap = runnerUp ? `  ·  **${money(leader.total_revenue - runnerUp.total_revenue)}** ahead of 2nd` : "";
   embed.addFields({
-    name: "👑  CURRENT LEADER",
+    name: "👑  ALL-TIME LEADER",
     value: `**${leader.display_name}** — ${money(leader.total_revenue)} across **${leader.order_count}** orders${gap} 🔥`,
     inline: false,
   });
 
-  // Quick stats
   const totalOrders = entries.reduce((s, e) => s + e.order_count, 0);
   const totalRev    = entries.reduce((s, e) => s + e.total_revenue, 0);
   embed.addFields(
-    { name: "📋 Total Orders", value: `**${totalOrders}**`,    inline: true },
-    { name: "💰 Total Revenue", value: `**${money(totalRev)}**`, inline: true },
-    { name: "👥 Mechanics Active", value: `**${entries.length}**`, inline: true },
+    { name: "📋 Total Orders", value: `**${totalOrders}**`,      inline: true },
+    { name: "💰 Total Revenue",  value: `**${money(totalRev)}**`, inline: true },
+    { name: "👥 Mechanics",      value: `**${entries.length}**`,  inline: true },
   );
 
   embed
-    .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
+    .setFooter({ text: "東京ドリフトカスタム  ·  All completed orders  ·  Last updated" })
     .setTimestamp(updatedAt);
 
   return embed;

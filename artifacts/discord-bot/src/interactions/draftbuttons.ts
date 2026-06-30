@@ -88,6 +88,7 @@ function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[]
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:discount:${orderId}`).setLabel("💲 Discount").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:settotal:${orderId}`).setLabel("💰 Set Total").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
     )
@@ -400,6 +401,28 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
+  // ── Set Customer Total modal ────────────────────────────────────────────────
+  if (action === "settotal") {
+    const totalR = await db.execute({ sql: "SELECT total, customer_total_override FROM orders WHERE id = ?", args: [orderId] });
+    if (!totalR.rows[0]) return true;
+    const currentDisplay = totalR.rows[0][1] != null ? Number(totalR.rows[0][1]) : Number(totalR.rows[0][0] ?? 0);
+    const modal = new ModalBuilder()
+      .setCustomId(`order:applytotal:${orderId}`)
+      .setTitle("💰 Set Customer Total");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Customer total (0 to reset to calculated)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder(`Current: ${currentDisplay.toLocaleString("en-US")}`)
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
   // ── Edit Labour modal ───────────────────────────────────────────────────────
   if (action === "editlabour") {
     const modal = new ModalBuilder().setCustomId(`order:setlabour:${orderId}`).setTitle("Edit Labour Amount");
@@ -545,6 +568,19 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       import("../commands/payall.js")
         .then(m => m.refreshPayLogPanel(interaction.guild!))
         .catch(() => {});
+    }
+
+    // Fire-and-forget: refresh leaderboard channel
+    if (interaction.guild) {
+      const guildSnap = interaction.guild;
+      getGuildConfig(guildId).then(async cfg => {
+        if (!cfg?.leaderboard_channel_id) return;
+        const ch = await guildSnap.channels.fetch(cfg.leaderboard_channel_id).catch(() => null);
+        if (ch?.isTextBased()) {
+          const { postLeaderboard } = await import("../commands/leaderboard.js");
+          postLeaderboard(ch as any).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     await interaction.editReply({

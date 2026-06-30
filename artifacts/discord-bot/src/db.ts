@@ -225,6 +225,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_name TEXT NOT NULL DEFAULT ''");
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
+  await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
   // Remove the hardcoded Ander account — no longer seeded on startup
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
   await db.execute({ sql: "DELETE FROM profiles WHERE discord_id = ?", args: ["1363222342800511058"] });
@@ -463,8 +464,9 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     approved_at:      c(12) ? String(c(12)) : null,
     approved_by:      c(13) ? String(c(13)) : null,
     completed_at:     c(14) ? String(c(14)) : null,
-    role_level:       c(16) ? String(c(16)) : "mechanic",
-    customer_name:    c(17) ? String(c(17)) : "",
+    role_level:              c(16) ? String(c(16)) : "mechanic",
+    customer_name:           c(17) ? String(c(17)) : "",
+    customer_total_override: c(18) != null ? Number(c(18)) : null,
   };
 }
 

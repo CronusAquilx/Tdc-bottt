@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
-import { requireRole } from "../lib/roles.js";
-import { COLORS, statusEmoji } from "../lib/embeds.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
+import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
   .setName("crew")
@@ -49,6 +49,11 @@ export const data = new SlashCommandBuilder()
     s.setName("mycityid")
       .setDescription("Set your own in-city ID")
       .addStringOption(o => o.setName("city_id").setDescription("Your in-city name / ID").setRequired(true).setMaxLength(40))
+  )
+  .addSubcommand(s =>
+    s.setName("info")
+      .setDescription("Full summary for a crew member (manager+)")
+      .addUserOption(o => o.setName("user").setDescription("Crew member to look up (leave blank for yourself)").setRequired(false))
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -170,12 +175,95 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const profile = await getProfile(interaction.user.id);
     if (!profile) { await interaction.editReply({ content: "❌ You're not in the crew yet." }); return; }
     await db.execute({ sql: "UPDATE profiles SET in_city_id = ? WHERE discord_id = ?", args: [cityId, interaction.user.id] });
-    // Try to update their nickname too
     try {
       const member = await interaction.guild!.members.fetch(interaction.user.id);
       await member.setNickname(cityId, "In-city ID self-updated");
     } catch { /* owner or missing perms — ignore */ }
     await interaction.editReply({ content: `✅ Your in-city ID has been set to **${cityId}**.` });
+    return;
+  }
+
+  if (sub === "info") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const callerRole = await detectUserRoleLevel(interaction);
+    const isManager = callerRole === "manager" || callerRole === "owner";
+
+    const targetUser = interaction.options.getUser("user");
+    if (targetUser && !isManager) {
+      await interaction.editReply({ content: "❌ Only managers can look up other crew members." });
+      return;
+    }
+    const targetId = targetUser?.id ?? interaction.user.id;
+
+    const [profile, roleRow] = await Promise.all([
+      getProfile(targetId),
+      db.execute({ sql: "SELECT role FROM user_roles WHERE discord_id = ?", args: [targetId] })
+    ]);
+
+    if (!profile) {
+      await interaction.editReply({ content: "❌ That user isn't in the crew." });
+      return;
+    }
+
+    const role = roleRow.rows[0] ? String(roleRow.rows[0][0]) : "none";
+
+    const SINCE_RESET_SQL =
+      `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+    const DONE = `status IN ('complete', 'approved', 'paid')`;
+
+    const [weekStats, allTimeStats, draftCount] = await Promise.all([
+      db.execute({
+        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue, COALESCE(SUM(labour), 0) as labour
+              FROM orders WHERE mechanic_id = ? AND ${DONE} AND ${SINCE_RESET_SQL}`,
+        args: [targetId]
+      }),
+      db.execute({
+        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue
+              FROM orders WHERE mechanic_id = ? AND ${DONE}`,
+        args: [targetId]
+      }),
+      db.execute({
+        sql: `SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'draft'`,
+        args: [targetId]
+      })
+    ]);
+
+    const weekOrders  = Number(weekStats.rows[0]?.[0] ?? 0);
+    const weekRevenue = Number(weekStats.rows[0]?.[1] ?? 0);
+    const weekLabour  = Number(weekStats.rows[0]?.[2] ?? 0);
+    const allOrders   = Number(allTimeStats.rows[0]?.[0] ?? 0);
+    const allRevenue  = Number(allTimeStats.rows[0]?.[1] ?? 0);
+    const drafts      = Number(draftCount.rows[0]?.[0] ?? 0);
+
+    const rate = profile.commission_rate;
+    const weekCommission = Math.round(weekLabour * rate);
+
+    const roleDisplay: Record<string, string> = {
+      owner: "👑 Owner", manager: "🔑 Manager", trainer: "🎓 Trainer", mechanic: "🔧 Mechanic"
+    };
+
+    const statusDisplay = statusEmoji(profile.status) + " " + profile.status.replace("_", " ").toUpperCase();
+
+    const embed = new EmbedBuilder()
+      .setTitle(`👤  ${profile.display_name}  ·  CREW INFO`)
+      .setColor(COLORS.primary)
+      .addFields(
+        { name: "🎭 Role",         value: roleDisplay[role] ?? role,                                       inline: true },
+        { name: "📡 Status",       value: statusDisplay,                                                   inline: true },
+        { name: "💵 Commission",   value: `**${(rate * 100).toFixed(0)}%** of labour`,                     inline: true },
+        { name: "📋 Channel",      value: profile.sales_channel_id ? `<#${profile.sales_channel_id}>` : "*not set*", inline: true },
+        { name: "🪪 City ID",      value: (profile as any).in_city_id ?? "*not set*",                     inline: true },
+        { name: "⏱️ Hours (Wk)",  value: `**${profile.hours_worked_this_week.toFixed(1)}h**`,             inline: true },
+        { name: "📦 This Period",  value: `**${weekOrders}** orders  ·  ${money(weekRevenue)} revenue\n💵 Commission: **${money(weekCommission)}**`, inline: false },
+        { name: "🏆 All-Time",     value: `**${allOrders}** orders  ·  **${money(allRevenue)}** total customer revenue`, inline: false },
+      );
+
+    if (drafts > 0) {
+      embed.addFields({ name: "✏️ Open Drafts", value: `**${drafts}** draft order${drafts > 1 ? "s" : ""} in progress`, inline: false });
+    }
+
+    embed.setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 }

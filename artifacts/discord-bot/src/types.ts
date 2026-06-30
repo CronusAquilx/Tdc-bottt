@@ -41,6 +41,7 @@ export interface Order {
   completed_at: string | null;
   role_level: string;
   customer_name: string;
+  customer_total_override: number | null;
 }
 
 export interface Timeclock {
