@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, TextChannel , MessageFlags} from "discord.js";
 import { db, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
-import { buildLeaderboardEmbed, getWeekStart } from "../lib/leaderboard.js";
+import { buildLeaderboardEmbed } from "../lib/leaderboard.js";
 import { COLORS } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
@@ -39,7 +39,7 @@ export async function postLeaderboard(channel: TextChannel) {
   const r = await db.execute({
     sql: `SELECT p.discord_id, p.display_name,
                  COUNT(o.id) as order_count,
-                 COALESCE(SUM(o.total), 0) as total_revenue,
+                 COALESCE(SUM(COALESCE(o.customer_total_override, o.total)), 0) as total_revenue,
                  COALESCE(SUM(o.labour), 0) as total_labour,
                  COALESCE(p.commission_rate, 0.3) as commission_rate
           FROM profiles p
@@ -67,7 +67,7 @@ export async function postLeaderboard(channel: TextChannel) {
   try {
     const recent = await channel.messages.fetch({ limit: 20 });
     const existing = [...recent.values()].find(m =>
-      m.author.bot && m.embeds[0]?.title?.includes("WEEKLY LEADERBOARD")
+      m.author.bot && m.embeds[0]?.title?.includes("LEADERBOARD")
     );
     if (existing) {
       await existing.edit({ embeds: [embed] });

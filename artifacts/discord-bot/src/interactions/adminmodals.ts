@@ -138,7 +138,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
         if (salesCh?.isTextBased()) {
           await postOrderPanel(salesCh as TextChannel, mechanicId, profile.display_name, rate);
         }
-      } catch { /* ignore — channel may not exist */ }
+      } catch { /* ignore — channel may not exist or bot lacks permissions */ }
     }
 
     try {
@@ -255,10 +255,16 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     }
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-    await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+    let amNewPinned = false;
+    try {
+      const amNewResult = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+      amNewPinned = amNewResult.pinned;
+    } catch { /* ignore */ }
 
     await interaction.editReply({
-      content: `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`
+      content: amNewPinned
+        ? `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`
+        : `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nOrder panel sent — give the bot **Manage Messages** permission in that channel so it can be pinned.`
     });
     return true;
   }
@@ -287,18 +293,24 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channelId, mechanicId] });
 
-    let panelPosted = true;
+    let amExistPosted = false;
+    let amExistPinned = false;
     try {
-      await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
-    } catch {
-      panelPosted = false;
+      const amExistResult = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+      amExistPosted = true;
+      amExistPinned = amExistResult.pinned;
+    } catch { /* ignore */ }
+
+    let amExistMsg = `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel.`;
+    if (!amExistPosted) {
+      amExistMsg += `\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then use **Resend Panel** from the admin setup.`;
+    } else if (!amExistPinned) {
+      amExistMsg += `\n✅ Order panel sent.\n⚠️ Could not pin it — give the bot **Manage Messages** permission in <#${channelId}> so mechanics can find it easily.`;
+    } else {
+      amExistMsg += ` Order panel posted and pinned.`;
     }
 
-    await interaction.editReply({
-      content: panelPosted
-        ? `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel and posted the order panel.`
-        : `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel.\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then run the setup again.`
-    });
+    await interaction.editReply({ content: amExistMsg });
     return true;
   }
 

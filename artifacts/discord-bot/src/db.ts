@@ -235,22 +235,31 @@ export async function initDb() {
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_name TEXT NOT NULL DEFAULT ''");
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
+  await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
   // Remove the hardcoded Ander account — no longer seeded on startup
   await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
   await db.execute({ sql: "DELETE FROM profiles WHERE discord_id = ?", args: ["1363222342800511058"] });
 
-  // On every startup, close any open timeclock sessions — prevents "already clocked in" ghost state
-  // after bot restarts. Crew will simply clock back in from the panel.
+  // Close only sessions that have been open for more than 8 hours — these are genuinely stale
+  // (bot was down for a long shift). Recent sessions survive quick restarts and deploys so
+  // mechanics who are actively clocked in don't get kicked out unexpectedly.
   await db.execute({
     sql: `UPDATE timeclock
           SET clock_out_time = datetime('now'),
               duration_minutes = ROUND((strftime('%s','now') - strftime('%s', REPLACE(clock_in_time,' ','T') || 'Z')) / 60.0, 2),
               status = 'approved',
               warned_at = NULL, stayed_in_at = NULL
-          WHERE clock_out_time IS NULL`,
+          WHERE clock_out_time IS NULL
+          AND datetime(COALESCE(clock_in_time, '2000-01-01')) < datetime('now', '-8 hours')`,
     args: []
   });
-  await db.execute({ sql: "UPDATE profiles SET status = 'offline' WHERE status IN ('online','on_break')", args: [] });
+  // Only mark offline mechanics whose session was just closed (not those still clocked in)
+  await db.execute({
+    sql: `UPDATE profiles SET status = 'offline'
+          WHERE status IN ('online','on_break')
+          AND discord_id NOT IN (SELECT DISTINCT mechanic_id FROM timeclock WHERE clock_out_time IS NULL)`,
+    args: []
+  });
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
@@ -473,8 +482,9 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     approved_at:      c(12) ? String(c(12)) : null,
     approved_by:      c(13) ? String(c(13)) : null,
     completed_at:     c(14) ? String(c(14)) : null,
-    role_level:       c(16) ? String(c(16)) : "mechanic",
-    customer_name:    c(17) ? String(c(17)) : "",
+    role_level:              c(16) ? String(c(16)) : "mechanic",
+    customer_name:           c(17) ? String(c(17)) : "",
+    customer_total_override: c(18) != null ? Number(c(18)) : null,
   };
 }
 

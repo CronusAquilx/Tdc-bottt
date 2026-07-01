@@ -140,10 +140,16 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     }
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-    await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+    let abPinned = false;
+    try {
+      const abResult = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+      abPinned = abResult.pinned;
+    } catch { /* ignore */ }
 
     await interaction.editReply({
-      content: `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`,
+      content: abPinned
+        ? `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`
+        : `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nOrder panel sent — give the bot **Manage Messages** permission in that channel so it can be pinned.`,
       embeds: [], components: []
     });
     return true;

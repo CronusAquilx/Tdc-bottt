@@ -40,26 +40,23 @@ function getWeekBounds(): { start: Date; end: Date; label: string } {
 }
 
 export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): EmbedBuilder {
-  const { label } = getWeekBounds();
-
   const embed = new EmbedBuilder()
-    .setTitle("🏆  WEEKLY LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
+    .setTitle("🏆  ALL-TIME LEADERBOARD  ·  TOKYO DRIFT CUSTOMS")
     .setColor(COLORS.gold);
 
   if (!entries.length) {
     embed
       .setDescription(
-        `## Week of ${label}\n\n` +
-        "```\n  No orders completed yet this week.\n  Get to work! 🔧\n```"
+        "## All-Time Customer Revenue\n\n" +
+        "```\n  No completed orders yet.\n  Get to work! 🔧\n```"
       )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
+      .setFooter({ text: "東京ドリフトカスタム  ·  All completed orders  ·  Last updated" })
       .setTimestamp(updatedAt);
     return embed;
   }
 
   const topLabour = entries[0]!.total_labour;
 
-  // Top 3 on separate lines with big callout, rest compact
   const topSection = entries.slice(0, 3).map((e, i) => {
     const bar        = buildBar(e.total_labour, topLabour, 14);
     const place      = PLACE_ICONS[i] ?? `${i + 1}.`;
@@ -80,7 +77,7 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
   }).join("\n");
 
   embed.setDescription(
-    `## Week of ${label}\n\n` +
+    "## All-Time Customer Revenue\n\n" +
     topSection +
     (restSection ? `\n\n${restSection}` : "")
   );
@@ -101,7 +98,6 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
     inline: false,
   });
 
-  // Quick stats
   const totalOrders = entries.reduce((s, e) => s + e.order_count, 0);
   const totalLabour = entries.reduce((s, e) => s + e.total_labour, 0);
   const totalComm   = entries.reduce((s, e) => s + Math.round(e.total_labour * e.commission_rate), 0);
@@ -112,7 +108,7 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
   );
 
   embed
-    .setFooter({ text: "東京ドリフトカスタム  ·  Resets every Monday  ·  Last updated" })
+    .setFooter({ text: "東京ドリフトカスタム  ·  All completed orders  ·  Last updated" })
     .setTimestamp(updatedAt);
 
   return embed;

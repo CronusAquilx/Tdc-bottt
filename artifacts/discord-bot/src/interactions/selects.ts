@@ -175,8 +175,9 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         try {
           const ch = await guild.channels.fetch(profile.sales_channel_id);
           if (!ch?.isTextBased()) throw new Error("Not a text channel");
-          await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
-          await interaction.editReply({ content: `✅ Order panel re-posted to <#${profile.sales_channel_id}> for **${profile.display_name}**.`, embeds: [], components: [] });
+          const result = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+          const pinNote = result.pinned ? "" : "\n⚠️ Panel sent but **could not be pinned** — give the bot **Manage Messages** permission in that channel so mechanics can find it easily.";
+          await interaction.editReply({ content: `✅ Order panel re-posted to <#${profile.sales_channel_id}> for **${profile.display_name}**.${pinNote}`, embeds: [], components: [] });
         } catch (err: any) {
           await interaction.editReply({ content: `❌ Could not post panel — check bot permissions in <#${profile.sales_channel_id}>. ${err?.message ?? ""}`, embeds: [], components: [] });
         }
@@ -426,19 +427,24 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
       await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channelId, mechanicId] });
 
-      let panelPosted = true;
+      let panelPosted = false;
+      let panelPinned = false;
       try {
-        await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
-      } catch {
-        panelPosted = false;
+        const result = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+        panelPosted = true;
+        panelPinned = result.pinned;
+      } catch { /* ignore */ }
+
+      let msg = `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel.`;
+      if (!panelPosted) {
+        msg += `\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then use **Resend Panel** from the admin setup.`;
+      } else if (!panelPinned) {
+        msg += `\n✅ Order panel sent.\n⚠️ Could not pin it — give the bot **Manage Messages** permission in <#${channelId}> so mechanics can find it easily.`;
+      } else {
+        msg += ` Order panel posted and pinned.`;
       }
 
-      await interaction.editReply({
-        content: panelPosted
-          ? `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel. Order panel posted.`
-          : `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel.\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then run the setup again.`,
-        embeds: [], components: []
-      });
+      await interaction.editReply({ content: msg, embeds: [], components: [] });
     }
 
     // ── Category picker for new sales channel ─────────────────────────────────
@@ -498,10 +504,16 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       }
 
       await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-      await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+      let newPanelPinned = false;
+      try {
+        const r2 = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+        newPanelPinned = r2.pinned;
+      } catch { /* ignore */ }
 
       await interaction.editReply({
-        content: `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nThe order panel has been pinned.`,
+        content: newPanelPinned
+          ? `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nThe order panel has been pinned.`
+          : `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nOrder panel sent — but give the bot **Manage Messages** permission in that channel so it can be pinned.`,
         embeds: [], components: []
       });
     }

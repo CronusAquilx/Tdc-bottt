@@ -226,6 +226,19 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         .catch(() => {});
     }
 
+    // Fire-and-forget: refresh leaderboard channel
+    if (interaction.guild) {
+      const guildSnap = interaction.guild;
+      getGuildConfig(guildId).then(async cfg => {
+        if (!cfg?.leaderboard_channel_id) return;
+        const ch = await guildSnap.channels.fetch(cfg.leaderboard_channel_id).catch(() => null);
+        if (ch?.isTextBased()) {
+          const { postLeaderboard } = await import("../commands/leaderboard.js");
+          postLeaderboard(ch as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
@@ -279,6 +292,51 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     const { order: updated, weekCommission, rate, crewCutInfo: cci0, catSelect } = await refreshDraftView(extra);
     await interaction.editReply({
       embeds: [buildDraftEmbed(updated, weekCommission, rate, cci0)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        ...mainDraftButtonRows(extra)
+      ]
+    });
+    return;
+  }
+
+  // ── Set Customer Total ──────────────────────────────────────────────────────
+  if (ns === "order" && action === "applytotal") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const raw = interaction.fields.getTextInputValue("amount").replace(/[$,\s]/g, "");
+    const amount = parseFloat(raw);
+    if (isNaN(amount) || amount < 0) {
+      await interaction.editReply({ content: "❌ Invalid amount — enter a number like `210000` or `0` to reset." });
+      return;
+    }
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
+    if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
+
+    if (amount === 0) {
+      // Reset: restore total to parts_cost + labour, clear override marker
+      await db.execute({
+        sql: "UPDATE orders SET customer_total_override = NULL, total = parts_cost + labour WHERE id = ?",
+        args: [extra]
+      });
+    } else {
+      // Set custom total: adjust labour so it absorbs the difference (commission recalculates naturally)
+      await db.execute({
+        sql: `UPDATE orders
+              SET customer_total_override = ?,
+                  total = ?,
+                  labour = MAX(0, ? - parts_cost)
+              WHERE id = ?`,
+        args: [amount, amount, amount, extra]
+      });
+    }
+
+    const { order: updated, weekCommission, rate, crewCutInfo: cciT, catSelect } = await refreshDraftView(extra);
+    const resetNote = amount === 0
+      ? "\n✅ Total reset to calculated value."
+      : `\n✅ Customer total set to **$${amount.toLocaleString("en-US")}** — labour adjusted, commission updated.`;
+    await interaction.editReply({
+      content: resetNote,
+      embeds: [buildDraftEmbed(updated, weekCommission, rate, cciT)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(extra)

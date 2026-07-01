@@ -150,7 +150,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
 
     const commRate = profile?.commission_rate ?? 0.3;
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [salesChannel.id, recruitId] });
-    await postOrderPanel(salesChannel, recruitId, displayName, commRate);
+    await postOrderPanel(salesChannel, recruitId, displayName, commRate).catch(() => {});
 
     // Update the training channel button to show it's done
     try {

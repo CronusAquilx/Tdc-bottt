@@ -92,7 +92,13 @@ export function buildOrderEmbed(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
       { name: "🔩 Parts",    value: money(order.parts_cost), inline: true },
       { name: "⚙️ Labour",  value: money(order.labour),     inline: true },
-      { name: "💰 Total",   value: `**${money(order.total)}**`, inline: true },
+      {
+        name: "💰 Total",
+        value: order.customer_total_override != null
+          ? `**${money(order.customer_total_override)}** ✏️\n-# Calculated: ${money(order.total)}`
+          : `**${money(order.total)}**`,
+        inline: true
+      },
       {
         name:  "💵 Commission (This Order)",
         value: `**${money(thisOrderCommission)}**\n-# ${commissionPct}% of labour`,
@@ -154,11 +160,16 @@ export function buildDraftEmbed(
   if (order.labour > 0)     summaryParts.push(`Labour: ${money(order.labour)}`);
   const summaryLine = summaryParts.length ? `\n-# ${summaryParts.join("  ·  ")}` : "";
 
+  const displayTotal = order.customer_total_override ?? order.total;
+  const totalLine = order.customer_total_override != null
+    ? `**${money(displayTotal)}** ✏️\n-# Calculated: ${money(order.total)}`
+    : `**${money(displayTotal)}**${summaryLine}`;
+
   const fields: any[] = [
     { name: "🛠️ Services", value: itemLines.slice(0, 1024), inline: false },
     {
-      name: "💰 Order Total",
-      value: `**${money(order.total)}**${summaryLine}`,
+      name: "💰 Customer Total",
+      value: totalLine,
       inline: true
     },
     {
