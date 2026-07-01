@@ -219,6 +219,13 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     logEvent({ kind: "order_completed", guildId, userId: mechanicId, orderId, orderNumber: completed.order_number, amount: Math.round(completed.labour), detail: `total=${completed.total} parts=${completed.parts_cost}` });
 
+    // Fire-and-forget: refresh the pay log panel so it reflects this order immediately
+    if (interaction.guild) {
+      import("../commands/payall.js")
+        .then(m => m.refreshPayLogPanel(interaction.guild!))
+        .catch(() => {});
+    }
+
     await interaction.editReply({
       content: postedTo
         ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
@@ -344,10 +351,11 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
     const order = rowToOrder(r.rows[0]);
 
-    const extrasPrice = qty * 500;
+    const extrasPrice = qty * 2000;
     // Remove existing body parts line if present, add fresh
     const items: any[] = (order.items ?? []).filter((i: any) => i.category !== "__extras__");
-    items.push({ label: `Body Parts ×${qty}`, price: extrasPrice, cost: 0, labour: extrasPrice, category: "__extras__" });
+    // All $2K per part is all-in (parts + labour): split cost=$500, labour=$1500
+    items.push({ label: `Body Parts ×${qty}`, price: extrasPrice, cost: qty * 500, labour: qty * 1500, category: "__extras__" });
 
     const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
     const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);

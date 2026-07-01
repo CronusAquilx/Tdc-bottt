@@ -735,10 +735,18 @@ export async function handleButton(interaction: ButtonInteraction) {
     // Full pay-period reset: clear hours, snapshots, AND the manual commission
     // adjustments set via /setpay. Without zeroing commission_adjustment the
     // old fixed amount keeps accumulating on top of all new orders.
-    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
-    await setSetting("order_number_reset_ts", new Date().toISOString());
+    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending'");
+    // Use SQLite-compatible timestamp format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly
+    await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
     const count = Number(r.rowsAffected ?? 0);
     const draftCount = Number(drafts.rowsAffected ?? 0);
+
+    // Refresh the pay log panel to reflect the cleared state immediately
+    if (interaction.guild) {
+      const { refreshPayLogPanel } = await import("../commands/payall.js");
+      refreshPayLogPanel(interaction.guild).catch(() => {});
+    }
+
     const embed = new EmbedBuilder()
       .setTitle("🗑️  WEEK CLEARED — ALL CREW")
       .setColor(COLORS.warning)
@@ -1161,6 +1169,12 @@ export async function handleButton(interaction: ButtonInteraction) {
       }
     }
 
+    // Refresh pay log panel to reflect the post-payroll zeroed state
+    if (interaction.guild) {
+      const { refreshPayLogPanel } = await import("../commands/payall.js");
+      refreshPayLogPanel(interaction.guild).catch(() => {});
+    }
+
     const summaryEmbed = new EmbedBuilder()
       .setTitle("✅  PAYROLL PROCESSED")
       .setColor(COLORS.paid)
@@ -1202,8 +1216,8 @@ export async function handleButton(interaction: ButtonInteraction) {
     // 3. Reset pay status to pending for everyone
     await db.execute("UPDATE profiles SET current_pay_status = 'pending'");
 
-    // 4. Mark the new pay-period start
-    await setSetting("order_number_reset_ts", new Date().toISOString());
+    // 4. Mark the new pay-period start (SQLite-compatible format: YYYY-MM-DD HH:MM:SS)
+    await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
 
     // 5. Send new week messages to all sales channels
     let sent = 0;
@@ -1247,6 +1261,12 @@ export async function handleButton(interaction: ButtonInteraction) {
           }
         } catch { /* ignore */ }
       }
+    }
+
+    // Refresh pay log panel to show the zeroed state
+    if (interaction.guild) {
+      const { refreshPayLogPanel } = await import("../commands/payall.js");
+      refreshPayLogPanel(interaction.guild).catch(() => {});
     }
 
     const embed = new EmbedBuilder()

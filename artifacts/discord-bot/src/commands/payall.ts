@@ -179,37 +179,178 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   return embed;
 }
 
-/**
- * Posts the current payroll summary + Pay All button to a pay-logs channel.
- * Called when the pay-logs channel is created or when the auto-scheduler fires.
- */
-export async function postPayLogPanel(channel: TextChannel, guild?: Guild): Promise<void> {
-  const ws = weekStart();
-  const embed = await buildPayallSummaryEmbed(ws, guild);
+const PAY_LOG_PANEL_TITLE = "💸  WEEKLY PAY LOG  ·  TOKYO DRIFT CUSTOMS";
+/** Guild-scoped settings key so multiple guilds don't stomp each other's panel msg ID */
+const payLogMsgKey = (guildId: string) => `paylogs_panel_msg_id:${guildId}`;
 
-  if (!embed) {
-    const waitEmbed = new EmbedBuilder()
-      .setTitle("💸  WEEKLY PAYROLL PANEL")
+/**
+ * Builds the live per-mechanic pay log embed shown in the pay-logs channel.
+ * Shows every crew member's weekly commission, order count, hours, and paid/pending status.
+ */
+export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder> {
+  const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+
+  // Single query: all profiles with their week labour + order counts
+  const r = await db.execute({
+    sql: `SELECT
+            p.discord_id,
+            p.display_name,
+            p.commission_rate,
+            p.hours_worked_this_week,
+            p.commission_adjustment,
+            p.commission_labour_snapshot,
+            p.current_pay_status,
+            COALESCE(SUM(CASE WHEN o.status IN ('complete','approved','paid') AND ${SINCE_RESET} THEN o.labour ELSE 0 END), 0) AS week_labour,
+            COUNT(CASE WHEN o.status IN ('complete','approved','paid') AND ${SINCE_RESET} THEN 1 ELSE NULL END) AS week_orders
+          FROM profiles p
+          LEFT JOIN orders o ON o.mechanic_id = p.discord_id
+          GROUP BY p.discord_id
+          ORDER BY week_labour DESC`,
+    args: []
+  });
+
+  const ws = weekStart();
+  const nowTs = Math.floor(Date.now() / 1000);
+
+  if (!r.rows.length) {
+    return new EmbedBuilder()
+      .setTitle(PAY_LOG_PANEL_TITLE)
       .setColor(0xffd700)
       .setDescription(
         `**Pay period:** Week of \`${ws}\`\n\n` +
-        "No completed orders yet this week.\n" +
-        "This panel will update when mechanics complete orders.\n\n" +
-        "Run `/payall` or use **Schedule Pay Day** in the admin panel when ready."
+        "*No crew profiles found yet.*\n\n" +
+        `🔄 Last updated: <t:${nowTs}:R>`
       )
       .setFooter({ text: FOOTER })
       .setTimestamp();
-    await channel.send({ embeds: [waitEmbed] });
-    return;
   }
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("payall:confirm").setLabel("💸  Pay All + Notify Crew").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("payall:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
-  );
+  const lines: string[] = [];
+  let grandTotal = 0;
 
-  const msg = await channel.send({ embeds: [embed], components: [row] });
+  for (const row of r.rows) {
+    const name       = String(row[1] ?? "Unknown");
+    const rate       = Number(row[2] ?? 0.3);
+    const hours      = Number(row[3] ?? 0);
+    const adj        = Number(row[4] ?? 0);
+    const snapshot   = Number(row[5] ?? 0);
+    const payStatus  = String(row[6] ?? "pending");
+    const weekLabour = Number(row[7] ?? 0);
+    const weekOrders = Number(row[8] ?? 0);
+
+    const labourAfter  = Math.max(0, weekLabour - snapshot);
+    const commission   = adj > 0 ? adj + labourAfter * rate : weekLabour * rate;
+    grandTotal        += commission;
+
+    const statusIcon  = payStatus === "paid" ? "💚" : "🔴";
+    const hrsNote     = hours > 0 ? ` · ${hours.toFixed(1)}h` : "";
+    const rateNote    = adj > 0 ? `set ${Math.round(adj).toLocaleString()}+` : `${(rate * 100).toFixed(0)}%`;
+    lines.push(`${statusIcon} **${name}** — ${weekOrders} orders${hrsNote} — ${rateNote} → **${money(Math.round(commission))}**`);
+  }
+
+  // Chunk into fields to stay under Discord's 1024-char limit
+  const fields: { name: string; value: string; inline: boolean }[] = [];
+  let chunk = "";
+  let chunkIdx = 0;
+  for (const line of lines) {
+    const addition = (chunk ? "\n" : "") + line;
+    if (chunk.length + addition.length > 1020) {
+      fields.push({ name: chunkIdx === 0 ? "🔩 Crew — Weekly Commission" : "\u200b", value: chunk, inline: false });
+      chunk = line; chunkIdx++;
+    } else {
+      chunk += addition;
+    }
+  }
+  if (chunk) fields.push({ name: chunkIdx === 0 ? "🔩 Crew — Weekly Commission" : "\u200b", value: chunk, inline: false });
+  fields.push({ name: "💰 Total to Bill Company", value: `**${money(Math.round(grandTotal))}**`, inline: true });
+
+  return new EmbedBuilder()
+    .setTitle(PAY_LOG_PANEL_TITLE)
+    .setColor(0xffd700)
+    .setDescription(
+      `**Pay period:** Week of \`${ws}\`\n` +
+      `💚 = paid  🔴 = pending\n\n` +
+      `🔄 Last updated: <t:${nowTs}:R>`
+    )
+    .addFields(...fields)
+    .setFooter({ text: FOOTER })
+    .setTimestamp();
+}
+
+function buildPayLogButtons(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:payroll:markpaid").setLabel("💚 Mark Paid").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:payroll:markunpaid").setLabel("🔴 Mark Pending").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("💸 Pay All").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:payroll:newweek").setLabel("🔄 New Week").setStyle(ButtonStyle.Secondary),
+    )
+  ];
+}
+
+/**
+ * Posts (or edits the existing pinned) pay log panel in the channel.
+ * Always pins the panel and stores its message ID so refreshPayLogPanel can edit it.
+ */
+export async function postPayLogPanel(channel: TextChannel, guild?: Guild): Promise<void> {
+  const { getSetting, setSetting } = await import("../db.js");
+  const embed      = await buildPayLogPanelEmbed(guild);
+  const components = buildPayLogButtons();
+
+  const guildId = guild?.id ?? (channel as any).guild?.id ?? "default";
+
+  // Try to find and edit an existing pinned panel from the bot
+  try {
+    const pins = await channel.messages.fetchPinned();
+    const existing = pins.find(m =>
+      m.author.id === channel.client.user?.id &&
+      (m.embeds[0]?.title?.includes("PAY LOG") || m.embeds[0]?.title?.includes("PAYROLL"))
+    );
+    if (existing) {
+      await existing.edit({ embeds: [embed], components });
+      await setSetting(payLogMsgKey(guildId), existing.id);
+      return;
+    }
+  } catch { /* ignore */ }
+
+  // No existing panel — post new and pin it
+  const msg = await channel.send({ embeds: [embed], components });
   try { await msg.pin(); } catch { /* ignore */ }
+  await setSetting(payLogMsgKey(guildId), msg.id);
+}
+
+/**
+ * Silently refreshes the pinned pay log panel in place.
+ * Call this after every order completion and after every week reset.
+ */
+export async function refreshPayLogPanel(guild: Guild | null): Promise<void> {
+  if (!guild) return;
+  try {
+    const { getGuildConfig, getSetting, setSetting } = await import("../db.js");
+    const config  = await getGuildConfig(guild.id);
+    const chanId  = config?.payday_channel_id;
+    if (!chanId) return;
+
+    const ch = await guild.channels.fetch(chanId).catch(() => null);
+    if (!ch?.isTextBased()) return;
+
+    const embed      = await buildPayLogPanelEmbed(guild);
+    const components = buildPayLogButtons();
+
+    const msgId = await getSetting(payLogMsgKey(guild.id));
+    if (msgId) {
+      const msg = await (ch as any).messages.fetch(msgId).catch(() => null);
+      if (msg) {
+        await msg.edit({ embeds: [embed], components });
+        return;
+      }
+    }
+
+    // Panel message not found — post a fresh one
+    const newMsg = await (ch as any).send({ embeds: [embed], components });
+    try { await (newMsg as any).pin(); } catch { /* ignore */ }
+    await setSetting(payLogMsgKey(guild.id), (newMsg as any).id);
+  } catch { /* never let panel refresh crash the caller */ }
 }
 
 export async function processPayall(
@@ -331,8 +472,9 @@ export async function processPayall(
 
   // Record pay-period boundary — order_seq counter is NOT reset (globally monotonic).
   // The reset_ts is used only to scope which orders belong to the current pay period.
+  // Use SQLite-compatible format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly.
   const { setSetting } = await import("../db.js");
-  await setSetting("order_number_reset_ts", new Date().toISOString());
+  await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
 
   // Log the payout event
   const { logEvent } = await import("../lib/eventLog.js");

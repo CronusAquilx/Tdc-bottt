@@ -33,26 +33,32 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 }
 
 export async function postLeaderboard(channel: TextChannel) {
-  const weekStart = getWeekStart();
+  // Use the same pay-period boundary as payroll/commission logic (order_number_reset_ts)
+  // so the leaderboard always matches what mechanics see in their pay panel.
+  const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
   const r = await db.execute({
     sql: `SELECT p.discord_id, p.display_name,
                  COUNT(o.id) as order_count,
-                 COALESCE(SUM(o.total), 0) as total_revenue
+                 COALESCE(SUM(o.total), 0) as total_revenue,
+                 COALESCE(SUM(o.labour), 0) as total_labour,
+                 COALESCE(p.commission_rate, 0.3) as commission_rate
           FROM profiles p
           JOIN orders o ON o.mechanic_id = p.discord_id
-          WHERE o.status = 'complete' AND o.completed_at >= ?
-          GROUP BY p.discord_id, p.display_name
+          WHERE o.status IN ('complete','approved','paid') AND ${SINCE_RESET}
+          GROUP BY p.discord_id, p.display_name, p.commission_rate
           HAVING order_count > 0
-          ORDER BY total_revenue DESC
+          ORDER BY total_labour DESC
           LIMIT 15`,
-    args: [weekStart]
+    args: []
   });
 
   const entries = r.rows.map(row => ({
-    discord_id:    String(row[0] ?? ""),
-    display_name:  String(row[1] ?? ""),
-    order_count:   Number(row[2] ?? 0),
-    total_revenue: Number(row[3] ?? 0),
+    discord_id:      String(row[0] ?? ""),
+    display_name:    String(row[1] ?? ""),
+    order_count:     Number(row[2] ?? 0),
+    total_revenue:   Number(row[3] ?? 0),
+    total_labour:    Number(row[4] ?? 0),
+    commission_rate: Number(row[5] ?? 0.3),
   }));
 
   const embed = buildLeaderboardEmbed(entries, new Date());

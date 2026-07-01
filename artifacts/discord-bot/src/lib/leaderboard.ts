@@ -6,6 +6,8 @@ export type LeaderEntry = {
   display_name: string;
   order_count: number;
   total_revenue: number;
+  total_labour: number;
+  commission_rate: number;
 };
 
 const PLACE_ICONS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
@@ -55,20 +57,26 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
     return embed;
   }
 
-  const topRev = entries[0]!.total_revenue;
+  const topLabour = entries[0]!.total_labour;
 
   // Top 3 on separate lines with big callout, rest compact
   const topSection = entries.slice(0, 3).map((e, i) => {
-    const bar   = buildBar(e.total_revenue, topRev, 14);
-    const place = PLACE_ICONS[i] ?? `${i + 1}.`;
-    return `${place}  **${e.display_name}**\n` +
-           `\`${bar}\`  **${money(e.total_revenue)}**  ·  ${e.order_count} orders`;
+    const bar        = buildBar(e.total_labour, topLabour, 14);
+    const place      = PLACE_ICONS[i] ?? `${i + 1}.`;
+    const ratePct    = Math.round(e.commission_rate * 100);
+    const commission = Math.round(e.total_labour * e.commission_rate);
+    return (
+      `${place}  **${e.display_name}**\n` +
+      `\`${bar}\`  **${money(e.total_labour)} labour**  ·  ${ratePct}% → **${money(commission)}**  ·  ${e.order_count} orders`
+    );
   }).join("\n\n");
 
   const restSection = entries.slice(3).map((e, i) => {
-    const bar   = buildBar(e.total_revenue, topRev, 8);
-    const place = PLACE_ICONS[i + 3] ?? `${i + 4}.`;
-    return `${place}  **${e.display_name}**  \`${bar}\`  ${money(e.total_revenue)}  ·  ${e.order_count} orders`;
+    const bar        = buildBar(e.total_labour, topLabour, 8);
+    const place      = PLACE_ICONS[i + 3] ?? `${i + 4}.`;
+    const ratePct    = Math.round(e.commission_rate * 100);
+    const commission = Math.round(e.total_labour * e.commission_rate);
+    return `${place}  **${e.display_name}**  \`${bar}\`  ${money(e.total_labour)} labour · ${ratePct}% → ${money(commission)}  ·  ${e.order_count} orders`;
   }).join("\n");
 
   embed.setDescription(
@@ -78,22 +86,29 @@ export function buildLeaderboardEmbed(entries: LeaderEntry[], updatedAt: Date): 
   );
 
   // Leader callout field
-  const leader = entries[0]!;
-  const runnerUp = entries[1];
-  const gap = runnerUp ? `  ·  **${money(leader.total_revenue - runnerUp.total_revenue)}** ahead of 2nd` : "";
+  const leader     = entries[0]!;
+  const runnerUp   = entries[1];
+  const ratePct    = Math.round(leader.commission_rate * 100);
+  const commission = Math.round(leader.total_labour * leader.commission_rate);
+  const gap        = runnerUp
+    ? `  ·  **${money(leader.total_labour - runnerUp.total_labour)}** ahead of 2nd`
+    : "";
   embed.addFields({
     name: "👑  CURRENT LEADER",
-    value: `**${leader.display_name}** — ${money(leader.total_revenue)} across **${leader.order_count}** orders${gap} 🔥`,
+    value:
+      `**${leader.display_name}** — ${money(leader.total_labour)} labour across **${leader.order_count}** orders${gap}\n` +
+      `${ratePct}% commission → **${money(commission)}** 🔥`,
     inline: false,
   });
 
   // Quick stats
   const totalOrders = entries.reduce((s, e) => s + e.order_count, 0);
-  const totalRev    = entries.reduce((s, e) => s + e.total_revenue, 0);
+  const totalLabour = entries.reduce((s, e) => s + e.total_labour, 0);
+  const totalComm   = entries.reduce((s, e) => s + Math.round(e.total_labour * e.commission_rate), 0);
   embed.addFields(
-    { name: "📋 Total Orders", value: `**${totalOrders}**`,    inline: true },
-    { name: "💰 Total Revenue", value: `**${money(totalRev)}**`, inline: true },
-    { name: "👥 Mechanics Active", value: `**${entries.length}**`, inline: true },
+    { name: "📋 Total Orders",       value: `**${totalOrders}**`,        inline: true },
+    { name: "🔧 Total Labour",       value: `**${money(totalLabour)}**`,  inline: true },
+    { name: "💸 Total Commissions",  value: `**${money(totalComm)}**`,    inline: true },
   );
 
   embed

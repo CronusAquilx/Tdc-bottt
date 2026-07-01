@@ -82,7 +82,6 @@ function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[]
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Perf").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`order:fullpackage:${orderId}`).setLabel("📦 Full Build").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🩸 Body Parts").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
     ),
@@ -282,21 +281,25 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     if (!r.rows[0]) return true;
     const order = rowToOrder(r.rows[0]);
 
+    // Full Build Package — updated to current catalog taxonomy
     const FULL_PACKAGE = [
       { label: "Engine 4",       category: "Performance",    price: 70000, cost: 40000, labour: 30000 },
       { label: "Turbo",          category: "Performance",    price: 40000, cost: 10000, labour: 30000 },
-      { label: "Suspension 4",   category: "Performance",    price: 21000, cost: 12000, labour: 9000  },
+      { label: "Suspension 4",   category: "Performance",    price: 21000, cost: 12000, labour:  9000 },
       { label: "Transmission 3", category: "Performance",    price: 26300, cost: 15000, labour: 11300 },
-      { label: "Brakes 3",       category: "Performance",    price: 16900, cost: 7500,  labour: 9400  },
-      { label: "Primary Color",  category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
-      { label: "Secondary Color",category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
-      { label: "Pearlescent",    category: "Visual & Body",  price: 11500, cost: 1000,  labour: 10500 },
-      { label: "Wheels",         category: "Extras",         price:  3900, cost:  500,  labour: 3400  },
-      { label: "Neon Kit",       category: "Neon & Lighting",price:  4000, cost: 1000,  labour: 3000  },
-      { label: "Tire Smoke",     category: "Neon & Lighting",price:  4000, cost: 1000,  labour: 3000  },
-      { label: "Window Tinting", category: "Neon & Lighting",price:  2100, cost: 1000,  labour: 1100  },
-      { label: "Xenon Lighting", category: "Neon & Lighting",price:  2100, cost: 1000,  labour: 1100  },
-    ]; // Total: $224,800
+      { label: "Brakes 3",       category: "Performance",    price: 16900, cost:  7500, labour:  9400 },
+      { label: "Primary Color",  category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Secondary Color",category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Pearlescent",    category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Wheels",         category: "Extras",         price:  3900, cost:   500, labour:  3400 },
+      { label: "Tire Smoke",     category: "Extras",         price:  4000, cost:  1000, labour:  3000 },
+      { label: "Window Tinting", category: "Extras",         price:  2100, cost:  1000, labour:  1100 },
+      { label: "Neon Front",     category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Back",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Left",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Right",     category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Xenon Lighting", category: "Neon & Lighting",price:  2100, cost:  1000, labour:  1100 },
+    ]; // Total: $215,800
 
     const newPartsCost = FULL_PACKAGE.reduce((s, i) => s + i.cost,   0);
     const newLabour    = FULL_PACKAGE.reduce((s, i) => s + i.labour, 0);
@@ -341,7 +344,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     await interaction.followUp({
       flags: MessageFlags.Ephemeral,
       content:
-        "📦 **Full Build Package applied! ($224,800)**\n\n" +
+        "📦 **Full Build Package applied! ($215,800)**\n\n" +
         "**⚡ Performance**\n" +
         "> 🔧 Engine 4 — $70,000\n" +
         "> 💨 Turbo — $40,000\n" +
@@ -354,9 +357,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
         "> ✨ Pearlescent — $11,500\n\n" +
         "**🎆 Extras & Lighting**\n" +
         "> 🛞 Wheels — $3,900\n" +
-        "> 💡 Neon Kit — $4,000\n" +
         "> 💨 Tire Smoke — $4,000\n" +
         "> 🪟 Window Tinting — $2,100\n" +
+        "> 🔴 Neon Front — $1,000\n" +
+        "> 🔴 Neon Back — $1,000\n" +
+        "> 🔴 Neon Left — $1,000\n" +
+        "> 🔴 Neon Right — $1,000\n" +
         "> 💡 Xenon Lighting — $2,100"
     });
     return true;
@@ -390,7 +396,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("quantity")
-          .setLabel("How many body parts? (each = $500)")
+          .setLabel("How many body parts? (each = $2,000)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setPlaceholder("e.g. 3")
@@ -539,6 +545,13 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       amount: Math.round(completed.labour),
       detail: `total=${completed.total} parts=${completed.parts_cost}`
     });
+
+    // Fire-and-forget: refresh the pay log panel so it reflects this order immediately
+    if (interaction.guild) {
+      import("../commands/payall.js")
+        .then(m => m.refreshPayLogPanel(interaction.guild!))
+        .catch(() => {});
+    }
 
     await interaction.editReply({
       content: postedTo

@@ -23,8 +23,13 @@ async function safeAlter(sql: string) {
 }
 
 const TDC_CATALOG = JSON.stringify({
-  categories: ["Performance", "Repair", "Visual & Body", "Neon & Lighting", "Extras"],
+  categories: ["Vehicle Packages", "Performance", "Repair", "Visual & Body", "Neon & Lighting", "Extras"],
   items: [
+    // ── Vehicle Packages ──────────────────────────────────────────────────
+    { label: "Bike Performance",             category: "Vehicle Packages", price: 145000, cost: 25000, labour: 120000 },
+    { label: "Bike Full Custom + Cosmetics", category: "Vehicle Packages", price: 180000, cost: 20000, labour: 160000 },
+    { label: "Car Performance",              category: "Vehicle Packages", price: 175000, cost: 30000, labour: 145000 },
+    { label: "Car Full Custom + Cosmetics",  category: "Vehicle Packages", price: 210000, cost: 25000, labour: 185000 },
     // ── Performance (Brakes, Engine, Suspension, Transmission, Turbo) ─────
     { label: "Brakes 1",            category: "Performance",     price: 8100,  cost: 2500,  labour: 5600  },
     { label: "Brakes 2",            category: "Performance",     price: 12500, cost: 5000,  labour: 7500  },
@@ -53,15 +58,20 @@ const TDC_CATALOG = JSON.stringify({
     { label: "Respray Wheels",      category: "Visual & Body",   price: 11500, cost: 1000,  labour: 10500 },
     { label: "Pearlescent",         category: "Visual & Body",   price: 11500, cost: 1000,  labour: 10500 },
     // ── Neon & Lighting ───────────────────────────────────────────────────
-    { label: "Neon Kit",            category: "Neon & Lighting", price: 4000,  cost: 1000,  labour: 3000  },
-    { label: "Tire Smoke",          category: "Neon & Lighting", price: 4000,  cost: 1000,  labour: 3000  },
-    { label: "Window Tinting",      category: "Neon & Lighting", price: 2100,  cost: 1000,  labour: 1100  },
+    // Each neon side is sold individually; Neon Color is a separate colour-change charge
+    { label: "Neon Front",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Back",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Left",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Right",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Color",          category: "Neon & Lighting", price: 500,   cost: 100,   labour: 400   },
     { label: "Xenon Lighting",      category: "Neon & Lighting", price: 2100,  cost: 1000,  labour: 1100  },
     // ── Extras ────────────────────────────────────────────────────────────
     { label: "Horns",               category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
     { label: "Hydraulics",          category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
     { label: "Plate Style",         category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
-    { label: "Wheels",              category: "Extras",          price: 3900,  cost: 500,   labour: 3400  }
+    { label: "Wheels",              category: "Extras",          price: 3900,  cost: 500,   labour: 3400  },
+    { label: "Tire Smoke",          category: "Extras",          price: 4000,  cost: 1000,  labour: 3000  },
+    { label: "Window Tinting",      category: "Extras",          price: 2100,  cost: 1000,  labour: 1100  },
   ]
 });
 
