@@ -80,13 +80,18 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
 function mainDraftButtonRows(orderId: string): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`order:maxperf:${orderId}`).setLabel("⚡ Max Perf").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🩸 Body Parts").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:bikeperf:${orderId}`).setLabel("🏍️ Bike Perf").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:bikemaxpack:${orderId}`).setLabel("🏍️ Bike Max Pack").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:carperf:${orderId}`).setLabel("🚗 Car Perf").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:carmaxpack:${orderId}`).setLabel("🚗 Car Max Pack").setStyle(ButtonStyle.Primary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`order:editlabour:${orderId}`).setLabel("✏️ Labour").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`order:extras:${orderId}`).setLabel("🩸 Body Parts").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`order:removeitems:${orderId}`).setLabel("🗑️ Remove").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:discount:${orderId}`).setLabel("💲 Discount").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:settotal:${orderId}`).setLabel("💰 Set Total").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`order:submit:${orderId}`).setLabel("✅ Complete Order").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`order:cancel:${orderId}`).setLabel("✕ Cancel").setStyle(ButtonStyle.Danger)
@@ -201,35 +206,19 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  // ── Max Performance — auto-add all top-tier performance items ──────────────
-  if (action === "maxperf") {
+  // ── Package apply helper ───────────────────────────────────────────────────
+  async function applyPackage(pkgItems: any[], label: string, breakdown: string) {
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return true;
-    const order = rowToOrder(r.rows[0]);
-
-    const MAX_PERF_ITEMS = [
-      { label: "Engine 4",       category: "Performance", price: 70000, cost: 40000, labour: 30000 },
-      { label: "Turbo",          category: "Performance", price: 40000, cost: 10000, labour: 30000 },
-      { label: "Suspension 4",   category: "Performance", price: 21000, cost: 12000, labour: 9000  },
-      { label: "Transmission 3", category: "Performance", price: 26300, cost: 15000, labour: 11300 },
-      { label: "Brakes 3",       category: "Performance", price: 16900, cost: 7500,  labour: 9400  },
-    ];
-    const perfLabels = new Set(MAX_PERF_ITEMS.map(i => i.label));
-
-    // Remove any existing performance items that clash, keep everything else
-    const existing = (order.items ?? []).filter((i: any) => !perfLabels.has(i.label));
-    const items = [...existing, ...MAX_PERF_ITEMS];
-
-    const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
-    const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
-    const newTotal     = items.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
-
+    if (!r.rows[0]) return;
+    // Replace entire order with the package items
+    const newPartsCost = pkgItems.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
+    const newLabour    = pkgItems.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
+    const newTotal     = pkgItems.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
     await db.execute({
       sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
-      args: [JSON.stringify(items), newPartsCost, newLabour, newTotal, orderId]
+      args: [JSON.stringify(pkgItems), newPartsCost, newLabour, newTotal, orderId]
     });
-
     const [catalogStr, ur] = await Promise.all([
       getSetting("parts_catalog"),
       db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
@@ -241,131 +230,187 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
-    const maxPerfCats: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
+    const cats: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
       ? catalog.categories : [];
-    const maxPerfComponents = maxPerfCats.length > 0
+    const components = cats.length > 0
       ? [
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId(`order:selectcategory:${orderId}`)
               .setPlaceholder("Add more services...")
-              .addOptions(maxPerfCats.map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)))
+              .addOptions(cats.map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)))
           ),
           ...mainDraftButtonRows(orderId)
         ]
       : mainDraftButtonRows(orderId);
-
-    // Update the original order embed
     await interaction.editReply({
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
-      components: maxPerfComponents
+      components
     });
-    // Show ephemeral breakdown of what was applied
+    const totalFmt = `$${newTotal.toLocaleString("en-US")}`;
+    const labourFmt = `$${newLabour.toLocaleString("en-US")}`;
     await interaction.followUp({
       flags: MessageFlags.Ephemeral,
-      content:
-        "⚡ **Max Performance Package applied!**\n\n" +
-        `> 🔧 Engine 4 — $70,000\n` +
-        `> 💨 Turbo — $40,000\n` +
-        `> 🌀 Suspension 4 — $21,000\n` +
-        `> ⚙️ Transmission 3 — $26,300\n` +
-        `> 🛑 Brakes 3 — $16,900\n\n` +
-        `**Package Total: $174,200** · Labour: $89,700`
+      content: `**${label} applied! (${totalFmt})**\n\n${breakdown}\n\n**Total: ${totalFmt}** · Labour: ${labourFmt}`
     });
+  }
+
+  // ── 🏍️ Bike Performance ────────────────────────────────────────────────────
+  // No suspension — bikes don't have it. Includes Primary + Secondary respray.
+  if (action === "bikeperf") {
+    const BIKE_PERF = [
+      { label: "Engine 4",        category: "Performance",   price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",           category: "Performance",   price: 40000, cost: 10000, labour: 30000 },
+      { label: "Transmission 3",  category: "Performance",   price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",        category: "Performance",   price: 16900, cost:  7500, labour:  9400 },
+      { label: "Primary Color",   category: "Visual & Body", price: 11500, cost:  1000, labour: 10500 },
+      { label: "Secondary Color", category: "Visual & Body", price: 11500, cost:  1000, labour: 10500 },
+    ];
+    await applyPackage(
+      BIKE_PERF,
+      "🏍️ Bike Performance",
+      "**⚡ Performance (No Suspension)**\n" +
+      "> 🔧 Engine 4 — $70,000\n" +
+      "> 💨 Turbo — $40,000\n" +
+      "> ⚙️ Transmission 3 — $26,300\n" +
+      "> 🛑 Brakes 3 — $16,900\n\n" +
+      "**🎨 Resprays**\n" +
+      "> 🖌️ Primary Color — $11,500\n" +
+      "> 🖌️ Secondary Color — $11,500"
+    );
     return true;
   }
 
-  // ── Full Build — add entire preset package (~$225k) ─────────────────────────
-  if (action === "fullpackage") {
-    await interaction.deferUpdate();
-    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return true;
-    const order = rowToOrder(r.rows[0]);
+  // ── 🏍️ Bike Max Package ────────────────────────────────────────────────────
+  // No suspension. Max performance + all resprays + xenon + underglow + tire smoke + wheels + 6 body parts.
+  // Extra body parts beyond 6 can be added via the 🩸 Body Parts button ($2k each).
+  if (action === "bikemaxpack") {
+    const BODY_PART = { cost: 500, labour: 1500, price: 2000 };
+    const BIKE_MAX = [
+      { label: "Engine 4",        category: "Performance",    price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",           category: "Performance",    price: 40000, cost: 10000, labour: 30000 },
+      { label: "Transmission 3",  category: "Performance",    price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",        category: "Performance",    price: 16900, cost:  7500, labour:  9400 },
+      { label: "Primary Color",   category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Secondary Color", category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Pearlescent",     category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Xenon Lighting",  category: "Neon & Lighting",price:  2100, cost:  1000, labour:  1100 },
+      { label: "Neon Front",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Back",       category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Left",       category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Right",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Tire Smoke",      category: "Extras",         price:  4000, cost:  1000, labour:  3000 },
+      { label: "Wheels",          category: "Extras",         price:  3900, cost:   500, labour:  3400 },
+      // 6 included body part cosmetics
+      { label: "Body Part 1",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 2",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 3",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 4",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 5",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 6",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+    ];
+    await applyPackage(
+      BIKE_MAX,
+      "🏍️ Bike Max Package",
+      "**⚡ Performance (No Suspension)**\n" +
+      "> 🔧 Engine 4 — $70,000\n" +
+      "> 💨 Turbo — $40,000\n" +
+      "> ⚙️ Transmission 3 — $26,300\n" +
+      "> 🛑 Brakes 3 — $16,900\n\n" +
+      "**🎨 All Resprays**\n" +
+      "> 🖌️ Primary Color — $11,500\n" +
+      "> 🖌️ Secondary Color — $11,500\n" +
+      "> ✨ Pearlescent — $11,500\n\n" +
+      "**💡 Lighting & Underglow**\n" +
+      "> 💡 Xenon Lighting — $2,100\n" +
+      "> 🔴 Neon Front — $1,000\n" +
+      "> 🔴 Neon Back — $1,000\n" +
+      "> 🔴 Neon Left — $1,000\n" +
+      "> 🔴 Neon Right — $1,000\n\n" +
+      "**🎆 Extras**\n" +
+      "> 💨 Tire Smoke — $4,000\n" +
+      "> 🛞 Wheels — $3,900\n\n" +
+      "**🩸 6 Body Parts included** (add more via 🩸 Body Parts — $2,000 each)"
+    );
+    return true;
+  }
 
-    // Full Build Package — updated to current catalog taxonomy
-    const FULL_PACKAGE = [
-      { label: "Engine 4",       category: "Performance",    price: 70000, cost: 40000, labour: 30000 },
-      { label: "Turbo",          category: "Performance",    price: 40000, cost: 10000, labour: 30000 },
-      { label: "Suspension 4",   category: "Performance",    price: 21000, cost: 12000, labour:  9000 },
-      { label: "Transmission 3", category: "Performance",    price: 26300, cost: 15000, labour: 11300 },
-      { label: "Brakes 3",       category: "Performance",    price: 16900, cost:  7500, labour:  9400 },
-      { label: "Primary Color",  category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
-      { label: "Secondary Color",category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
-      { label: "Pearlescent",    category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
-      { label: "Wheels",         category: "Extras",         price:  3900, cost:   500, labour:  3400 },
-      { label: "Tire Smoke",     category: "Extras",         price:  4000, cost:  1000, labour:  3000 },
-      { label: "Window Tinting", category: "Extras",         price:  2100, cost:  1000, labour:  1100 },
-      { label: "Neon Front",     category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
-      { label: "Neon Back",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
-      { label: "Neon Left",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
-      { label: "Neon Right",     category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
-      { label: "Xenon Lighting", category: "Neon & Lighting",price:  2100, cost:  1000, labour:  1100 },
-    ]; // Total: $215,800
+  // ── 🚗 Car Performance ─────────────────────────────────────────────────────
+  // Full max performance including suspension.
+  if (action === "carperf") {
+    const CAR_PERF = [
+      { label: "Engine 4",       category: "Performance", price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",          category: "Performance", price: 40000, cost: 10000, labour: 30000 },
+      { label: "Suspension 4",   category: "Performance", price: 21000, cost: 12000, labour:  9000 },
+      { label: "Transmission 3", category: "Performance", price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",       category: "Performance", price: 16900, cost:  7500, labour:  9400 },
+    ];
+    await applyPackage(
+      CAR_PERF,
+      "🚗 Car Performance",
+      "**⚡ Performance**\n" +
+      "> 🔧 Engine 4 — $70,000\n" +
+      "> 💨 Turbo — $40,000\n" +
+      "> 🌀 Suspension 4 — $21,000\n" +
+      "> ⚙️ Transmission 3 — $26,300\n" +
+      "> 🛑 Brakes 3 — $16,900"
+    );
+    return true;
+  }
 
-    const newPartsCost = FULL_PACKAGE.reduce((s, i) => s + i.cost,   0);
-    const newLabour    = FULL_PACKAGE.reduce((s, i) => s + i.labour, 0);
-    const newTotal     = FULL_PACKAGE.reduce((s, i) => s + i.price,  0);
-
-    await db.execute({
-      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
-      args: [JSON.stringify(FULL_PACKAGE), newPartsCost, newLabour, newTotal, orderId]
-    });
-
-    const [catalogStr2, ur2] = await Promise.all([
-      getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
-    ]);
-    const updated2 = rowToOrder(ur2.rows[0]);
-    const guildId2 = interaction.guildId ?? "";
-    const commData2 = await getCommissionData(updated2.mechanic_id, guildId2, updated2.role_level);
-    const crewCutInfo2 = ["trainer","manager","owner"].includes(updated2.role_level)
-      ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
-      : undefined;
-    const catalog2 = JSON.parse(catalogStr2 ?? "{}");
-    const fullPkgCats: string[] = Array.isArray(catalog2.categories) && catalog2.categories.length > 0
-      ? catalog2.categories : [];
-    const fullPkgComponents = fullPkgCats.length > 0
-      ? [
-          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-            new StringSelectMenuBuilder()
-              .setCustomId(`order:selectcategory:${orderId}`)
-              .setPlaceholder("Add more services...")
-              .addOptions(fullPkgCats.map((c: string) => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)))
-          ),
-          ...mainDraftButtonRows(orderId)
-        ]
-      : mainDraftButtonRows(orderId);
-
-    // Update the original order embed
-    await interaction.editReply({
-      embeds: [buildDraftEmbed(updated2, commData2.weekCommission, commData2.rate, crewCutInfo2)],
-      components: fullPkgComponents
-    });
-    // Show ephemeral breakdown of what was applied
-    await interaction.followUp({
-      flags: MessageFlags.Ephemeral,
-      content:
-        "📦 **Full Build Package applied! ($215,800)**\n\n" +
-        "**⚡ Performance**\n" +
-        "> 🔧 Engine 4 — $70,000\n" +
-        "> 💨 Turbo — $40,000\n" +
-        "> 🌀 Suspension 4 — $21,000\n" +
-        "> ⚙️ Transmission 3 — $26,300\n" +
-        "> 🛑 Brakes 3 — $16,900\n\n" +
-        "**🎨 Visual & Body**\n" +
-        "> 🖌️ Primary Color — $11,500\n" +
-        "> 🖌️ Secondary Color — $11,500\n" +
-        "> ✨ Pearlescent — $11,500\n\n" +
-        "**🎆 Extras & Lighting**\n" +
-        "> 🛞 Wheels — $3,900\n" +
-        "> 💨 Tire Smoke — $4,000\n" +
-        "> 🪟 Window Tinting — $2,100\n" +
-        "> 🔴 Neon Front — $1,000\n" +
-        "> 🔴 Neon Back — $1,000\n" +
-        "> 🔴 Neon Left — $1,000\n" +
-        "> 🔴 Neon Right — $1,000\n" +
-        "> 💡 Xenon Lighting — $2,100"
-    });
+  // ── 🚗 Car Max Package ─────────────────────────────────────────────────────
+  // Full performance (with suspension) + all resprays + xenon + underglow + tire smoke + wheels + 6 body parts.
+  // Extra body parts beyond 6 can be added via the 🩸 Body Parts button ($2k each).
+  if (action === "carmaxpack") {
+    const BODY_PART = { cost: 500, labour: 1500, price: 2000 };
+    const CAR_MAX = [
+      { label: "Engine 4",        category: "Performance",    price: 70000, cost: 40000, labour: 30000 },
+      { label: "Turbo",           category: "Performance",    price: 40000, cost: 10000, labour: 30000 },
+      { label: "Suspension 4",    category: "Performance",    price: 21000, cost: 12000, labour:  9000 },
+      { label: "Transmission 3",  category: "Performance",    price: 26300, cost: 15000, labour: 11300 },
+      { label: "Brakes 3",        category: "Performance",    price: 16900, cost:  7500, labour:  9400 },
+      { label: "Primary Color",   category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Secondary Color", category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Pearlescent",     category: "Visual & Body",  price: 11500, cost:  1000, labour: 10500 },
+      { label: "Xenon Lighting",  category: "Neon & Lighting",price:  2100, cost:  1000, labour:  1100 },
+      { label: "Neon Front",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Back",       category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Left",       category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Neon Right",      category: "Neon & Lighting",price:  1000, cost:   250, labour:   750 },
+      { label: "Tire Smoke",      category: "Extras",         price:  4000, cost:  1000, labour:  3000 },
+      { label: "Wheels",          category: "Extras",         price:  3900, cost:   500, labour:  3400 },
+      // 6 included body part cosmetics
+      { label: "Body Part 1",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 2",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 3",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 4",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 5",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+      { label: "Body Part 6",     category: "Visual & Body",  price: BODY_PART.price, cost: BODY_PART.cost, labour: BODY_PART.labour },
+    ];
+    await applyPackage(
+      CAR_MAX,
+      "🚗 Car Max Package",
+      "**⚡ Performance**\n" +
+      "> 🔧 Engine 4 — $70,000\n" +
+      "> 💨 Turbo — $40,000\n" +
+      "> 🌀 Suspension 4 — $21,000\n" +
+      "> ⚙️ Transmission 3 — $26,300\n" +
+      "> 🛑 Brakes 3 — $16,900\n\n" +
+      "**🎨 All Resprays**\n" +
+      "> 🖌️ Primary Color — $11,500\n" +
+      "> 🖌️ Secondary Color — $11,500\n" +
+      "> ✨ Pearlescent — $11,500\n\n" +
+      "**💡 Lighting & Underglow**\n" +
+      "> 💡 Xenon Lighting — $2,100\n" +
+      "> 🔴 Neon Front — $1,000\n" +
+      "> 🔴 Neon Back — $1,000\n" +
+      "> 🔴 Neon Left — $1,000\n" +
+      "> 🔴 Neon Right — $1,000\n\n" +
+      "**🎆 Extras**\n" +
+      "> 💨 Tire Smoke — $4,000\n" +
+      "> 🛞 Wheels — $3,900\n\n" +
+      "**🩸 6 Body Parts included** (add more via 🩸 Body Parts — $2,000 each)"
+    );
     return true;
   }
 
