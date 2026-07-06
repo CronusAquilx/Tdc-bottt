@@ -98,7 +98,7 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   let grandCommission = 0;
   let totalLabour     = 0;
   let totalRevenue    = 0;
-  const payLines: string[] = [];
+  const commissionMap = new Map<string, number>();
 
   for (const [mid, m] of mechanicMap) {
     const { adj = 0, snapshot = 0 } = adjustSummaryMap.get(mid) ?? {};
@@ -109,24 +109,19 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
     grandCommission += commission;
     totalLabour     += m.labour;
     totalRevenue    += m.revenue;
-    const hrsNote    = m.hours > 0 ? ` · ${m.hours.toFixed(1)}h` : "";
-    const rateNote   = adj > 0
-      ? `set $${Math.round(adj).toLocaleString()} + new orders`
-      : `${(m.rate * 100).toFixed(0)}%`;
-    payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} · ${rateNote} → **${money(commission)}**`);
+    commissionMap.set(mid, commission);
   }
 
-  if (!payLines.length) return null;
-
-  // Manager cuts — snapshot-based formula (same as getCommissionData)
+  // Manager cuts — snapshot-based formula (same as getCommissionData). Folded into
+  // each manager's own commission line below so the panel shows ONE total, not two.
   const SINCE_RESET_BARE = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
   const managersR = await db.execute(
     "SELECT p.discord_id, p.display_name, p.manager_override_rate, p.manager_cut_adjustment, p.manager_labour_snapshot FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
   );
-  const managerLines: string[] = [];
   let totalManagerCuts = 0;
   for (const row of managersR.rows) {
     const managerId    = String(row[0] ?? "");
+    const managerName  = String(row[1] ?? "Unknown");
     const manualBonus  = Number(row[3] ?? 0);
     const managerSnap  = Number(row[4] ?? 0);
     const overrideRate = Number(row[2] ?? 0.20);
@@ -141,14 +136,22 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
       ? manualBonus + crewAfterSnap * overrideRate
       : crewLabour * overrideRate;
     if (cut > 0) {
-      const rateLabel = manualBonus > 0
-        ? `set ${money(manualBonus)} + new crew orders`
-        : `${(overrideRate * 100).toFixed(0)}% of crew labour`;
-      const label = `**${String(row[1] ?? "")}** · ${rateLabel} → **${money(cut)}**`;
-      managerLines.push(label);
       totalManagerCuts += cut;
+      if (!mechanicMap.has(managerId)) {
+        mechanicMap.set(managerId, { name: managerName, rate: overrideRate, labour: 0, orders: 0, revenue: 0, hours: 0 });
+      }
+      commissionMap.set(managerId, (commissionMap.get(managerId) ?? 0) + cut);
     }
   }
+
+  const payLines: string[] = [];
+  for (const [mid, m] of mechanicMap) {
+    const total = commissionMap.get(mid) ?? 0;
+    const hrsNote = m.hours > 0 ? ` · ${m.hours.toFixed(1)}h` : "";
+    payLines.push(`**${m.name}** · ${m.orders} orders${hrsNote} → Total: **${money(total)}**`);
+  }
+
+  if (!payLines.length) return null;
 
   const totalToBill = grandCommission + totalManagerCuts;
 
@@ -163,12 +166,8 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
       "⚠️ This will **mark all orders as paid** and **reset weekly stats**."
     )
     .addFields(
-      { name: `🔩 Crew Commissions (${mechanicMap.size} people)`, value: payLines.join("\n") || "None", inline: false }
+      { name: `🔩 Crew Payouts (${mechanicMap.size} people)`, value: payLines.join("\n") || "None", inline: false }
     );
-
-  if (managerLines.length) {
-    embed.addFields({ name: "👔 Manager Cuts", value: managerLines.join("\n"), inline: false });
-  }
 
   embed.addFields(
     { name: "💰 Total to Bill Company", value: `**${money(totalToBill)}**`, inline: true },
@@ -270,9 +269,7 @@ export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder
     grandTotal += commission;
 
     const statusIcon  = payStatus === "paid" ? "💚" : "🔴";
-    const rateNote    = adj > 0 ? `set ${Math.round(adj).toLocaleString()}+` : `${(rate * 100).toFixed(0)}%`;
-    const cutNote     = managerCut > 0 ? ` + ${money(Math.round(managerCut))} crew cut` : "";
-    lines.push(`${statusIcon} **${name}** — ${weekOrders} orders — ${rateNote}${cutNote} → **${money(Math.round(commission))}**`);
+    lines.push(`${statusIcon} **${name}** — ${weekOrders} orders — Total: **${money(Math.round(commission))}**`);
   }
 
   // Chunk into fields to stay under Discord's 1024-char limit
@@ -412,7 +409,6 @@ export async function processPayall(
           WHERE o.status IN ('complete','approved') AND ${SINCE_RESET}`,
     args: []
   });
-  if (!ordersR.rows.length) return null;
 
   const mechanicMap = new Map<string, { name: string; rate: number; labour: number; orders: number; revenue: number; hours: number }>();
   for (const row of ordersR.rows) {
@@ -432,27 +428,30 @@ export async function processPayall(
   let totalRevenue    = 0;
   const { randomUUID } = await import("../lib/utils.js");
 
-  const adjustR = await db.execute(
-    "SELECT discord_id, commission_adjustment, commission_labour_snapshot FROM profiles"
+  // Pull ALL profile info in one shot — we need this to include crew who have
+  // manually-set pay (/setpay) or manager cuts but zero orders this period,
+  // as well as everyone else so they still get a "new week" message.
+  const allProfilesR = await db.execute(
+    "SELECT discord_id, display_name, commission_rate, hours_worked_this_week, commission_adjustment, commission_labour_snapshot, sales_channel_id FROM profiles"
   );
   const adjustMap = new Map<string, { adj: number; snapshot: number }>();
-  for (const row of adjustR.rows) {
-    adjustMap.set(String(row[0] ?? ""), {
-      adj:      Number(row[1] ?? 0),
-      snapshot: Number(row[2] ?? 0)
-    });
-  }
-
-  // Fetch sales channel IDs for notification
-  const salesChanR = await db.execute(
-    "SELECT discord_id, sales_channel_id FROM profiles"
-  );
   const salesChanMap = new Map<string, string | null>();
-  for (const row of salesChanR.rows) {
-    salesChanMap.set(String(row[0] ?? ""), row[1] ? String(row[1]) : null);
+  const profileMetaMap = new Map<string, { name: string; rate: number; hours: number }>();
+  for (const row of allProfilesR.rows) {
+    const id       = String(row[0] ?? "");
+    const name     = String(row[1] ?? "Unknown");
+    const rate     = Number(row[2] ?? 0.3);
+    const hours    = Number(row[3] ?? 0);
+    const adj      = Number(row[4] ?? 0);
+    const snapshot = Number(row[5] ?? 0);
+    const salesChan = row[6] ? String(row[6]) : null;
+    adjustMap.set(id, { adj, snapshot });
+    salesChanMap.set(id, salesChan);
+    profileMetaMap.set(id, { name, rate, hours });
   }
 
   const payoutResults: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
+  const processedIds = new Set<string>();
 
   for (const [mid, m] of mechanicMap) {
     const { adj = 0, snapshot = 0 } = adjustMap.get(mid) ?? {};
@@ -478,6 +477,31 @@ export async function processPayall(
       salesChanId: salesChanMap.get(mid) ?? null,
       rate: m.rate
     });
+    processedIds.add(mid);
+  }
+
+  // Crew with manually-set pay (/setpay) but zero orders this period still get paid.
+  for (const [id, { adj, snapshot }] of adjustMap) {
+    if (processedIds.has(id) || adj <= 0) continue;
+    const commission = adj; // no orders this period => labourAfterSetpay is 0
+    grandCommission += commission;
+    const meta = profileMetaMap.get(id) ?? { name: "Unknown", rate: 0.3, hours: 0 };
+    const payoutId = randomUUID();
+    await db.execute({
+      sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
+      args: [payoutId, id, ws, commission, 0, meta.hours, 0, paidById]
+    });
+    payoutResults.push({
+      mechanicId: id,
+      amount: commission,
+      managerCut: 0,
+      orders: 0,
+      hours: meta.hours,
+      name: meta.name,
+      salesChanId: salesChanMap.get(id) ?? null,
+      rate: meta.rate
+    });
+    processedIds.add(id);
   }
 
   // Compute manager cuts BEFORE marking orders paid and BEFORE resetting snapshots
@@ -503,8 +527,44 @@ export async function processPayall(
     totalManagerCuts += cut;
     // Attach manager cut to their payout record so the notification shows the full amount
     const pRecord = payoutResults.find(p => p.mechanicId === managerId);
-    if (pRecord) pRecord.managerCut = cut;
+    if (pRecord) {
+      pRecord.managerCut = cut;
+    } else if (cut > 0) {
+      // Manager has no orders/manual pay of their own but still earned a crew cut
+      const meta = profileMetaMap.get(managerId) ?? { name: "Unknown", rate: overrideRate, hours: 0 };
+      payoutResults.push({
+        mechanicId: managerId,
+        amount: 0,
+        managerCut: cut,
+        orders: 0,
+        hours: meta.hours,
+        name: meta.name,
+        salesChanId: salesChanMap.get(managerId) ?? null,
+        rate: meta.rate
+      });
+      processedIds.add(managerId);
+    }
   }
+
+  // Everyone else with a sales channel gets included too (at $0) purely so they
+  // still receive the "new week" announcement — just without a billing amount or ping.
+  for (const [id, salesChan] of salesChanMap) {
+    if (processedIds.has(id) || !salesChan) continue;
+    const meta = profileMetaMap.get(id) ?? { name: "Unknown", rate: 0.3, hours: 0 };
+    payoutResults.push({
+      mechanicId: id,
+      amount: 0,
+      managerCut: 0,
+      orders: 0,
+      hours: meta.hours,
+      name: meta.name,
+      salesChanId: salesChan,
+      rate: meta.rate
+    });
+    processedIds.add(id);
+  }
+
+  if (!payoutResults.length) return null;
 
   // Mark all unpaid complete orders as paid
   await db.execute({
@@ -523,18 +583,20 @@ export async function processPayall(
 
   // Log the payout event
   const { logEvent } = await import("../lib/eventLog.js");
+  const paidCount = payoutResults.filter(p => (p.amount + p.managerCut) > 0).length;
+
   logEvent({
     kind: "payout_processed",
     guildId: guild?.id,
     userId: paidById,
     amount: Math.round(grandCommission + totalManagerCuts),
-    detail: `${mechanicMap.size} crew, ${ordersR.rows.length} orders, week ${ws}`
+    detail: `${paidCount} crew paid, ${ordersR.rows.length} orders, week ${ws}`
   });
 
   return {
     grandCommission,
     totalRevenue,
-    mechanicCount: mechanicMap.size,
+    mechanicCount: paidCount,
     totalToBill: grandCommission + totalManagerCuts,
     payouts: payoutResults
   };

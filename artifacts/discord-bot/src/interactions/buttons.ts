@@ -1125,24 +1125,26 @@ export async function handleButton(interaction: ButtonInteraction) {
           const ch = await interaction.guild.channels.fetch(p.salesChanId).catch(() => null);
           if (!ch?.isTextBased()) { failed++; continue; }
 
-          // Pay notification
           const totalPay = p.amount + p.managerCut;
-          await (ch as any).send({
-            content:
-              `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `> 📋 **${p.orders} orders** completed this week\n` +
-              (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
-              `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
-              `> 💵 **Your commission this week: ${money(p.amount)}**\n` +
-              (p.managerCut > 0 ? `> 👔 **Manager cut: ${money(p.managerCut)}**\n` : "") +
-              (p.managerCut > 0 ? `> 🏆 **Total pay: ${money(totalPay)}**\n` : "") +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `**Bill the company: ${money(totalPay)}** 🏢\n` +
-              `Keep grinding, ${p.name}! 🏁`
-          });
 
-          // New Week announcement
+          if (totalPay > 0) {
+            // Owed something this week — ping them + show the billing amount
+            await (ch as any).send({
+              content:
+                `<@${p.mechanicId}>\n` +
+                `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `> 📋 **${p.orders} orders** completed this week\n` +
+                (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
+                `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+                `> 💵 **Total pay: ${money(totalPay)}**\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `**Bill the company: ${money(totalPay)}** 🏢\n` +
+                `Keep grinding, ${p.name}! 🏁`
+            });
+          }
+
+          // New Week announcement — everyone gets this, regardless of pay
           await (ch as any).send({
             content: "🗓️ **New pay week — let's get it!** 🏁"
           });
@@ -1164,10 +1166,13 @@ export async function handleButton(interaction: ButtonInteraction) {
         try {
           const ch = await interaction.guild.channels.fetch(payLogsChanId);
           if (ch?.isTextBased()) {
-            const payLines = payouts.map(p => {
-              const hrsNote = p.hours > 0 ? ` · ${p.hours.toFixed(1)}h` : "";
-              return `**${p.name}** · ${p.orders} orders${hrsNote} · ${(p.rate * 100).toFixed(0)}% → **${money(p.amount)}**`;
-            });
+            const payLines = payouts
+              .filter(p => (p.amount + p.managerCut) > 0)
+              .map(p => {
+                const hrsNote = p.hours > 0 ? ` · ${p.hours.toFixed(1)}h` : "";
+                const total = p.amount + p.managerCut;
+                return `**${p.name}** · ${p.orders} orders${hrsNote} → Total: **${money(total)}**`;
+              });
             const logEmbed = new EmbedBuilder()
               .setTitle("💸  PAYROLL PROCESSED — New Week Started")
               .setColor(0xffd700)
@@ -1179,7 +1184,6 @@ export async function handleButton(interaction: ButtonInteraction) {
               )
               .addFields(
                 { name: `🔩 Crew Paid (${mechanicCount})`,       value: payLines.join("\n") || "None", inline: false },
-                { name: "💰 Total Commission Out",                value: money(grandCommission),        inline: true  },
                 { name: "🏢 Total Billed to Company",            value: `**${money(totalToBill)}**`,   inline: true  }
               )
               .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
