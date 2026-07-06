@@ -716,95 +716,116 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Clear: confirm all ────────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "all") {
     await interaction.deferUpdate();
-    const callerRole = await detectUserRoleLevel(interaction);
-    if (!["manager", "owner"].includes(callerRole)) {
-      await interaction.editReply({ content: "❌ Managers only.", components: [] });
-      return;
-    }
-    const guildId = interaction.guildId ?? "";
-    // Archive complete orders
-    const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
-      args: [guildId]
-    });
-    // Delete draft orders entirely
-    const drafts = await db.execute({
-      sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
-      args: [guildId]
-    });
-    // Full pay-period reset: clear hours, snapshots, AND the manual commission
-    // adjustments set via /setpay. Without zeroing commission_adjustment the
-    // old fixed amount keeps accumulating on top of all new orders.
-    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending'");
-    // Use SQLite-compatible timestamp format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly
-    await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
-    const count = Number(r.rowsAffected ?? 0);
-    const draftCount = Number(drafts.rowsAffected ?? 0);
+    try {
+      const callerRole = await detectUserRoleLevel(interaction);
+      if (!["manager", "owner"].includes(callerRole)) {
+        await interaction.editReply({ content: "❌ Managers only.", components: [] });
+        return;
+      }
+      const guildId = interaction.guildId ?? "";
+      // Archive complete AND already-paid orders so nothing is left behind still
+      // counting toward week totals after a full clear.
+      const r = await db.execute({
+        sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
+        args: [guildId]
+      });
+      // Delete draft orders entirely
+      const drafts = await db.execute({
+        sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
+        args: [guildId]
+      });
+      // Full pay-period reset: clear hours, snapshots, AND the manual commission
+      // adjustments set via /setpay. Without zeroing commission_adjustment the
+      // old fixed amount keeps accumulating on top of all new orders.
+      await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending'");
+      // Use SQLite-compatible timestamp format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly
+      await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+      const count = Number(r.rowsAffected ?? 0);
+      const draftCount = Number(drafts.rowsAffected ?? 0);
 
-    // Refresh the pay log panel to reflect the cleared state immediately
-    if (interaction.guild) {
-      const { refreshPayLogPanel } = await import("../commands/payall.js");
-      refreshPayLogPanel(interaction.guild).catch(() => {});
-    }
+      // Refresh the pay log panel to reflect the cleared state immediately
+      if (interaction.guild) {
+        const { refreshPayLogPanel } = await import("../commands/payall.js");
+        refreshPayLogPanel(interaction.guild).catch(() => {});
+      }
 
-    const embed = new EmbedBuilder()
-      .setTitle("🗑️  WEEK CLEARED — ALL CREW")
-      .setColor(COLORS.warning)
-      .setDescription(
-        `Cleared **${count}** completed order(s) and **${draftCount}** draft(s) for all mechanics.\n\n` +
-        "**Stats reset:**\n" +
-        "• Orders ➜ **0**\n" +
-        "• Revenue ➜ **$0**\n" +
-        "• Commissions ➜ **$0**\n" +
-        "• Hours ➜ **0**\n\n" +
-        "*Completed orders are archived. Drafts were deleted. Use `/payall` to pay before clearing next time.*"
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-      .setTimestamp();
-    await interaction.editReply({ embeds: [embed], components: [] });
+      const embed = new EmbedBuilder()
+        .setTitle("🗑️  WEEK CLEARED — ALL CREW")
+        .setColor(COLORS.warning)
+        .setDescription(
+          `Cleared **${count}** completed order(s) and **${draftCount}** draft(s) for all mechanics.\n\n` +
+          "**Stats reset:**\n" +
+          "• Orders ➜ **0**\n" +
+          "• Revenue ➜ **$0**\n" +
+          "• Commissions ➜ **$0**\n" +
+          "• Hours ➜ **0**\n\n" +
+          "*Completed orders are archived. Drafts were deleted. Use `/payall` to pay before clearing next time.*"
+        )
+        .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+    } catch (err: any) {
+      console.error("[TDC] clear all error:", err);
+      try { await interaction.editReply({ content: `❌ Clear failed: ${err?.message ?? "Unknown error"}`, components: [] }); } catch { /* ignore */ }
+    }
     return;
   }
 
   // ── Clear: confirm player ─────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "player") {
     await interaction.deferUpdate();
-    const callerRole = await detectUserRoleLevel(interaction);
-    if (!["manager", "owner"].includes(callerRole)) {
-      await interaction.editReply({ content: "❌ Managers only.", components: [] });
-      return;
+    try {
+      const callerRole = await detectUserRoleLevel(interaction);
+      if (!["manager", "owner"].includes(callerRole)) {
+        await interaction.editReply({ content: "❌ Managers only.", components: [] });
+        return;
+      }
+      const mechId = rest.slice(1).join(":");
+      const guildId = interaction.guildId ?? "";
+      const profile = await getProfile(mechId);
+      // Archive complete AND already-paid orders so nothing is left behind still
+      // counting toward week totals after this player's clear.
+      const r = await db.execute({
+        sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
+        args: [mechId, guildId]
+      });
+      // Delete draft orders
+      const drafts = await db.execute({
+        sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
+        args: [mechId, guildId]
+      });
+      // Full reset: hours, snapshots, manual commission adjustments from /setpay,
+      // AND pay status — otherwise a previously-"paid" mechanic keeps showing
+      // paid/green in the pay log even though their commission is now $0.
+      await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending' WHERE discord_id = ?", args: [mechId] });
+      const count = Number(r.rowsAffected ?? 0);
+      const draftCount = Number(drafts.rowsAffected ?? 0);
+
+      // Refresh the pay log panel to reflect the cleared state immediately
+      if (interaction.guild) {
+        const { refreshPayLogPanel } = await import("../commands/payall.js");
+        refreshPayLogPanel(interaction.guild).catch(() => {});
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🗑️  PLAYER STATS CLEARED")
+        .setColor(COLORS.warning)
+        .setDescription(
+          `Cleared **${count}** order(s) and **${draftCount}** draft(s) for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
+          "**Stats reset:**\n" +
+          "• Orders ➜ **0**\n" +
+          "• Revenue ➜ **$0**\n" +
+          "• Commission ➜ **$0**\n" +
+          "• Hours ➜ **0**\n\n" +
+          "*Other mechanics' stats are unchanged.*"
+        )
+        .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+    } catch (err: any) {
+      console.error("[TDC] clear player error:", err);
+      try { await interaction.editReply({ content: `❌ Clear failed: ${err?.message ?? "Unknown error"}`, components: [] }); } catch { /* ignore */ }
     }
-    const mechId = rest.slice(1).join(":");
-    const guildId = interaction.guildId ?? "";
-    const profile = await getProfile(mechId);
-    // Archive complete orders
-    const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
-      args: [mechId, guildId]
-    });
-    // Delete draft orders
-    const drafts = await db.execute({
-      sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
-      args: [mechId, guildId]
-    });
-    // Full reset: hours, snapshots, AND manual commission adjustments from /setpay
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0 WHERE discord_id = ?", args: [mechId] });
-    const count = Number(r.rowsAffected ?? 0);
-    const draftCount = Number(drafts.rowsAffected ?? 0);
-    const embed = new EmbedBuilder()
-      .setTitle("🗑️  PLAYER STATS CLEARED")
-      .setColor(COLORS.warning)
-      .setDescription(
-        `Cleared **${count}** order(s) and **${draftCount}** draft(s) for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
-        "**Stats reset:**\n" +
-        "• Orders ➜ **0**\n" +
-        "• Revenue ➜ **$0**\n" +
-        "• Commission ➜ **$0**\n" +
-        "• Hours ➜ **0**\n\n" +
-        "*Other mechanics' stats are unchanged.*"
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-      .setTimestamp();
-    await interaction.editReply({ embeds: [embed], components: [] });
     return;
   }
 
@@ -1200,9 +1221,9 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.deferUpdate();
     const guildId = interaction.guildId ?? "";
 
-    // 1. Archive complete orders + delete drafts
+    // 1. Archive complete + paid orders, delete drafts
     const archived = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
+      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
       args: [guildId]
     });
     await db.execute({

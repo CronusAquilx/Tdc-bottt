@@ -236,9 +236,6 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
-  // Remove the hardcoded Ander account — no longer seeded on startup
-  await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
-  await db.execute({ sql: "DELETE FROM profiles WHERE discord_id = ?", args: ["1363222342800511058"] });
 
   // Close only sessions that have been open for more than 8 hours — these are genuinely stale
   // (bot was down for a long shift). Recent sessions survive quick restarts and deploys so
