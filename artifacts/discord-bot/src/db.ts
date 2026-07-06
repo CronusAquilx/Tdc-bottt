@@ -63,7 +63,7 @@ const TDC_CATALOG = JSON.stringify({
     { label: "Neon Back",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
     { label: "Neon Left",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
     { label: "Neon Right",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
-    { label: "Neon Color",          category: "Neon & Lighting", price: 500,   cost: 100,   labour: 400   },
+    { label: "Neon Color",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
     { label: "Xenon Lighting",      category: "Neon & Lighting", price: 2100,  cost: 1000,  labour: 1100  },
     // ── Extras ────────────────────────────────────────────────────────────
     { label: "Horns",               category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },

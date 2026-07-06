@@ -225,13 +225,37 @@ export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder
       .setTimestamp();
   }
 
+  // Manager cuts — same snapshot-based formula used in /payall, keyed by discord_id
+  // so we can fold each manager's crew cut into their pay log line + the grand total.
+  const SINCE_RESET_BARE = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  const managersR = await db.execute(
+    "SELECT p.discord_id, p.manager_override_rate, p.manager_cut_adjustment, p.manager_labour_snapshot FROM profiles p INNER JOIN user_roles ur ON p.discord_id = ur.discord_id WHERE ur.role IN ('manager','owner')"
+  );
+  const managerCutMap = new Map<string, number>();
+  for (const row of managersR.rows) {
+    const managerId    = String(row[0] ?? "");
+    const overrideRate = Number(row[1] ?? 0.20);
+    const manualBonus  = Number(row[2] ?? 0);
+    const managerSnap  = Number(row[3] ?? 0);
+    const crewLabourR = await db.execute({
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+      args: [managerId]
+    });
+    const crewLabour = Number(crewLabourR.rows[0]?.[0] ?? 0);
+    const crewAfterSnap = Math.max(0, crewLabour - managerSnap);
+    const cut = manualBonus > 0
+      ? manualBonus + crewAfterSnap * overrideRate
+      : crewLabour * overrideRate;
+    if (cut > 0) managerCutMap.set(managerId, cut);
+  }
+
   const lines: string[] = [];
   let grandTotal = 0;
 
   for (const row of r.rows) {
+    const discordId  = String(row[0] ?? "");
     const name       = String(row[1] ?? "Unknown");
     const rate       = Number(row[2] ?? 0.3);
-    const hours      = Number(row[3] ?? 0);
     const adj        = Number(row[4] ?? 0);
     const snapshot   = Number(row[5] ?? 0);
     const payStatus  = String(row[6] ?? "pending");
@@ -239,13 +263,16 @@ export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder
     const weekOrders = Number(row[8] ?? 0);
 
     const labourAfter  = Math.max(0, weekLabour - snapshot);
-    const commission   = adj > 0 ? adj + labourAfter * rate : weekLabour * rate;
-    grandTotal        += commission;
+    let commission      = adj > 0 ? adj + labourAfter * rate : weekLabour * rate;
+
+    const managerCut = managerCutMap.get(discordId) ?? 0;
+    commission += managerCut;
+    grandTotal += commission;
 
     const statusIcon  = payStatus === "paid" ? "💚" : "🔴";
-    const hrsNote     = hours > 0 ? ` · ${hours.toFixed(1)}h` : "";
     const rateNote    = adj > 0 ? `set ${Math.round(adj).toLocaleString()}+` : `${(rate * 100).toFixed(0)}%`;
-    lines.push(`${statusIcon} **${name}** — ${weekOrders} orders${hrsNote} — ${rateNote} → **${money(Math.round(commission))}**`);
+    const cutNote     = managerCut > 0 ? ` + ${money(Math.round(managerCut))} crew cut` : "";
+    lines.push(`${statusIcon} **${name}** — ${weekOrders} orders — ${rateNote}${cutNote} → **${money(Math.round(commission))}**`);
   }
 
   // Chunk into fields to stay under Discord's 1024-char limit
@@ -280,10 +307,14 @@ export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder
 function buildPayLogButtons(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:payroll:setpay").setLabel("💰 Set Individual Pay").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅 Pay All").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:payroll:lifetimeearnings").setLabel("🏆 Lifetime Earnings").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:payroll:markpaid").setLabel("💚 Mark Paid").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("admin:payroll:markunpaid").setLabel("🔴 Mark Pending").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("💸 Pay All").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("admin:payroll:newweek").setLabel("🔄 New Week").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:payroll:newweek").setLabel("🔄 Start New Week").setStyle(ButtonStyle.Primary),
     )
   ];
 }
