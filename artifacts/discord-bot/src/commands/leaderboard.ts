@@ -1,12 +1,11 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, TextChannel , MessageFlags} from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, TextChannel, MessageFlags } from "discord.js";
 import { db, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildLeaderboardEmbed } from "../lib/leaderboard.js";
-import { COLORS } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
   .setName("leaderboard")
-  .setDescription("Post the weekly leaderboard (manager+)");
+  .setDescription("Post or refresh the revenue leaderboard (manager+)");
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "manager"))) return;
@@ -29,25 +28,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   await postLeaderboard(ch as TextChannel);
-  await interaction.editReply({ content: `✅ Leaderboard posted to <#${ch.id}>!` });
+  await interaction.editReply({ content: `✅ Leaderboard refreshed in <#${ch.id}>!` });
 }
 
 export async function postLeaderboard(channel: TextChannel) {
-  // Use the same pay-period boundary as payroll/commission logic (order_number_reset_ts)
-  // so the leaderboard always matches what mechanics see in their pay panel.
-  const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  // All-time revenue — every completed/approved/paid order ever, no pay-period boundary.
+  // Sorted by customer revenue DESC so the board reflects money made for the shop.
   const r = await db.execute({
     sql: `SELECT p.discord_id, p.display_name,
-                 COUNT(o.id) as order_count,
-                 COALESCE(SUM(COALESCE(o.customer_total_override, o.total)), 0) as total_revenue,
-                 COALESCE(SUM(o.labour), 0) as total_labour,
-                 COALESCE(p.commission_rate, 0.3) as commission_rate
+                 COUNT(o.id) AS order_count,
+                 COALESCE(SUM(COALESCE(o.customer_total_override, o.total)), 0) AS total_revenue,
+                 COALESCE(SUM(o.labour), 0) AS total_labour,
+                 COALESCE(p.commission_rate, 0.3) AS commission_rate
           FROM profiles p
           JOIN orders o ON o.mechanic_id = p.discord_id
-          WHERE o.status IN ('complete','approved','paid') AND ${SINCE_RESET}
+          WHERE o.status IN ('complete','approved','paid')
           GROUP BY p.discord_id, p.display_name, p.commission_rate
           HAVING order_count > 0
-          ORDER BY total_labour DESC
+          ORDER BY total_revenue DESC
           LIMIT 15`,
     args: []
   });
@@ -63,11 +61,11 @@ export async function postLeaderboard(channel: TextChannel) {
 
   const embed = buildLeaderboardEmbed(entries, new Date());
 
-  // Try to find and update an existing leaderboard message
+  // Edit the existing pinned board if it exists, otherwise post fresh
   try {
-    const recent = await channel.messages.fetch({ limit: 20 });
+    const recent = await channel.messages.fetch({ limit: 25 });
     const existing = [...recent.values()].find(m =>
-      m.author.bot && m.embeds[0]?.title?.includes("LEADERBOARD")
+      m.author.bot && (m.embeds[0]?.title?.includes("LEADERBOARD") || m.embeds[0]?.title?.includes("REVENUE"))
     );
     if (existing) {
       await existing.edit({ embeds: [embed] });
@@ -75,5 +73,6 @@ export async function postLeaderboard(channel: TextChannel) {
     }
   } catch { /* fallthrough to send */ }
 
-  await channel.send({ embeds: [embed] });
+  const msg = await channel.send({ embeds: [embed] });
+  try { await msg.pin(); } catch { /* ignore — missing perms */ }
 }

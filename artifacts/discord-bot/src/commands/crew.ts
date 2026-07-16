@@ -54,6 +54,10 @@ export const data = new SlashCommandBuilder()
     s.setName("info")
       .setDescription("Full summary for a crew member (manager+)")
       .addUserOption(o => o.setName("user").setDescription("Crew member to look up (leave blank for yourself)").setRequired(false))
+  )
+  .addSubcommand(s =>
+    s.setName("sync")
+      .setDescription("Re-assign Discord roles to all crew members based on their DB role (manager+)")
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -264,6 +268,67 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     embed.setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
     await interaction.editReply({ embeds: [embed] });
+    return;
+  }
+
+  if (sub === "sync") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const guild = interaction.guild!;
+    const config = await getGuildConfig(guild.id);
+
+    const roleMap: Record<string, string[]> = {
+      owner:    config?.owner_role_id    ? [config.owner_role_id]    : [],
+      manager:  config?.manager_role_id  ? [config.manager_role_id]  : [],
+      trainer:  config?.trainer_role_id  ? [config.trainer_role_id]  : [],
+      mechanic: config?.mechanic_role_id ? [config.mechanic_role_id] : [],
+    };
+
+    const crewRows = await db.execute(
+      "SELECT ur.discord_id, ur.role, p.display_name FROM user_roles ur JOIN profiles p ON p.discord_id = ur.discord_id"
+    );
+
+    let synced = 0;
+    let failed = 0;
+    const skipped: string[] = [];
+
+    for (const row of crewRows.rows) {
+      const userId         = String(row[0] ?? "");
+      const role           = String(row[1] ?? "");
+      const displayName    = String(row[2] ?? userId);
+      const discordRoleIds = roleMap[role] ?? [];
+      if (!discordRoleIds.length) {
+        skipped.push(`${displayName} (no Discord role configured for ${role})`);
+        continue;
+      }
+      try {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (!member) { skipped.push(`${displayName} (not in server)`); continue; }
+        for (const rid of discordRoleIds) {
+          if (!member.roles.cache.has(rid)) {
+            await member.roles.add(rid, "Crew sync by manager");
+          }
+        }
+        synced++;
+      } catch { failed++; }
+    }
+
+    const syncEmbed = new EmbedBuilder()
+      .setTitle("🔄  CREW SYNC COMPLETE")
+      .setColor(COLORS.approved)
+      .setDescription(
+        `Scanned **${crewRows.rows.length}** crew members and re-applied their Discord roles.\n\n` +
+        `✅ **${synced}** synced successfully\n` +
+        (failed > 0 ? `❌ **${failed}** failed (bot may lack role permissions)\n` : "") +
+        (skipped.length > 0
+          ? `⚠️ **${skipped.length}** skipped:\n${skipped.map(s => `· ${s}`).join("\n")}`
+          : "")
+      )
+      .setFooter({ text: "Tokyo Drift Customs" })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [syncEmbed] });
     return;
   }
 }

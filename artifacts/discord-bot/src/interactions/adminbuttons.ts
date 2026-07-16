@@ -904,6 +904,9 @@ async function postChannelPanel(channel: TextChannel, chanType: string, guild?: 
     await postPayLogPanel(channel, guild);
   } else if (chanType === "lifetimeearnings") {
     await postLifetimeEarningsPanel(channel);
+  } else if (chanType === "leaderboard") {
+    const { postLeaderboard } = await import("../commands/leaderboard.js");
+    await postLeaderboard(channel);
   }
   // orders, jobs, logs, archive, clocklogch — no panel needed
 }
