@@ -262,6 +262,17 @@ export async function initDb() {
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
   await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });
 
+  // Force-flush the WAL into the main .db file right now so tdc.db is always
+  // up-to-date when git checkpoints run.  Without this, all writes since the last
+  // checkpoint live only in tdc.db-wal (which is gitignored) and are lost if the
+  // container is ever rebuilt from git.
+  try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+
+  // Schedule a WAL checkpoint every 3 minutes so the main file stays current.
+  setInterval(async () => {
+    try { await db.execute("PRAGMA wal_checkpoint(PASSIVE)"); } catch { /* ignore */ }
+  }, 3 * 60 * 1000);
+
   console.log("[TDC] Database initialized.");
 }
 
