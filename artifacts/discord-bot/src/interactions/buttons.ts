@@ -693,34 +693,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
-  // ── Delete Order: confirm ────────────────────────────────────────────────
-  if (ns === "deleteorder" && action === "confirm") {
-    if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferUpdate();
-    const [orderId, mechId] = rest;
-    const profile = await getProfile(mechId);
-    const r = await db.execute({ sql: "SELECT order_number FROM orders WHERE id = ?", args: [orderId] });
-    const orderNum = r.rows[0] ? String(r.rows[0][0]) : orderId;
-    await db.execute({ sql: "UPDATE orders SET status = 'voided' WHERE id = ?", args: [orderId] });
-    const doneEmbed = new EmbedBuilder()
-      .setTitle("🗑️  Order Voided")
-      .setColor(COLORS.warning)
-      .setDescription(
-        `**${orderNum}** has been voided and removed from commission.\n` +
-        `Mechanic: **${profile?.display_name ?? mechId}**\n\n` +
-        `The order is kept in the database for audit purposes but will not count toward any pay period.`
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-      .setTimestamp();
-    await interaction.editReply({ embeds: [doneEmbed], components: [] });
-    return;
-  }
-
-  if (ns === "deleteorder" && action === "cancel") {
-    await interaction.update({ content: "❌ Cancelled — order not voided.", embeds: [], components: [] });
-    return;
-  }
-
   // ── Order Pay: start (manager+ pay button on order embed) ─────────────────
   if (ns === "orderpay" && action === "start") {
     if (!(await requireRole(interaction, "manager"))) return;

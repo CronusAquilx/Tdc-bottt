@@ -68,7 +68,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         "`/order list` — View **all** orders across the shop",
         "`/crew add` — Add a new member to the crew",
         "`/crew remove` — Remove a crew member",
-        "`/crew list` — Full crew roster with stats"
+        "`/crew list` — Full crew roster with stats",
+        "`/setpay manager` — Change one manager's crew cut percentage"
       ].join("\n")
     });
   }

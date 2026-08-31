@@ -297,27 +297,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setFooter({ text: FOOTER });
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("payall:schedulenow").setLabel("📅  Schedule Pay Day").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("admin:payroll:resetperiod").setLabel("🔧  Fix Pay Period").setStyle(ButtonStyle.Secondary),
     );
     await interaction.editReply({ embeds: [embed], components: [row] });
-    return true;
-  }
-
-  // ── Payroll: Fix Pay Period (reset order_number_reset_ts) ─────────────────
-  if (section === "payroll" && action === "resetperiod") {
-    if (!(await requireRole(interaction, "manager"))) return true;
-    const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import("discord.js");
-    const modal = new ModalBuilder()
-      .setCustomId("admin:payroll:setperiod")
-      .setTitle("Fix Pay Period Start");
-    const field = new TextInputBuilder()
-      .setCustomId("perioddate")
-      .setLabel("Pay period start (YYYY-MM-DD)")
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder("e.g. 2026-06-23")
-      .setRequired(true);
-    modal.addComponents(new (await import("discord.js")).ActionRowBuilder<TextInputBuilder>().addComponents(field));
-    await interaction.showModal(modal);
     return true;
   }
 
