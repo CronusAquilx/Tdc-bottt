@@ -3,8 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
-  ChannelType, PermissionFlagsBits, TextChannel,
-} from "discord.js";
+  ChannelType, PermissionFlagsBits, TextChannel, MessageFlags} from "discord.js";
 import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
@@ -23,20 +22,20 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     if (ns === "setup" && action === "setrole") {
       const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
       const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
-      if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", ephemeral: true }); return; }
+      if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", flags: MessageFlags.Ephemeral }); return; }
       const roleIds = interaction.values;
-      if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", flags: MessageFlags.Ephemeral }); return; }
       await setGuildRoleMapping(interaction.guild.id, level, roleIds);
       const levelLabel = level.charAt(0).toUpperCase() + level.slice(1).replace(/_/g, " ");
       const mentions = roleIds.map(id => `<@&${id}>`).join(", ");
-      await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, ephemeral: true });
+      await interaction.reply({ content: `✅ **${levelLabel}** set to ${mentions}. Members with ${roleIds.length > 1 ? "any of these roles" : "this role"} can use ${level}-level commands.`, flags: MessageFlags.Ephemeral });
     }
 
     // admin:assignbyrole:pickrole — pick role → fetch members with that role → show multi-select
     if (ns === "admin" && action === "assignbyrole" && rest[0] === "pickrole") {
       if (!(await requireRole(interaction, "manager"))) return;
       const guild = interaction.guild;
-      if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", ephemeral: true }); return; }
+      if (!guild) { await interaction.reply({ content: "❌ Must be used in a server.", flags: MessageFlags.Ephemeral }); return; }
       await interaction.deferUpdate();
 
       const roleId = interaction.values[0];
@@ -162,6 +161,29 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const mechanicId = interaction.values[0];
       const guild = interaction.guild!;
 
+      if (type === "resend") {
+        await interaction.deferUpdate();
+        const profile = await getProfile(mechanicId);
+        if (!profile) {
+          await interaction.editReply({ content: "❌ That user isn't in the crew. Add them via `/crew add` first.", components: [] });
+          return;
+        }
+        if (!profile.sales_channel_id) {
+          await interaction.editReply({ content: `❌ **${profile.display_name}** doesn't have a sales channel set up yet.`, components: [] });
+          return;
+        }
+        try {
+          const ch = await guild.channels.fetch(profile.sales_channel_id);
+          if (!ch?.isTextBased()) throw new Error("Not a text channel");
+          const result = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+          const pinNote = result.pinned ? "" : "\n⚠️ Panel sent but **could not be pinned** — give the bot **Manage Messages** permission in that channel so mechanics can find it easily.";
+          await interaction.editReply({ content: `✅ Order panel re-posted to <#${profile.sales_channel_id}> for **${profile.display_name}**.${pinNote}`, embeds: [], components: [] });
+        } catch (err: any) {
+          await interaction.editReply({ content: `❌ Could not post panel — check bot permissions in <#${profile.sales_channel_id}>. ${err?.message ?? ""}`, embeds: [], components: [] });
+        }
+        return;
+      }
+
       if (type === "new") {
         await interaction.deferUpdate();
 
@@ -217,6 +239,59 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
         await interaction.update({ embeds: [embed], components: [chanRow] });
       }
+    }
+
+    // ── Admin: payroll — mark individual as paid / pending ───────────────────
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmarkpaid") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ User not found in crew.", embeds: [], components: [] });
+        return;
+      }
+      await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'paid' WHERE discord_id = ?", args: [memberId] });
+      await interaction.update({ content: `✅ **${profile.display_name}** marked as 💚 **paid** this week.`, embeds: [], components: [] });
+    }
+
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmarkunpaid") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ User not found in crew.", embeds: [], components: [] });
+        return;
+      }
+      await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'pending' WHERE discord_id = ?", args: [memberId] });
+      await interaction.update({ content: `✅ **${profile.display_name}** marked as 🔴 **pending** this week.`, embeds: [], components: [] });
+    }
+
+    // ── Admin: payroll — pick member to set individual pay ───────────────────
+    if (ns === "admin" && action === "payroll" && rest[0] === "pickmember") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const memberId = interaction.values[0];
+      const profile = await getProfile(memberId);
+      if (!profile) {
+        await interaction.update({ content: "❌ That user isn't in the crew. Add them via `/crew add` first.", embeds: [], components: [] });
+        return;
+      }
+      const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
+      const currentOverride = profile.commission_adjustment ?? 0;
+      const modal = new ModalBuilder()
+        .setCustomId(`admin:payroll:setpay:${memberId}`)
+        .setTitle(`Set Pay — ${profile.display_name}`);
+      modal.addComponents(
+        new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Commission $ amount (0 = use % calculation)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(currentOverride > 0 ? String(Math.round(currentOverride)) : "")
+            .setPlaceholder("e.g. 5000  (enter 0 to clear override)")
+        )
+      );
+      await interaction.showModal(modal);
     }
 
     // ── Admin: commission pick mechanic ─────────────────────────────────────
@@ -352,19 +427,24 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
       await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channelId, mechanicId] });
 
-      let panelPosted = true;
+      let panelPosted = false;
+      let panelPinned = false;
       try {
-        await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
-      } catch {
-        panelPosted = false;
+        const result = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+        panelPosted = true;
+        panelPinned = result.pinned;
+      } catch { /* ignore */ }
+
+      let msg = `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel.`;
+      if (!panelPosted) {
+        msg += `\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then use **Resend Panel** from the admin setup.`;
+      } else if (!panelPinned) {
+        msg += `\n✅ Order panel sent.\n⚠️ Could not pin it — give the bot **Manage Messages** permission in <#${channelId}> so mechanics can find it easily.`;
+      } else {
+        msg += ` Order panel posted and pinned.`;
       }
 
-      await interaction.editReply({
-        content: panelPosted
-          ? `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel. Order panel posted.`
-          : `✅ <#${channelId}> attached as **${profile.display_name}**'s sales channel.\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then run the setup again.`,
-        embeds: [], components: []
-      });
+      await interaction.editReply({ content: msg, embeds: [], components: [] });
     }
 
     // ── Category picker for new sales channel ─────────────────────────────────
@@ -424,10 +504,16 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       }
 
       await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-      await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+      let newPanelPinned = false;
+      try {
+        const r2 = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+        newPanelPinned = r2.pinned;
+      } catch { /* ignore */ }
 
       await interaction.editReply({
-        content: `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nThe order panel has been pinned.`,
+        content: newPanelPinned
+          ? `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nThe order panel has been pinned.`
+          : `✅ Sales channel created for **${profile.display_name}** in the selected category: <#${channel.id}>\nOrder panel sent — but give the bot **Manage Messages** permission in that channel so it can be pinned.`,
         embeds: [], components: []
       });
     }
@@ -496,7 +582,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const commData = await getCommissionData(interaction.user.id, guildId, updated.role_level);
+    const commData = await getCommissionData(updated.mechanic_id, guildId, updated.role_level);
     const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
@@ -528,13 +614,13 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catalog = JSON.parse(catalogStr ?? "{}");
     const items: { label: string; category: string; price: number; cost: number; labour: number }[] = catalog.items ?? [];
     const catItems = items.filter(i => i.category === category);
-    if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, ephemeral: true }); return; }
+    if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, flags: MessageFlags.Ephemeral }); return; }
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
     if (!r.rows[0]) return;
     const order = rowToOrder(r.rows[0]);
     const guildId2 = interaction.guildId ?? "";
-    const commData2 = await getCommissionData(interaction.user.id, guildId2, order.role_level);
+    const commData2 = await getCommissionData(order.mechanic_id, guildId2, order.role_level);
     const crewCutInfo2 = ["trainer","manager","owner"].includes(order.role_level)
       ? { amount: commData2.crewCut, rate: commData2.crewCutRate, label: commData2.crewCutLabel }
       : undefined;
@@ -592,7 +678,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     }).filter(Boolean);
 
     if (!newItems.length) {
-      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", ephemeral: true });
+      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -612,7 +698,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const updatedR2 = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const updated = rowToOrder(updatedR2.rows[0]);
     const guildId3 = interaction.guildId ?? "";
-    const commData3 = await getCommissionData(interaction.user.id, guildId3, updated.role_level);
+    const commData3 = await getCommissionData(updated.mechanic_id, guildId3, updated.role_level);
     const crewCutInfo3 = ["trainer","manager","owner"].includes(updated.role_level)
       ? { amount: commData3.crewCut, rate: commData3.crewCutRate, label: commData3.crewCutLabel }
       : undefined;

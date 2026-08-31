@@ -3,15 +3,251 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   EmbedBuilder
-} from "discord.js";
-import { db, getProfile, getGuildConfig, getSetting, rowToOrder } from "../db.js";
+, MessageFlags} from "discord.js";
+import { db, getProfile, getGuildConfig, getSetting, rowToOrder, nextOrderNumber } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
-import { buildDraftEmbed, buildJobEmbed, COLORS, money } from "../lib/embeds.js";
+import { buildDraftEmbed, buildJobEmbed, buildOrderEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
+import { randomUUID } from "../lib/utils.js";
+import { logEvent } from "../lib/eventLog.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
+
+  // ── New Order: customer name modal → create draft and show category selector ─
+  if (ns === "order" && action === "startorder") {
+    const customerName = interaction.fields.getTextInputValue("customer_name").trim();
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!(await requireRole(interaction, "mechanic"))) return;
+
+    const clickerId = interaction.user.id;
+    const guildId   = interaction.guildId ?? "";
+    const clickerRole = await detectUserRoleLevel(interaction);
+    const isManager   = clickerRole === "manager" || clickerRole === "owner";
+
+    let targetMechanicId  = clickerId;
+    let targetDisplayName: string | undefined;
+
+    if (isManager) {
+      const clickerProfile = await getProfile(clickerId);
+      if (interaction.channelId && interaction.channelId !== clickerProfile?.sales_channel_id) {
+        const ownerRow = await db.execute({
+          sql: "SELECT discord_id, display_name FROM profiles WHERE sales_channel_id = ? LIMIT 1",
+          args: [interaction.channelId]
+        });
+        if (ownerRow.rows[0]) {
+          targetMechanicId  = String(ownerRow.rows[0][0] ?? clickerId);
+          targetDisplayName = String(ownerRow.rows[0][1] ?? "");
+        }
+      }
+    }
+
+    // Check clock-in state (required for mechanics and for managers acting as themselves)
+    if (!isManager || targetMechanicId === clickerId) {
+      const active = await db.execute({
+        sql: "SELECT id FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+        args: [clickerId]
+      });
+      if (!active.rows[0]) {
+        // Store customer name so clockin:then:order can apply it after clocking in
+        await db.execute({
+          sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+          args: [`pending_customer_name_${clickerId}`, customerName]
+        });
+        const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId("clockin:then:order").setLabel("🟢  Clock In & Start Order").setStyle(ButtonStyle.Success)
+        );
+        await interaction.editReply({ embeds: [buildClockInPromptEmbed()], components: [clockRow] });
+        return;
+      }
+    }
+
+    const roleLevel = targetMechanicId === clickerId ? clickerRole : "mechanic";
+
+    // Clean up stale drafts from before the last reset
+    const resetTs = await getSetting("order_number_reset_ts");
+    if (resetTs) {
+      await db.execute({
+        sql: `DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft'
+              AND (guild_id = ? OR guild_id = '')
+              AND datetime(COALESCE(created_at, '2000-01-01')) < datetime(?)`,
+        args: [targetMechanicId, guildId, resetTs]
+      });
+    }
+
+    // Resume existing draft or create a new one
+    let orderId: string;
+    const existingDraftR = await db.execute({
+      sql: `SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft'
+            AND (guild_id = ? OR guild_id = '')
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [targetMechanicId, guildId]
+    });
+
+    if (existingDraftR.rows[0]) {
+      orderId = String(existingDraftR.rows[0][0]);
+      await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [customerName, orderId] });
+    } else {
+      orderId = randomUUID();
+      let orderNumber = await nextOrderNumber();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await db.execute({
+            sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level, customer_name) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?, ?)",
+            args: [orderId, orderNumber, targetMechanicId, guildId, roleLevel, customerName]
+          });
+          break;
+        } catch (err: any) {
+          if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+            orderNumber = await nextOrderNumber();
+            continue;
+          }
+          throw err;
+        }
+      }
+      logEvent({ kind: "order_created", guildId, userId: targetMechanicId, userName: targetDisplayName ?? interaction.user.username, orderId, orderNumber });
+    }
+
+    const [catalogStr, draft] = await Promise.all([
+      getSetting("parts_catalog"),
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] }).then(r => rowToOrder(r.rows[0]))
+    ]);
+    const commData = await getCommissionData(targetMechanicId, guildId, roleLevel);
+    let catalog: any = {};
+    try { catalog = JSON.parse(catalogStr ?? "{}"); } catch { /* use empty */ }
+    const categories: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0 ? catalog.categories : [];
+
+    if (categories.length === 0) {
+      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
+      return;
+    }
+
+    const catSelect = new StringSelectMenuBuilder()
+      .setCustomId(`order:selectcategory:${orderId}`)
+      .setPlaceholder("Pick a service category...")
+      .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
+
+    const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(roleLevel)
+      ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel } : undefined;
+
+    const headerNote = (isManager && targetMechanicId !== clickerId)
+      ? `> 📋 **On behalf of ${targetDisplayName ?? `<@${targetMechanicId}>`}**  ·  👤 Customer: **${customerName}**`
+      : `> 👤 **Customer:** ${customerName}`;
+
+    await interaction.editReply({
+      content: headerNote,
+      embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        ...mainDraftButtonRows(orderId)
+      ]
+    });
+    return;
+  }
+
+  // ── Set customer name on existing draft then complete it ───────────────────
+  if (ns === "order" && action === "setcustomer") {
+    const orderId    = extra;
+    const custName   = interaction.fields.getTextInputValue("customer_name").trim();
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!(await requireRole(interaction, "mechanic"))) return;
+
+    await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [custName, orderId] });
+
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
+    const order = rowToOrder(r.rows[0]);
+
+    if (!order.items.length) {
+      await interaction.editReply({ content: "❌ Add at least one service before completing the order." });
+      return;
+    }
+
+    const mechanicId      = order.mechanic_id;
+    const mechanicRoleLevel = order.role_level ?? "mechanic";
+    const guildId         = interaction.guildId ?? "";
+
+    const [profile, prevCommData] = await Promise.all([
+      getProfile(mechanicId),
+      getCommissionData(mechanicId, guildId, mechanicRoleLevel)
+    ]);
+
+    await db.execute({
+      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
+      args: [orderId]
+    });
+
+    const ur       = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
+    const completed = rowToOrder(ur.rows[0]);
+    const thisOrderCut       = Math.round(completed.labour * prevCommData.rate);
+    const finalWeekCommission = prevCommData.weekCommission + thisOrderCut;
+
+    const crewCutInfo = prevCommData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)
+      ? { amount: prevCommData.crewCut, rate: prevCommData.crewCutRate, label: prevCommData.crewCutLabel } : undefined;
+
+    const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", finalWeekCommission, prevCommData.rate, crewCutInfo);
+
+    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`orderpay:start:${mechanicId}`).setLabel("💸  Pay").setStyle(ButtonStyle.Primary)
+    );
+
+    let postedTo = "";
+    if (interaction.guild && profile?.sales_channel_id) {
+      try {
+        const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
+        if (ch?.isTextBased()) {
+          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+          postedTo = profile.sales_channel_id;
+          await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (interaction.guild) {
+      try {
+        const gConfig = await getGuildConfig(guildId);
+        const logChanId = gConfig?.orders_channel_id ?? gConfig?.log_channel_id;
+        if (logChanId && logChanId !== profile?.sales_channel_id) {
+          const logCh = await interaction.guild.channels.fetch(logChanId).catch(() => null);
+          if (logCh?.isTextBased()) await (logCh as any).send({ embeds: [embed] });
+        }
+      } catch { /* ignore */ }
+    }
+
+    logEvent({ kind: "order_completed", guildId, userId: mechanicId, orderId, orderNumber: completed.order_number, amount: Math.round(completed.labour), detail: `total=${completed.total} parts=${completed.parts_cost}` });
+
+    // Fire-and-forget: refresh the pay log panel so it reflects this order immediately
+    if (interaction.guild) {
+      import("../commands/payall.js")
+        .then(m => m.refreshPayLogPanel(interaction.guild!))
+        .catch(() => {});
+    }
+
+    // Fire-and-forget: refresh leaderboard channel
+    if (interaction.guild) {
+      const guildSnap = interaction.guild;
+      getGuildConfig(guildId).then(async cfg => {
+        if (!cfg?.leaderboard_channel_id) return;
+        const ch = await guildSnap.channels.fetch(cfg.leaderboard_channel_id).catch(() => null);
+        if (ch?.isTextBased()) {
+          const { postLeaderboard } = await import("../commands/leaderboard.js");
+          postLeaderboard(ch as any).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
+    await interaction.editReply({
+      content: postedTo
+        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
+        : `✅ **${completed.order_number}** complete!\n*Set up a sales channel to auto-post orders.*`,
+      embeds: [embed],
+      components: []
+    });
+    return;
+  }
 
   // Helper: rebuild category select + main draft buttons with commission info
   async function refreshDraftView(ordId: string) {
@@ -21,9 +257,12 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     ]);
     const order = rowToOrder(r.rows[0]);
     const guildId = interaction.guildId ?? "";
-    const currentRole = await detectUserRoleLevel(interaction);
-    const commData = await getCommissionData(interaction.user.id, guildId, currentRole);
-    const crewCutInfo = ["trainer","manager","owner"].includes(currentRole)
+    // Use the order's mechanic_id (not the clicker) so on-behalf edits show the
+    // correct commission for the assigned mechanic, not the manager's own rate.
+    const mechanicId   = order.mechanic_id ?? interaction.user.id;
+    const orderRole    = (order as any).role_level ?? "mechanic";
+    const commData = await getCommissionData(mechanicId, guildId, orderRole);
+    const crewCutInfo = ["trainer","manager","owner"].includes(orderRole)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
       : undefined;
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -37,7 +276,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Edit Labour ────────────────────────────────────────────────────────────
   if (ns === "order" && action === "setlabour") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const labourStr = interaction.fields.getTextInputValue("labour").replace(/[$,]/g, "");
     const labour = parseFloat(labourStr);
     if (isNaN(labour) || labour < 0) {
@@ -61,9 +300,54 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     return;
   }
 
+  // ── Set Customer Total ──────────────────────────────────────────────────────
+  if (ns === "order" && action === "applytotal") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const raw = interaction.fields.getTextInputValue("amount").replace(/[$,\s]/g, "");
+    const amount = parseFloat(raw);
+    if (isNaN(amount) || amount < 0) {
+      await interaction.editReply({ content: "❌ Invalid amount — enter a number like `210000` or `0` to reset." });
+      return;
+    }
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
+    if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
+
+    if (amount === 0) {
+      // Reset: restore total to parts_cost + labour, clear override marker
+      await db.execute({
+        sql: "UPDATE orders SET customer_total_override = NULL, total = parts_cost + labour WHERE id = ?",
+        args: [extra]
+      });
+    } else {
+      // Set custom total: adjust labour so it absorbs the difference (commission recalculates naturally)
+      await db.execute({
+        sql: `UPDATE orders
+              SET customer_total_override = ?,
+                  total = ?,
+                  labour = MAX(0, ? - parts_cost)
+              WHERE id = ?`,
+        args: [amount, amount, amount, extra]
+      });
+    }
+
+    const { order: updated, weekCommission, rate, crewCutInfo: cciT, catSelect } = await refreshDraftView(extra);
+    const resetNote = amount === 0
+      ? "\n✅ Total reset to calculated value."
+      : `\n✅ Customer total set to **$${amount.toLocaleString("en-US")}** — labour adjusted, commission updated.`;
+    await interaction.editReply({
+      content: resetNote,
+      embeds: [buildDraftEmbed(updated, weekCommission, rate, cciT)],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
+        ...mainDraftButtonRows(extra)
+      ]
+    });
+    return;
+  }
+
   // ── Discount ────────────────────────────────────────────────────────────────
   if (ns === "order" && action === "applydiscount") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const pctStr = interaction.fields.getTextInputValue("percent").replace(/[%\s]/g, "");
     const pct = parseFloat(pctStr);
     if (isNaN(pct) || pct < 1 || pct > 100) {
@@ -113,7 +397,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
   // ── Body Parts ──────────────────────────────────────────────────────────────
   if (ns === "order" && action === "addextras") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const qtyStr = interaction.fields.getTextInputValue("quantity").trim();
     const qty = parseInt(qtyStr, 10);
     if (isNaN(qty) || qty <= 0) {
@@ -125,10 +409,11 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Order not found." }); return; }
     const order = rowToOrder(r.rows[0]);
 
-    const extrasPrice = qty * 500;
+    const extrasPrice = qty * 2000;
     // Remove existing body parts line if present, add fresh
     const items: any[] = (order.items ?? []).filter((i: any) => i.category !== "__extras__");
-    items.push({ label: `Body Parts ×${qty}`, price: extrasPrice, cost: 0, labour: extrasPrice, category: "__extras__" });
+    // All $2K per part is all-in (parts + labour): split cost=$500, labour=$1500
+    items.push({ label: `Body Parts ×${qty}`, price: extrasPrice, cost: qty * 500, labour: qty * 1500, category: "__extras__" });
 
     const newPartsCost = items.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
     const newLabour    = items.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
@@ -150,9 +435,49 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     return;
   }
 
+  // ── Admin: payroll set individual pay ─────────────────────────────────────
+  if (ns === "admin" && action === "payroll" && extra.startsWith("setpay:")) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!(await requireRole(interaction, "manager"))) return;
+    const memberId = extra.replace("setpay:", "");
+    const amountStr = interaction.fields.getTextInputValue("amount").replace(/[$,\s]/g, "");
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount) || amount < 0) {
+      await interaction.editReply({ content: "❌ Invalid amount — enter a dollar value like `5000` or `0` to clear." });
+      return;
+    }
+    const profile = await getProfile(memberId);
+    if (!profile) {
+      await interaction.editReply({ content: "❌ User not found in crew." });
+      return;
+    }
+    if (amount === 0) {
+      // Clear — reset adjustment and snapshot
+      await db.execute({
+        sql: "UPDATE profiles SET commission_adjustment = 0, commission_labour_snapshot = 0 WHERE discord_id = ?",
+        args: [memberId]
+      });
+      await interaction.editReply({ content: `✅ Cleared commission for **${profile.display_name}** — back to % calculation.` });
+    } else {
+      // Snapshot current labour so new orders add on top of the set amount
+      const SINCE_RESET = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+      const snapR = await db.execute({
+        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET}`,
+        args: [memberId]
+      });
+      const labourSnapshot = Number(snapR.rows[0]?.[0] ?? 0);
+      await db.execute({
+        sql: "UPDATE profiles SET commission_adjustment = ?, commission_labour_snapshot = ? WHERE discord_id = ?",
+        args: [amount, labourSnapshot, memberId]
+      });
+      await interaction.editReply({ content: `✅ Set **${profile.display_name}**'s commission to **$${Math.round(amount).toLocaleString()}** — new orders will add on top.` });
+    }
+    return;
+  }
+
   // ── Job apply modal ────────────────────────────────────────────────────────
   if (ns === "job" && action === "applymodal") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const jobId = extra;
     const message = interaction.fields.getTextInputValue("message");
     const experience = interaction.fields.getTextInputValue("experience");

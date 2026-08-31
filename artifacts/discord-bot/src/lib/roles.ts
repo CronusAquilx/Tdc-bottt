@@ -2,7 +2,7 @@ import {
   ChatInputCommandInteraction, ButtonInteraction,
   ModalSubmitInteraction, AnySelectMenuInteraction,
   PermissionFlagsBits
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { hasRole as dbHasRole, getProfile, getUserRole as dbGetUserRole, getGuildConfig, splitRoleIds } from "../db.js";
 
 type AnyInteraction =
@@ -107,7 +107,7 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
   if (!interaction.guild) {
     try {
       if (!interaction.replied && !(interaction as any).deferred) {
-        await (interaction as any).reply({ content: "❌ This can only be used in a server.", ephemeral: true });
+        await (interaction as any).reply({ content: "❌ This can only be used in a server.", flags: MessageFlags.Ephemeral });
       }
     } catch { /* ignore */ }
     return false;
@@ -133,9 +133,9 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
 
   try {
     if (!interaction.replied && !(interaction as any).deferred) {
-      await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+      await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, flags: MessageFlags.Ephemeral });
     } else if ((interaction as any).deferred) {
-      await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, ephemeral: true });
+      await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, flags: MessageFlags.Ephemeral });
     }
   } catch { /* ignore */ }
   return false;

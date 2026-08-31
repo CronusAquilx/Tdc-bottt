@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildLoaEmbed, COLORS } from "../lib/embeds.js";
@@ -75,7 +75,7 @@ export async function showLoaModal(interaction: ButtonInteraction) {
 // ── Handle LOA modal submission ────────────────────────────────────────────────
 export async function handleLoaModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   if (interaction.customId !== "loa:submit") return false;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = interaction.guild!;
   const reason      = interaction.fields.getTextInputValue("reason");

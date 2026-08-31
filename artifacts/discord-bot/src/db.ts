@@ -23,8 +23,13 @@ async function safeAlter(sql: string) {
 }
 
 const TDC_CATALOG = JSON.stringify({
-  categories: ["Performance", "Repair", "Visual & Body", "Neon & Lighting", "Extras"],
+  categories: ["Vehicle Packages", "Performance", "Repair", "Visual & Body", "Neon & Lighting", "Extras"],
   items: [
+    // ── Vehicle Packages ──────────────────────────────────────────────────
+    { label: "Bike Performance",             category: "Vehicle Packages", price: 145000, cost: 25000, labour: 120000 },
+    { label: "Bike Full Custom + Cosmetics", category: "Vehicle Packages", price: 180000, cost: 20000, labour: 160000 },
+    { label: "Car Performance",              category: "Vehicle Packages", price: 175000, cost: 30000, labour: 145000 },
+    { label: "Car Full Custom + Cosmetics",  category: "Vehicle Packages", price: 210000, cost: 25000, labour: 185000 },
     // ── Performance (Brakes, Engine, Suspension, Transmission, Turbo) ─────
     { label: "Brakes 1",            category: "Performance",     price: 8100,  cost: 2500,  labour: 5600  },
     { label: "Brakes 2",            category: "Performance",     price: 12500, cost: 5000,  labour: 7500  },
@@ -53,15 +58,20 @@ const TDC_CATALOG = JSON.stringify({
     { label: "Respray Wheels",      category: "Visual & Body",   price: 11500, cost: 1000,  labour: 10500 },
     { label: "Pearlescent",         category: "Visual & Body",   price: 11500, cost: 1000,  labour: 10500 },
     // ── Neon & Lighting ───────────────────────────────────────────────────
-    { label: "Neon Kit",            category: "Neon & Lighting", price: 4000,  cost: 1000,  labour: 3000  },
-    { label: "Tire Smoke",          category: "Neon & Lighting", price: 4000,  cost: 1000,  labour: 3000  },
-    { label: "Window Tinting",      category: "Neon & Lighting", price: 2100,  cost: 1000,  labour: 1100  },
+    // Each neon side is sold individually; Neon Color is a separate colour-change charge
+    { label: "Neon Front",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Back",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Left",           category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Right",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
+    { label: "Neon Color",          category: "Neon & Lighting", price: 1000,  cost: 250,   labour: 750   },
     { label: "Xenon Lighting",      category: "Neon & Lighting", price: 2100,  cost: 1000,  labour: 1100  },
     // ── Extras ────────────────────────────────────────────────────────────
     { label: "Horns",               category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
     { label: "Hydraulics",          category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
     { label: "Plate Style",         category: "Extras",          price: 1600,  cost: 500,   labour: 1100  },
-    { label: "Wheels",              category: "Extras",          price: 3900,  cost: 500,   labour: 3400  }
+    { label: "Wheels",              category: "Extras",          price: 3900,  cost: 500,   labour: 3400  },
+    { label: "Tire Smoke",          category: "Extras",          price: 4000,  cost: 1000,  labour: 3000  },
+    { label: "Window Tinting",      category: "Extras",          price: 2100,  cost: 1000,  labour: 1100  },
   ]
 });
 
@@ -216,20 +226,52 @@ export async function initDb() {
   await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_crew_rate REAL DEFAULT 0.10");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_crew_rate REAL DEFAULT 0.20");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN clocklog_channel_id TEXT");
-  // Ensure the owner/manager has manager role in the DB so they always get manager cut + admin access
-  await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: ["1363222342800511058"] });
-  await db.execute({ sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'manager')", args: ["1363222342800511058"] });
-  // Seed their commission rate at 40% (upsert so display_name is preserved if profile exists)
+  await safeAlter("ALTER TABLE profiles ADD COLUMN commission_adjustment REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN manager_cut_adjustment REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN commission_labour_snapshot REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN manager_labour_snapshot REAL DEFAULT 0");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_msg_id TEXT");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN warn_chan_id TEXT");
+  await safeAlter("ALTER TABLE orders ADD COLUMN customer_name TEXT NOT NULL DEFAULT ''");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
+  await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
+
+  // Close only sessions that have been open for more than 8 hours — these are genuinely stale
+  // (bot was down for a long shift). Recent sessions survive quick restarts and deploys so
+  // mechanics who are actively clocked in don't get kicked out unexpectedly.
   await db.execute({
-    sql: `INSERT INTO profiles (discord_id, display_name, commission_rate)
-          VALUES (?, 'Manager', 0.4)
-          ON CONFLICT(discord_id) DO UPDATE SET commission_rate = 0.4`,
-    args: ["1363222342800511058"]
+    sql: `UPDATE timeclock
+          SET clock_out_time = datetime('now'),
+              duration_minutes = ROUND((strftime('%s','now') - strftime('%s', REPLACE(clock_in_time,' ','T') || 'Z')) / 60.0, 2),
+              status = 'approved',
+              warned_at = NULL, stayed_in_at = NULL
+          WHERE clock_out_time IS NULL
+          AND datetime(COALESCE(clock_in_time, '2000-01-01')) < datetime('now', '-8 hours')`,
+    args: []
+  });
+  // Only mark offline mechanics whose session was just closed (not those still clocked in)
+  await db.execute({
+    sql: `UPDATE profiles SET status = 'offline'
+          WHERE status IN ('online','on_break')
+          AND discord_id NOT IN (SELECT DISTINCT mechanic_id FROM timeclock WHERE clock_out_time IS NULL)`,
+    args: []
   });
 
   // Seed / update catalog
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
   await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });
+
+  // Force-flush the WAL into the main .db file right now so tdc.db is always
+  // up-to-date when git checkpoints run.  Without this, all writes since the last
+  // checkpoint live only in tdc.db-wal (which is gitignored) and are lost if the
+  // container is ever rebuilt from git.
+  try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+
+  // Schedule a WAL checkpoint every 3 minutes so the main file stays current.
+  setInterval(async () => {
+    try { await db.execute("PRAGMA wal_checkpoint(PASSIVE)"); } catch { /* ignore */ }
+  }, 3 * 60 * 1000);
 
   console.log("[TDC] Database initialized.");
 }
@@ -266,38 +308,40 @@ export async function getGuildConfig(guildId: string) {
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
-                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id
+                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id,
+                 lifetime_earnings_channel_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
-    guild_id:                String(row[0]  ?? ""),
-    orders_channel_id:       row[1]  ? String(row[1])  : null,
-    jobs_channel_id:         row[2]  ? String(row[2])  : null,
-    log_channel_id:          row[3]  ? String(row[3])  : null,
-    archive_channel_id:      row[4]  ? String(row[4])  : null,
-    owner_role_id:           row[5]  ? String(row[5])  : null,
-    manager_role_id:         row[6]  ? String(row[6])  : null,
-    trainer_role_id:         row[7]  ? String(row[7])  : null,
-    mechanic_role_id:        row[8]  ? String(row[8])  : null,
-    timeclock_channel_id:    row[9]  ? String(row[9])  : null,
-    loa_channel_id:          row[10] ? String(row[10]) : null,
-    raffle_channel_id:       row[11] ? String(row[11]) : null,
-    leaderboard_channel_id:  row[12] ? String(row[12]) : null,
-    training_channel_id:     row[13] ? String(row[13]) : null,
-    needs_training_role_id:  row[14] ? String(row[14]) : null,
-    payday_channel_id:       row[15] ? String(row[15]) : null,
-    trainer_crew_rate:       row[16] != null ? Number(row[16]) : 0.10,
-    manager_crew_rate:       row[17] != null ? Number(row[17]) : 0.20,
-    clocklog_channel_id:     row[18] ? String(row[18]) : null,
+    guild_id:                      String(row[0]  ?? ""),
+    orders_channel_id:             row[1]  ? String(row[1])  : null,
+    jobs_channel_id:               row[2]  ? String(row[2])  : null,
+    log_channel_id:                row[3]  ? String(row[3])  : null,
+    archive_channel_id:            row[4]  ? String(row[4])  : null,
+    owner_role_id:                 row[5]  ? String(row[5])  : null,
+    manager_role_id:               row[6]  ? String(row[6])  : null,
+    trainer_role_id:               row[7]  ? String(row[7])  : null,
+    mechanic_role_id:              row[8]  ? String(row[8])  : null,
+    timeclock_channel_id:          row[9]  ? String(row[9])  : null,
+    loa_channel_id:                row[10] ? String(row[10]) : null,
+    raffle_channel_id:             row[11] ? String(row[11]) : null,
+    leaderboard_channel_id:        row[12] ? String(row[12]) : null,
+    training_channel_id:           row[13] ? String(row[13]) : null,
+    needs_training_role_id:        row[14] ? String(row[14]) : null,
+    payday_channel_id:             row[15] ? String(row[15]) : null,
+    trainer_crew_rate:             row[16] != null ? Number(row[16]) : 0.10,
+    manager_crew_rate:             row[17] != null ? Number(row[17]) : 0.20,
+    clocklog_channel_id:           row[18] ? String(row[18]) : null,
+    lifetime_earnings_channel_id:  row[19] ? String(row[19]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id" | "lifetime_earnings_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
@@ -339,40 +383,66 @@ export function splitRoleIds(s: string | null | undefined): string[] {
 }
 
 export async function nextOrderNumber(): Promise<string> {
-  // Respect weekly reset — only count orders created after the last payday reset
-  const resetR = await db.execute("SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'");
-  const resetTs = resetR.rows[0] ? String(resetR.rows[0][0]) : null;
+  // Ensure the sequence row exists
+  await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('order_seq', '0')");
 
-  let r;
-  if (resetTs) {
-    r = await db.execute({
-      sql: "SELECT order_number FROM orders WHERE created_at >= ? ORDER BY rowid DESC LIMIT 1",
-      args: [resetTs]
-    });
-  } else {
-    r = await db.execute("SELECT order_number FROM orders ORDER BY rowid DESC LIMIT 1");
-  }
+  // Sync the counter up to the highest order number already in the table.
+  // This self-heals if the counter ever falls behind (e.g. after a DB restore
+  // or if orders were inserted via a different path).
+  await db.execute(
+    `UPDATE app_settings
+     SET value = CAST(
+       MAX(
+         CAST(value AS INTEGER),
+         COALESCE(
+           (SELECT MAX(CAST(SUBSTR(order_number, 5) AS INTEGER))
+            FROM orders
+            WHERE order_number LIKE 'TDC-%'
+              AND LENGTH(order_number) >= 8),
+           0
+         )
+       ) AS TEXT
+     )
+     WHERE key = 'order_seq'`
+  );
 
-  if (!r.rows[0]) return "TDC-0001";
-  const num = parseInt(String(r.rows[0][0]).replace("TDC-", ""), 10) + 1;
+  // Atomically increment and read the new value
+  const results = await db.batch([
+    {
+      sql: "UPDATE app_settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'order_seq'",
+      args: []
+    },
+    {
+      sql: "SELECT value FROM app_settings WHERE key = 'order_seq'",
+      args: []
+    }
+  ], "write");
+  const num = parseInt(String(results[1].rows[0]?.[0] ?? "1"), 10);
   return `TDC-${String(num).padStart(4, "0")}`;
 }
 
+// NOTE: order_seq is intentionally never reset — it is a globally monotonic counter.
+// The pay-period boundary is tracked via order_number_reset_ts in app_settings.
+
 export async function getProfile(discordId: string) {
-  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate FROM profiles WHERE discord_id = ?", args: [discordId] });
+  const r = await db.execute({ sql: "SELECT discord_id, display_name, sales_channel_id, commission_rate, hours_worked_this_week, status, created_at, in_city_id, manager_id, manager_override_rate, commission_adjustment, manager_cut_adjustment, commission_labour_snapshot, manager_labour_snapshot FROM profiles WHERE discord_id = ?", args: [discordId] });
   if (!r.rows[0]) return null;
   const row = r.rows[0];
   return {
-    discord_id:             String(row[0] ?? ""),
-    display_name:           String(row[1] ?? ""),
-    sales_channel_id:       row[2] ? String(row[2]) : null,
-    commission_rate:        Number(row[3] ?? 0.3),
-    hours_worked_this_week: Number(row[4] ?? 0),
-    status:                 String(row[5] ?? "offline"),
-    created_at:             String(row[6] ?? ""),
-    in_city_id:             row[7] ? String(row[7]) : null,
-    manager_id:             row[8] ? String(row[8]) : null,
-    manager_override_rate:  Number(row[9] ?? 0.20),
+    discord_id:                    String(row[0] ?? ""),
+    display_name:                  String(row[1] ?? ""),
+    sales_channel_id:              row[2] ? String(row[2]) : null,
+    commission_rate:               Number(row[3] ?? 0.3),
+    hours_worked_this_week:        Number(row[4] ?? 0),
+    status:                        String(row[5] ?? "offline"),
+    created_at:                    String(row[6] ?? ""),
+    in_city_id:                    row[7] ? String(row[7]) : null,
+    manager_id:                    row[8] ? String(row[8]) : null,
+    manager_override_rate:         Number(row[9] ?? 0.20),
+    commission_adjustment:         Number(row[10] ?? 0),
+    manager_cut_adjustment:        Number(row[11] ?? 0),
+    commission_labour_snapshot:    Number(row[12] ?? 0),
+    manager_labour_snapshot:       Number(row[13] ?? 0),
   };
 }
 
@@ -420,7 +490,9 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     approved_at:      c(12) ? String(c(12)) : null,
     approved_by:      c(13) ? String(c(13)) : null,
     completed_at:     c(14) ? String(c(14)) : null,
-    role_level:       c(16) ? String(c(16)) : "mechanic",
+    role_level:              c(16) ? String(c(16)) : "mechanic",
+    customer_name:           c(17) ? String(c(17)) : "",
+    customer_total_override: c(18) != null ? Number(c(18)) : null,
   };
 }
 
@@ -438,5 +510,7 @@ export function rowToTimeclock(row: unknown): import("./types.js").Timeclock {
     created_at:       String(c(8)  ?? ""),
     clock_message_id: c(9)  ? String(c(9))  : null,
     clock_channel_id: c(10) ? String(c(10)) : null,
+    warn_msg_id:      c(14) ? String(c(14)) : null,
+    warn_chan_id:     c(15) ? String(c(15)) : null,
   };
 }

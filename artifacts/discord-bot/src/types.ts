@@ -40,6 +40,8 @@ export interface Order {
   approved_by: string | null;
   completed_at: string | null;
   role_level: string;
+  customer_name: string;
+  customer_total_override: number | null;
 }
 
 export interface Timeclock {
@@ -54,6 +56,8 @@ export interface Timeclock {
   created_at: string;
   clock_message_id: string | null;
   clock_channel_id: string | null;
+  warn_msg_id: string | null;
+  warn_chan_id: string | null;
 }
 
 export interface Payout {

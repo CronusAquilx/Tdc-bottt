@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
 import { getUserRole } from "../db.js";
 import { COLORS } from "../lib/embeds.js";
 
@@ -9,7 +9,7 @@ export const data = new SlashCommandBuilder()
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const role = await getUserRole(interaction.user.id);
 

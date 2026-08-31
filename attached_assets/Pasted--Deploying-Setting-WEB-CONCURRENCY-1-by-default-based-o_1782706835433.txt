@@ -1,0 +1,50 @@
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////
+[TDC] ⏱️ Auto clocked out ryan after 151min
+[TDC] Interaction error: DiscordAPIError[40060]: Interaction has already been acknowledged.
+    at handleErrors (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/Shared.ts:148:10)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/handlers/BurstHandler.ts:144:20)
+    at async _REST.request (/opt/render/project/src/node_modules/.pnpm/@discordjs+rest@2.6.1/node_modules/@discordjs/rest/src/lib/REST.ts:210:20)
+    at async ButtonInteraction.deferReply (/opt/render/project/src/node_modules/.pnpm/discord.js@14.26.4/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async handleDraftButton (file:///opt/render/project/src/artifacts/discord-bot/dist/interactions/draftbuttons.js:79:9)
+    at async Client.<anonymous> (file:///opt/render/project/src/artifacts/discord-bot/dist/index.js:216:17) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: {
+    message: 'Interaction has already been acknowledged.',
+    code: 40060
+  },
+  code: 40060,
+  status: 400,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1521003676687138926/aW50ZXJhY3Rpb246MTUyMTAwMzY3NjY4NzEzODkyNjpMZG80aUtJYWloZXJ6Z0NROVR0Um5BaERjWENOeVFjc2ZVcEtOOThvNmZWekZZMko4UkltMTRESXUxSU1HRGtYWUg1R0NJT2ZJaVFXYnAzdnZ1NVhUZndDRGlGc2RxYjM2amt6U1VZeUxPaFRVbVhyazVMcVQ2TmFGNXgwQTZRVA/callback?with_response=false'
+}
+[TDC] ⚠️ Sent idle warning to 393264006221266945 (warned: true)
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node --enable-source-maps dist/index.js'
+[TDC] Database initialized.
+[TDC] 🌐 Health server on port 10000
+[TDC] 🏁 Logged in as Tokyo Drift Customs#5560
+[TDC] 🔧 Registering 19 slash commands globally (up to 1hr propagation)...
+[TDC] ✅ Registered 19 commands: /order, /crew, /clock, /mysales, /pay, /payall, /setup, /settings, /help, /payout, /loa, /profile, /leaderboard, /setrank, /manager, /clear, /newweek, /timeclock, /setpay
+[TDC] ✅ LOA panel already present in #🛬-loa
+[TDC] ⏱️ Auto clock-out monitor started (warn: 30 min, auto-out: 40 min)
+[TDC] 🏆 Leaderboard scheduler started (checks every 5 min, fires Monday midnight UTC)
+==> Your service is live 🎉
+==> 
+==> ///////////////////////////////////////////////////////////
+==> 
+==> Available at your primary URL https://tdc-bottt.onrender.com
+==> 
+==> ///////////////////////////////////////////////////////////

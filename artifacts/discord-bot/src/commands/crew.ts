@@ -1,7 +1,7 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
-import { requireRole } from "../lib/roles.js";
-import { COLORS, statusEmoji } from "../lib/embeds.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
+import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 
 export const data = new SlashCommandBuilder()
   .setName("crew")
@@ -49,6 +49,15 @@ export const data = new SlashCommandBuilder()
     s.setName("mycityid")
       .setDescription("Set your own in-city ID")
       .addStringOption(o => o.setName("city_id").setDescription("Your in-city name / ID").setRequired(true).setMaxLength(40))
+  )
+  .addSubcommand(s =>
+    s.setName("info")
+      .setDescription("Full summary for a crew member (manager+)")
+      .addUserOption(o => o.setName("user").setDescription("Crew member to look up (leave blank for yourself)").setRequired(false))
+  )
+  .addSubcommand(s =>
+    s.setName("sync")
+      .setDescription("Re-assign Discord roles to all crew members based on their DB role (manager+)")
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -56,22 +65,27 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "add") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       const target = interaction.options.getUser("user", true);
       const role = interaction.options.getString("role", true);
       const displayName = interaction.options.getString("display_name", true);
+      const existingProfile = await getProfile(target.id);
+      const isNew = !existingProfile;
       await db.execute({ sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)", args: [target.id, displayName] });
-      await db.execute({ sql: "UPDATE profiles SET display_name = ?, commission_rate = 0.3 WHERE discord_id = ?", args: [displayName, target.id] });
+      await db.execute({ sql: "UPDATE profiles SET display_name = ? WHERE discord_id = ?", args: [displayName, target.id] });
       await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
       await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [target.id, role] });
       const caller = await getProfile(interaction.user.id);
+      const updatedProfile = await getProfile(target.id);
+      const rateStr = `${Math.round((updatedProfile?.commission_rate ?? 0.3) * 100)}%`;
       const embed = new EmbedBuilder()
         .setTitle("✅ Crew Member Added")
         .setColor(COLORS.approved)
         .addFields(
           { name: "User", value: displayName, inline: true },
           { name: "Role", value: role.toUpperCase(), inline: true },
+          { name: "Commission", value: isNew ? `${rateStr} (default)` : `${rateStr} (preserved)`, inline: true },
           { name: "Added By", value: caller?.display_name ?? interaction.user.username, inline: true }
         )
         .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
@@ -86,7 +100,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "remove") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target = interaction.options.getUser("user", true);
     const profile = await getProfile(target.id);
     if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
@@ -107,7 +121,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "list") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const roles = ["owner", "manager", "trainer", "mechanic"];
     const embed = new EmbedBuilder()
       .setTitle("👥 Tokyo Drift Customs — Crew")
@@ -131,7 +145,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "status") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target = interaction.options.getUser("user", true);
     const status = interaction.options.getString("status", true);
     const profile = await getProfile(target.id);
@@ -143,7 +157,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "setcityid") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const target  = interaction.options.getUser("user", true);
     const cityId  = interaction.options.getString("city_id", true).trim();
     const profile = await getProfile(target.id);
@@ -160,17 +174,161 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "mycityid") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const cityId  = interaction.options.getString("city_id", true).trim();
     const profile = await getProfile(interaction.user.id);
     if (!profile) { await interaction.editReply({ content: "❌ You're not in the crew yet." }); return; }
     await db.execute({ sql: "UPDATE profiles SET in_city_id = ? WHERE discord_id = ?", args: [cityId, interaction.user.id] });
-    // Try to update their nickname too
     try {
       const member = await interaction.guild!.members.fetch(interaction.user.id);
       await member.setNickname(cityId, "In-city ID self-updated");
     } catch { /* owner or missing perms — ignore */ }
     await interaction.editReply({ content: `✅ Your in-city ID has been set to **${cityId}**.` });
+    return;
+  }
+
+  if (sub === "info") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const callerRole = await detectUserRoleLevel(interaction);
+    const isManager = callerRole === "manager" || callerRole === "owner";
+
+    const targetUser = interaction.options.getUser("user");
+    if (targetUser && !isManager) {
+      await interaction.editReply({ content: "❌ Only managers can look up other crew members." });
+      return;
+    }
+    const targetId = targetUser?.id ?? interaction.user.id;
+
+    const [profile, roleRow] = await Promise.all([
+      getProfile(targetId),
+      db.execute({ sql: "SELECT role FROM user_roles WHERE discord_id = ?", args: [targetId] })
+    ]);
+
+    if (!profile) {
+      await interaction.editReply({ content: "❌ That user isn't in the crew." });
+      return;
+    }
+
+    const role = roleRow.rows[0] ? String(roleRow.rows[0][0]) : "none";
+
+    const SINCE_RESET_SQL =
+      `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+    const DONE = `status IN ('complete', 'approved', 'paid')`;
+
+    const [weekStats, allTimeStats, draftCount] = await Promise.all([
+      db.execute({
+        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue, COALESCE(SUM(labour), 0) as labour
+              FROM orders WHERE mechanic_id = ? AND ${DONE} AND ${SINCE_RESET_SQL}`,
+        args: [targetId]
+      }),
+      db.execute({
+        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue
+              FROM orders WHERE mechanic_id = ? AND ${DONE}`,
+        args: [targetId]
+      }),
+      db.execute({
+        sql: `SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'draft'`,
+        args: [targetId]
+      })
+    ]);
+
+    const weekOrders  = Number(weekStats.rows[0]?.[0] ?? 0);
+    const weekRevenue = Number(weekStats.rows[0]?.[1] ?? 0);
+    const weekLabour  = Number(weekStats.rows[0]?.[2] ?? 0);
+    const allOrders   = Number(allTimeStats.rows[0]?.[0] ?? 0);
+    const allRevenue  = Number(allTimeStats.rows[0]?.[1] ?? 0);
+    const drafts      = Number(draftCount.rows[0]?.[0] ?? 0);
+
+    const rate = profile.commission_rate;
+    const weekCommission = Math.round(weekLabour * rate);
+
+    const roleDisplay: Record<string, string> = {
+      owner: "👑 Owner", manager: "🔑 Manager", trainer: "🎓 Trainer", mechanic: "🔧 Mechanic"
+    };
+
+    const statusDisplay = statusEmoji(profile.status) + " " + profile.status.replace("_", " ").toUpperCase();
+
+    const embed = new EmbedBuilder()
+      .setTitle(`👤  ${profile.display_name}  ·  CREW INFO`)
+      .setColor(COLORS.primary)
+      .addFields(
+        { name: "🎭 Role",         value: roleDisplay[role] ?? role,                                       inline: true },
+        { name: "📡 Status",       value: statusDisplay,                                                   inline: true },
+        { name: "💵 Commission",   value: `**${(rate * 100).toFixed(0)}%** of labour`,                     inline: true },
+        { name: "📋 Channel",      value: profile.sales_channel_id ? `<#${profile.sales_channel_id}>` : "*not set*", inline: true },
+        { name: "🪪 City ID",      value: (profile as any).in_city_id ?? "*not set*",                     inline: true },
+        { name: "⏱️ Hours (Wk)",  value: `**${profile.hours_worked_this_week.toFixed(1)}h**`,             inline: true },
+        { name: "📦 This Period",  value: `**${weekOrders}** orders  ·  ${money(weekRevenue)} revenue\n💵 Commission: **${money(weekCommission)}**`, inline: false },
+        { name: "🏆 All-Time",     value: `**${allOrders}** orders  ·  **${money(allRevenue)}** total customer revenue`, inline: false },
+      );
+
+    if (drafts > 0) {
+      embed.addFields({ name: "✏️ Open Drafts", value: `**${drafts}** draft order${drafts > 1 ? "s" : ""} in progress`, inline: false });
+    }
+
+    embed.setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
+    await interaction.editReply({ embeds: [embed] });
+    return;
+  }
+
+  if (sub === "sync") {
+    if (!(await requireRole(interaction, "manager"))) return;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const guild = interaction.guild!;
+    const config = await getGuildConfig(guild.id);
+
+    const roleMap: Record<string, string[]> = {
+      owner:    config?.owner_role_id    ? [config.owner_role_id]    : [],
+      manager:  config?.manager_role_id  ? [config.manager_role_id]  : [],
+      trainer:  config?.trainer_role_id  ? [config.trainer_role_id]  : [],
+      mechanic: config?.mechanic_role_id ? [config.mechanic_role_id] : [],
+    };
+
+    const crewRows = await db.execute(
+      "SELECT ur.discord_id, ur.role, p.display_name FROM user_roles ur JOIN profiles p ON p.discord_id = ur.discord_id"
+    );
+
+    let synced = 0;
+    let failed = 0;
+    const skipped: string[] = [];
+
+    for (const row of crewRows.rows) {
+      const userId         = String(row[0] ?? "");
+      const role           = String(row[1] ?? "");
+      const displayName    = String(row[2] ?? userId);
+      const discordRoleIds = roleMap[role] ?? [];
+      if (!discordRoleIds.length) {
+        skipped.push(`${displayName} (no Discord role configured for ${role})`);
+        continue;
+      }
+      try {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (!member) { skipped.push(`${displayName} (not in server)`); continue; }
+        for (const rid of discordRoleIds) {
+          if (!member.roles.cache.has(rid)) {
+            await member.roles.add(rid, "Crew sync by manager");
+          }
+        }
+        synced++;
+      } catch { failed++; }
+    }
+
+    const syncEmbed = new EmbedBuilder()
+      .setTitle("🔄  CREW SYNC COMPLETE")
+      .setColor(COLORS.approved)
+      .setDescription(
+        `Scanned **${crewRows.rows.length}** crew members and re-applied their Discord roles.\n\n` +
+        `✅ **${synced}** synced successfully\n` +
+        (failed > 0 ? `❌ **${failed}** failed (bot may lack role permissions)\n` : "") +
+        (skipped.length > 0
+          ? `⚠️ **${skipped.length}** skipped:\n${skipped.map(s => `· ${s}`).join("\n")}`
+          : "")
+      )
+      .setFooter({ text: "Tokyo Drift Customs" })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [syncEmbed] });
     return;
   }
 }

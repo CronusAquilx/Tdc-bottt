@@ -62,6 +62,33 @@ All draft/order view refreshes call this once and pass a `crewCutInfo` object (o
 - guild_config: col 9 = timeclock_channel_id; col 16 = trainer_crew_rate; col 17 = manager_crew_rate
 - orders: col 15 = guild_id; col 16 = role_level
 
+## Crash Prevention (index.ts)
+- `process.on("uncaughtException")` → log + `process.exit(1)` after 500ms so supervisor restarts cleanly.
+- `process.on("unhandledRejection")` → log only (Node exits anyway; we just want it in logs).
+- Discord events: `Events.Error`, `Events.ShardDisconnect`, `Events.ShardReconnecting`, `Events.ShardResume` all wired up.
+
+## Auto-Payday Double-Fire Prevention
+- `firedThisWeek` is in-memory — resets to `false` on process restart. Without DB guard, a crash+restart on Monday 00:00-05 min fires payday twice, wiping all `/setpay` data.
+- Fix: check `app_settings.last_auto_payday_date` on each tick. Write the dedup key AFTER successful completion (not before), so a mid-run crash allows the next restart to retry safely (processPayall only touches unpaid orders — idempotent).
+
+## /clear Must Reset Labour Snapshots
+- When `/clear` runs, it resets `order_number_reset_ts` (starts new pay period) but does NOT reset `commission_labour_snapshot`. This breaks the snapshot formula: new orders after clear won't add on top of the `/setpay` amount until new labour exceeds the old (irrelevant) snapshot.
+- Fix: `clear:confirm:all` and `clear:confirm:player` now also reset `commission_labour_snapshot = 0, manager_labour_snapshot = 0`.
+
+## Commission Consistency Rule (critical)
+Every pay path MUST use the snapshot formula AND the `order_number_reset_ts` boundary — not `weekStart()` or `DATE(created_at) >= ?`:
+```
+SINCE_RESET = datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))
+commAdj   = profile.commission_adjustment ?? 0
+snapshot  = profile.commission_labour_snapshot ?? 0
+labourAfter = Math.max(0, totalLabour - snapshot)
+commission = commAdj > 0 ? commAdj + labourAfter * rate : totalLabour * rate
+```
+Files that must use this: `setpay.ts`, `payall.ts`, `draftbuttons.ts` (getCommissionData), `mysales.ts`, `pay.ts`, `buttons.ts` (orderpay:start, orderpay:confirm, pay:confirm, sales:viewdetailed). Using `weekStart()` as query boundary causes divergence after mid-week payday.
+
+## On-Behalf Order Editing (modals.ts)
+`refreshDraftView` must pass `order.mechanic_id` (not `interaction.user.id`) and `order.role_level` to `getCommissionData` — otherwise manager editing another mechanic's draft sees wrong commission projection.
+
 ## Why
 - No approve/reject reduces friction — mechanics complete orders directly.
 - Role stored per-order (not per-user) so historical crew cut calculations survive role changes.

@@ -77,6 +77,7 @@ export function buildOrderEmbed(
 
   const dateTs = Math.floor(new Date(order.created_at).getTime() / 1000);
   const noteBlock = order.notes ? `\n📋 **Notes:** ${order.notes.slice(0, 300)}` : "";
+  const customerBlock = order.customer_name ? `\n👤 **Customer:** ${order.customer_name}` : "";
 
   const thisOrderCommission = Math.round(order.labour * commissionRate);
   const commissionPct = (commissionRate * 100).toFixed(0);
@@ -85,13 +86,19 @@ export function buildOrderEmbed(
     .setTitle(`🏁  ${order.order_number}  ·  ${statusLabel[order.status] ?? order.status.toUpperCase()}`)
     .setColor(statusColor(order.status))
     .setDescription(
-      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${noteBlock}`
+      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${customerBlock}${noteBlock}`
     )
     .addFields(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
       { name: "🔩 Parts",    value: money(order.parts_cost), inline: true },
       { name: "⚙️ Labour",  value: money(order.labour),     inline: true },
-      { name: "💰 Total",   value: `**${money(order.total)}**`, inline: true },
+      {
+        name: "💰 Total",
+        value: order.customer_total_override != null
+          ? `**${money(order.customer_total_override)}** ✏️\n-# Calculated: ${money(order.total)}`
+          : `**${money(order.total)}**`,
+        inline: true
+      },
       {
         name:  "💵 Commission (This Order)",
         value: `**${money(thisOrderCommission)}**\n-# ${commissionPct}% of labour`,
@@ -153,11 +160,16 @@ export function buildDraftEmbed(
   if (order.labour > 0)     summaryParts.push(`Labour: ${money(order.labour)}`);
   const summaryLine = summaryParts.length ? `\n-# ${summaryParts.join("  ·  ")}` : "";
 
+  const displayTotal = order.customer_total_override ?? order.total;
+  const totalLine = order.customer_total_override != null
+    ? `**${money(displayTotal)}** ✏️\n-# Calculated: ${money(order.total)}`
+    : `**${money(displayTotal)}**${summaryLine}`;
+
   const fields: any[] = [
     { name: "🛠️ Services", value: itemLines.slice(0, 1024), inline: false },
     {
-      name: "💰 Order Total",
-      value: `**${money(order.total)}**${summaryLine}`,
+      name: "💰 Customer Total",
+      value: totalLine,
       inline: true
     },
     {
@@ -169,10 +181,12 @@ export function buildDraftEmbed(
     },
   ];
 
-  if (weekCommission > 0) {
+  // Include this draft order's projected commission so the running total updates as items are added
+  const projectedWeekCommission = weekCommission + thisOrderCommission;
+  if (projectedWeekCommission > 0) {
     fields.push({
       name: "📊 Running Commission (Pay Period)",
-      value: `**${money(Math.round(weekCommission))}**\n-# All completed orders since last pay`,
+      value: `**${money(Math.round(projectedWeekCommission))}**\n-# Includes this order's projected cut`,
       inline: true
     });
   }
@@ -196,10 +210,14 @@ export function buildDraftEmbed(
     );
   }
 
+  const draftCustomerLine = order.customer_name
+    ? `👤 **Customer:** ${order.customer_name}\n`
+    : "";
+
   return new EmbedBuilder()
     .setTitle(`📝  Draft Order  ·  ${order.order_number}`)
     .setColor(COLORS.draft)
-    .setDescription("Select a category below to add services. Hit **✅ Complete Order** when done.")
+    .setDescription(`${draftCustomerLine}Select a category below to add services. Hit **✅ Complete Order** when done.`)
     .addFields(...fields)
     .setFooter({ text: FOOTER_TEXT })
     .setTimestamp();

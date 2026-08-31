@@ -2,13 +2,13 @@ import {
   ModalSubmitInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig, setGuildCrewRate, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
-import { postTimeclockPanel, postLoaPanel, postRafflePanel, CHANNEL_MAP } from "./adminbuttons.js";
+import { postTimeclockPanel, postLoaPanel, postRafflePanel, postLifetimeEarningsPanel, CHANNEL_MAP } from "./adminbuttons.js";
 
 export async function handleAdminModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const parts = interaction.customId.split(":");
@@ -20,7 +20,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Job Post ───────────────────────────────────────────────────────────────
   if (section === "jobpost") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const title = interaction.fields.getTextInputValue("title");
     const body  = interaction.fields.getTextInputValue("body");
@@ -60,7 +60,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Commission: set trainer crew cut % ───────────────────────────────────
   if (section === "commission" && action === "trainerrate") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
     if (isNaN(pct) || pct < 0 || pct > 100) {
@@ -81,7 +81,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Commission: set manager crew cut % ───────────────────────────────────
   if (section === "commission" && action === "managerrate") {
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
     if (isNaN(pct) || pct < 0 || pct > 100) {
@@ -103,7 +103,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   if (section === "commission" && action === "set") {
     const mechanicId = parts[3];
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const rateStr = interaction.fields.getTextInputValue("rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
@@ -138,7 +138,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
         if (salesCh?.isTextBased()) {
           await postOrderPanel(salesCh as TextChannel, mechanicId, profile.display_name, rate);
         }
-      } catch { /* ignore — channel may not exist */ }
+      } catch { /* ignore — channel may not exist or bot lacks permissions */ }
     }
 
     try {
@@ -155,7 +155,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   if (section === "commission" && action === "setoverride") {
     const managerId = parts[3];
     if (!(await requireRole(interaction, "owner"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const rateStr = interaction.fields.getTextInputValue("override_rate").replace(/%/g, "").trim();
     const pct = parseFloat(rateStr);
@@ -202,7 +202,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Sales Channel: Create New ──────────────────────────────────────────────
   if (section === "saleschan" && action === "new") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const mechanicId = interaction.fields.getTextInputValue("mechanic_id").trim();
     const profile = await getProfile(mechanicId);
@@ -255,10 +255,16 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     }
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
-    await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+    let amNewPinned = false;
+    try {
+      const amNewResult = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);
+      amNewPinned = amNewResult.pinned;
+    } catch { /* ignore */ }
 
     await interaction.editReply({
-      content: `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`
+      content: amNewPinned
+        ? `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nThe order panel has been pinned.`
+        : `✅ Sales channel created for **${profile.display_name}**: <#${channel.id}>\nOrder panel sent — give the bot **Manage Messages** permission in that channel so it can be pinned.`
     });
     return true;
   }
@@ -266,7 +272,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
   // ── Sales Channel: Attach Existing ────────────────────────────────────────
   if (section === "saleschan" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const mechanicId = interaction.fields.getTextInputValue("mechanic_id").trim();
     const channelId  = interaction.fields.getTextInputValue("channel_id").trim();
@@ -287,25 +293,31 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channelId, mechanicId] });
 
-    let panelPosted = true;
+    let amExistPosted = false;
+    let amExistPinned = false;
     try {
-      await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
-    } catch {
-      panelPosted = false;
+      const amExistResult = await postOrderPanel(ch as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+      amExistPosted = true;
+      amExistPinned = amExistResult.pinned;
+    } catch { /* ignore */ }
+
+    let amExistMsg = `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel.`;
+    if (!amExistPosted) {
+      amExistMsg += `\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then use **Resend Panel** from the admin setup.`;
+    } else if (!amExistPinned) {
+      amExistMsg += `\n✅ Order panel sent.\n⚠️ Could not pin it — give the bot **Manage Messages** permission in <#${channelId}> so mechanics can find it easily.`;
+    } else {
+      amExistMsg += ` Order panel posted and pinned.`;
     }
 
-    await interaction.editReply({
-      content: panelPosted
-        ? `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel and posted the order panel.`
-        : `✅ Attached <#${channelId}> as **${profile.display_name}**'s sales channel.\n⚠️ Could not post the order panel — make sure the bot has **Send Messages** and **Embed Links** permission in that channel, then run the setup again.`
-    });
+    await interaction.editReply({ content: amExistMsg });
     return true;
   }
 
   // ── Timeclock: Attach Existing ─────────────────────────────────────────────
   if (section === "timeclock" && action === "existing") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
     let ch: any;
@@ -329,7 +341,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     const cfg = CHANNEL_MAP[chanType];
     if (!cfg) return false;
     if (!(await requireRole(interaction, "manager"))) return true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const channelId = interaction.fields.getTextInputValue("channel_id").trim();
     let ch: any;
@@ -347,9 +359,18 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
       await postLoaPanel(ch as TextChannel);
     } else if (chanType === "rafflech") {
       await postRafflePanel(ch as TextChannel);
+    } else if (chanType === "lifetimeearnings") {
+      await postLifetimeEarningsPanel(ch as TextChannel);
+    } else if (chanType === "trainingch") {
+      const { postTrainingPanel } = await import("./training.js");
+      await postTrainingPanel(ch as TextChannel);
+    } else if (chanType === "paylogs") {
+      const { postPayLogPanel } = await import("../commands/payall.js");
+      await postPayLogPanel(ch as TextChannel, guild);
     }
 
-    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${chanType === "loach" || chanType === "rafflech" ? " and panel posted." : "."}` });
+    const panelTypes = ["loach", "rafflech", "lifetimeearnings", "trainingch", "paylogs"];
+    await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${panelTypes.includes(chanType) ? " and panel posted." : "."}` });
     return true;
   }
 

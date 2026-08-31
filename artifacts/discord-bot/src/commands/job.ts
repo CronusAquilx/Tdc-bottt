@@ -2,7 +2,7 @@ import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
@@ -43,7 +43,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "list") {
     if (!(await requireRole(interaction, "owner"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const page = (interaction.options.getInteger("page") ?? 1) - 1;
     const r = await db.execute("SELECT id, title, created_at FROM jobs ORDER BY created_at DESC");
     const { items, total, pages } = paginate(r.rows as unknown as any[][], page, 5);
@@ -61,7 +61,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "delete") {
     if (!(await requireRole(interaction, "owner"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const id = interaction.options.getString("id", true);
     const r = await db.execute({ sql: "SELECT * FROM jobs WHERE id = ?", args: [id] });
     if (!r.rows[0]) { await interaction.editReply({ content: "❌ Job not found." }); return; }

@@ -4,7 +4,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   EmbedBuilder, ChannelType, PermissionFlagsBits,
   OverwriteType, TextChannel
-} from "discord.js";
+, MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS } from "../lib/embeds.js";
@@ -69,7 +69,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     try {
       await interaction.channel?.delete();
     } catch {
-      await interaction.followUp({ content: "❌ Failed to delete channel.", ephemeral: true });
+      await interaction.followUp({ content: "❌ Failed to delete channel.", flags: MessageFlags.Ephemeral });
     }
     return true;
   }
@@ -82,7 +82,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
 
     if (!(await requireRole(interaction, "trainer"))) return true;
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const guild = interaction.guild!;
     const config = await getGuildConfig(guild.id);
 
@@ -132,25 +132,44 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
       return true;
     }
 
-    // Make sure they're in the crew so the order panel works
-    if (!profile) {
-      try {
-        const member = await guild.members.fetch(recruitId);
-        const dn = member.displayName;
-        await db.execute({
-          sql: `INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate, status) VALUES (?, ?, 0.3, 'offline')`,
-          args: [recruitId, dn]
-        });
-        await db.execute({
-          sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
-          args: [recruitId]
-        });
-      } catch { /* ignore */ }
-    }
+    // Always ensure they have a crew profile (mechanic, 30% commission) and a
+    // user_roles entry regardless of whether a partial profile existed already
+    // (e.g. created by the training modal before this button was clicked).
+    try {
+      const member = await guild.members.fetch(recruitId).catch(() => null);
+      const dn = member?.displayName ?? displayName;
 
-    const commRate = profile?.commission_rate ?? 0.3;
+      // Upsert profile — preserve existing commission_rate if already set above 0,
+      // otherwise default to 30%.
+      await db.execute({
+        sql: `INSERT INTO profiles (discord_id, display_name, commission_rate, status)
+              VALUES (?, ?, 0.3, 'offline')
+              ON CONFLICT(discord_id) DO UPDATE SET
+                display_name = COALESCE(NULLIF(excluded.display_name,''), profiles.display_name),
+                commission_rate = CASE WHEN profiles.commission_rate > 0 THEN profiles.commission_rate ELSE 0.3 END`,
+        args: [recruitId, dn]
+      });
+
+      // Ensure they are in user_roles as mechanic (INSERT OR IGNORE so we don't
+      // overwrite a trainer/manager role if they somehow already have one).
+      await db.execute({
+        sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
+        args: [recruitId]
+      });
+
+      // Assign the Discord mechanic role if configured
+      const mechRoleIds = splitRoleIds(config?.mechanic_role_id);
+      if (member && mechRoleIds.length) {
+        for (const rid of mechRoleIds) {
+          try { await member.roles.add(rid, "Auto-assigned via training sales channel creation"); } catch { /* missing perms or invalid role */ }
+        }
+      }
+    } catch { /* non-fatal — profile/role already set */ }
+
+    const freshProfile = await getProfile(recruitId);
+    const commRate = freshProfile?.commission_rate ?? 0.3;
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [salesChannel.id, recruitId] });
-    await postOrderPanel(salesChannel, recruitId, displayName, commRate);
+    await postOrderPanel(salesChannel, recruitId, displayName, commRate).catch(() => {});
 
     // Update the training channel button to show it's done
     try {
@@ -197,7 +216,7 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
 
   if (action === "modal") {
     const guild = interaction.guild!;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const yourName       = interaction.fields.getTextInputValue("your_name").trim();
     const timeAvailable  = interaction.fields.getTextInputValue("time_available").trim();

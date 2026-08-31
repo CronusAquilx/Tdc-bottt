@@ -1,14 +1,19 @@
 import {
-  ButtonInteraction, EmbedBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle
+  ButtonInteraction, EmbedBuilder, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
+  ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock } from "../db.js";
-import { requireRole } from "../lib/roles.js";
-import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, COLORS, money } from "../lib/embeds.js";
+import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock, getSetting, setSetting, nextOrderNumber } from "../db.js";
+import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
+import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, buildDraftEmbed, buildPayoutEmbed, buildDashboardEmbed, statusEmoji, COLORS, money } from "../lib/embeds.js";
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 import { autoClockOut } from "../lib/autoClockOut.js";
 import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
+import { postOrderPanel } from "./orderpanel.js";
+import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
+import { logEvent } from "../lib/eventLog.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -18,13 +23,32 @@ function parseUtc(s: string): number {
   return new Date(norm).getTime();
 }
 
+/** After any clock-out, edit the idle-warning message to remove its buttons
+ *  so mechanics can't click "Stay Clocked In" on a closed shift. */
+async function clearWarnMessage(
+  entry: { id: string; warn_msg_id: string | null; warn_chan_id: string | null },
+  client: import("discord.js").Client
+) {
+  const mem    = warnedMechanics.get(entry.id);
+  const msgId  = mem?.msgId  ?? entry.warn_msg_id;
+  const chanId = mem?.chanId ?? entry.warn_chan_id;
+  if (!msgId || !chanId) return;
+  try {
+    const ch = await client.channels.fetch(chanId).catch(() => null);
+    if (ch && ch.isTextBased()) {
+      const msg = await (ch as any).messages.fetch(msgId).catch(() => null);
+      if (msg) await msg.edit({ components: [] });
+    }
+  } catch { /* ignore — DM closed or message deleted */ }
+}
+
 export async function handleButton(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const id = rest.join(":");
 
   // ── Clock-warning: Stay Clocked In ────────────────────────────────────────
   if (ns === "clockwarn" && action === "stayin") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const tcId = id;
 
     // Verify this timeclock entry exists and belongs to the user clicking
@@ -58,20 +82,24 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock-warning: Clock Out Now ──────────────────────────────────────────
   if (ns === "clockwarn" && action === "clockout") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const tcId = id;
 
-    // Find the timeclock entry
-    const tcR = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [tcId] });
+    // Find the timeclock entry — also fetch warned_at (index 11) for stale-shift detection
+    const tcR = await db.execute({
+      sql: "SELECT id, mechanic_id, clock_in_time, clock_out_time, duration_minutes, approved_by, status, notes, created_at, clock_message_id, clock_channel_id, warned_at FROM timeclock WHERE id = ?",
+      args: [tcId]
+    });
     if (!tcR.rows[0]) {
       try { await interaction.message.edit({ content: "ℹ️ This warning is no longer active.", components: [] }); } catch { /* ignore */ }
       await interaction.editReply({ content: "ℹ️ That shift no longer exists." });
       return;
     }
     const entry = rowToTimeclock(tcR.rows[0]);
+    const warnedAtRaw = tcR.rows[0][11] ? String(tcR.rows[0][11]) : null;
 
     if (entry.clock_out_time) {
-      // Already clocked out — just kill the buttons so user stops seeing them
+      // Already clocked out — remove buttons so it stops showing
       try { await interaction.message.edit({ content: "✅ Already clocked out.", components: [] }); } catch { /* ignore */ }
       await interaction.editReply({ content: "ℹ️ You're already clocked out." });
       return;
@@ -84,7 +112,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     warnedMechanics.delete(tcId);
     await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
 
-    // Disable warning message buttons using interaction.message directly
+    // Disable warning message buttons
     try { await interaction.message.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] }); } catch { /* ignore */ }
 
     await autoClockOut(
@@ -97,9 +125,22 @@ export async function handleButton(interaction: ButtonInteraction) {
       entry.clock_channel_id ?? null
     );
 
-    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
-    const hrs = Math.floor(mins / 60);
-    const m = Math.round(mins % 60);
+    // Calculate displayed duration — cap at warned_at + 30 min buffer if this was a stale shift
+    // (prevents showing "27 hours" when the shift should have been auto-clocked-out long ago)
+    const clockInMs  = parseUtc(entry.clock_in_time);
+    const warnedAtMs = warnedAtRaw ? parseUtc(warnedAtRaw) : 0;
+    const realMins   = (Date.now() - clockInMs) / 60000;
+    // If shift was warned and button clicked more than 35 min after the warning,
+    // show duration as of (warned_at + 30 min) — the expected auto-out window
+    const WARN_MINS     = 120;
+    const AUTO_OUT_MINS = 30;
+    let displayMins = realMins;
+    if (warnedAtMs > 0 && realMins > WARN_MINS + AUTO_OUT_MINS + 10) {
+      displayMins = (warnedAtMs + AUTO_OUT_MINS * 60000 - clockInMs) / 60000;
+      if (displayMins < 1) displayMins = realMins; // safety fallback
+    }
+    const hrs = Math.floor(displayMins / 60);
+    const m = Math.round(displayMins % 60);
     await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
     return;
   }
@@ -150,34 +191,65 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     // Immediately open the new order draft
-    const { db: _db, getSetting, rowToOrder, nextOrderNumber } = await import("../db.js");
-    const { detectUserRoleLevel } = await import("../lib/roles.js");
-    const { buildDraftEmbed } = await import("../lib/embeds.js");
-    const { mainDraftButtonRows, getCommissionData } = await import("./draftbuttons.js");
-    const { StringSelectMenuBuilder: SSB2, StringSelectMenuOptionBuilder: SSOB2 } = await import("discord.js");
-
     const guildId = interaction.guildId ?? "";
     const roleLevel = await detectUserRoleLevel(interaction);
     const newOrderId = randomUUID();
-    const orderNumber = await nextOrderNumber();
 
-    await _db.execute({
-      sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-      args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+    // Insert with retry on UNIQUE constraint (rare race on order_number)
+    let orderNumber = await nextOrderNumber();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await db.execute({
+          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
+          args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+        });
+        break;
+      } catch (err: any) {
+        if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+          orderNumber = await nextOrderNumber();
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Apply any pending customer name (stored before clock-in was required)
+    const pendingNameKey = `pending_customer_name_${interaction.user.id}`;
+    const pendingName = await getSetting(pendingNameKey);
+    if (pendingName) {
+      await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [pendingName, newOrderId] });
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingNameKey] });
+    }
+
+    // Log the order creation
+    logEvent({
+      kind: "order_created",
+      guildId,
+      userId: interaction.user.id,
+      userName: interaction.user.username,
+      orderId: newOrderId,
+      orderNumber
     });
 
     const [catalogStr, draft] = await Promise.all([
       getSetting("parts_catalog"),
-      _db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
+      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [newOrderId] }).then(r => rowToOrder(r.rows[0]))
     ]);
     const commData = await getCommissionData(interaction.user.id, guildId, roleLevel);
-    const catalog = JSON.parse(catalogStr ?? "{}");
-    const categories: string[] = catalog.categories ?? [];
+    let catalog: any = {};
+    try { catalog = JSON.parse(catalogStr ?? "{}"); } catch { /* use empty */ }
+    const categories: string[] = Array.isArray(catalog.categories) && catalog.categories.length > 0
+      ? catalog.categories : [];
 
-    const catSelect = new SSB2()
+    if (categories.length === 0) {
+      await interaction.editReply({ content: "⚠️ No service catalog is set up yet. Ask a manager to configure it with `/settings`." });
+      return;
+    }
+
+    const catSelect = new StringSelectMenuBuilder()
       .setCustomId(`order:selectcategory:${newOrderId}`)
       .setPlaceholder("Pick a service category...")
-      .addOptions(categories.map((cat: string) => new SSOB2().setLabel(cat).setValue(cat)));
+      .addOptions(categories.map((cat: string) => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const crewCutInfo = commData.crewCut > 0 || ["trainer","manager","owner"].includes(roleLevel)
       ? { amount: commData.crewCut, rate: commData.crewCutRate, label: commData.crewCutLabel }
@@ -186,15 +258,30 @@ export async function handleButton(interaction: ButtonInteraction) {
     await interaction.editReply({
       embeds: [buildDraftEmbed(draft, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
-        new ActionRowBuilder<InstanceType<typeof SSB2>>().addComponents(catSelect),
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(newOrderId)
       ]
     });
     return;
   }
 
-  // ── Clock In from order embed (toggles to Clock Out) ─────────────────────
+  // ── Clock In from order embed — redirect to timeclock channel ───────────────
   if (ns === "clockin" && action === "order") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = interaction.guild
+      ? await getGuildConfig(interaction.guild.id)
+      : null;
+    const tcChanId = config?.timeclock_channel_id;
+    await interaction.editReply({
+      content: tcChanId
+        ? `⏰ Clock in using the dedicated panel in <#${tcChanId}>.`
+        : "⏰ Use the **Clock Panel** channel to clock in."
+    });
+    return;
+  }
+
+  // ── Clock In from order embed (old handler — kept for compatibility, redirects) ─
+  if (ns === "clockin" && action === "order_DISABLED") {
     await interaction.deferUpdate();
 
     // Atomic insert — prevents race condition where two clicks both pass a SELECT check
@@ -237,7 +324,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       await interaction.followUp({
         content: `⚠️ **You're already clocked in!**${sinceTs} Clock out first.`,
         components: [clockOutBtn],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -281,12 +368,27 @@ export async function handleButton(interaction: ButtonInteraction) {
         .setStyle(ButtonStyle.Primary)
     );
     await interaction.message.edit({ components: [clockOutRow, payRow] });
-    await interaction.followUp({ content: "✅ Clocked in!", ephemeral: true });
+    await interaction.followUp({ content: "✅ Clocked in!", flags: MessageFlags.Ephemeral });
     return;
   }
 
-  // ── Clock Out from order embed (toggles to Clock In) ─────────────────────
+  // ── Clock Out from order embed — redirect to timeclock channel ──────────────
   if (ns === "clockout" && action === "order") {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = interaction.guild
+      ? await getGuildConfig(interaction.guild.id)
+      : null;
+    const tcChanId = config?.timeclock_channel_id;
+    await interaction.editReply({
+      content: tcChanId
+        ? `⏰ Clock out using the dedicated panel in <#${tcChanId}>.`
+        : "⏰ Use the **Clock Panel** channel to clock out."
+    });
+    return;
+  }
+
+  // ── Clock Out from order embed (old handler — kept for compatibility, redirects) ─
+  if (ns === "clockout" && action === "order_DISABLED") {
     await interaction.deferUpdate();
 
     const active = await db.execute({
@@ -294,7 +396,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [interaction.user.id]
     });
     if (!active.rows[0]) {
-      await interaction.followUp({ content: "❌ You're not clocked in!", ephemeral: true });
+      await interaction.followUp({ content: "❌ You're not clocked in!", flags: MessageFlags.Ephemeral });
       const clockInRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId("clockin:order").setLabel("🟢  Clock In").setStyle(ButtonStyle.Primary)
@@ -320,9 +422,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
-    // Clear any in-memory warn/stay state for this shift
+    // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
+    await clearWarnMessage(entry, interaction.client);
 
     // Edit original clock-in message or post new clock-out
     const profile = await getProfile(interaction.user.id);
@@ -363,13 +466,13 @@ export async function handleButton(interaction: ButtonInteraction) {
         .setStyle(ButtonStyle.Primary)
     );
     await interaction.message.edit({ components: [clockInRow, payRow] });
-    await interaction.followUp({ content: `✅ Clocked out! **${hrs}h ${m}m**`, ephemeral: true });
+    await interaction.followUp({ content: `✅ Clocked out! **${hrs}h ${m}m**`, flags: MessageFlags.Ephemeral });
     return;
   }
 
   // ── Clock In from panel ────────────────────────────────────────────────────
   if (ns === "clockin" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     // Atomic insert — only inserts if no active shift exists (prevents race condition)
     const tcId = randomUUID();
@@ -432,7 +535,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clock Out from panel ───────────────────────────────────────────────────
   if (ns === "clockout" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const active = await db.execute({
       sql: "SELECT * FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL ORDER BY created_at DESC LIMIT 1",
@@ -454,9 +557,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
-    // Clear any in-memory warn/stay state for this shift
+    // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
+    await clearWarnMessage(entry, interaction.client);
 
     const ordersThisShift = await db.execute({
       sql: "SELECT COUNT(*) FROM orders WHERE mechanic_id = ? AND status = 'complete' AND completed_at >= ?",
@@ -517,7 +621,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Check Time (how long clocked in) ──────────────────────────────────────
   if (ns === "checktime" && action === "panel") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const active = await db.execute({
       sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
@@ -540,7 +644,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Close Channel (trainer+) ───────────────────────────────────────────────
   if (ns === "closechan" && action === "panel") {
     if (!(await requireRole(interaction, "trainer"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = interaction.channel;
     if (!channel || !interaction.guild) {
       await interaction.editReply({ content: "❌ Could not find this channel." });
@@ -611,79 +715,117 @@ export async function handleButton(interaction: ButtonInteraction) {
 
   // ── Clear: confirm all ────────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "all") {
-    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
-    const guildId = interaction.guildId ?? "";
-    const { setSetting } = await import("../db.js");
-    // Archive complete orders
-    const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
-      args: [guildId]
-    });
-    // Delete draft orders entirely
-    const drafts = await db.execute({
-      sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
-      args: [guildId]
-    });
-    // Reset ALL profiles hours (not just those with orders)
-    await db.execute("UPDATE profiles SET hours_worked_this_week = 0");
-    await setSetting("order_number_reset_ts", new Date().toISOString());
-    const count = Number(r.rowsAffected ?? 0);
-    const draftCount = Number(drafts.rowsAffected ?? 0);
-    const embed = new EmbedBuilder()
-      .setTitle("🗑️  WEEK CLEARED — ALL CREW")
-      .setColor(COLORS.warning)
-      .setDescription(
-        `Cleared **${count}** completed order(s) and **${draftCount}** draft(s) for all mechanics.\n\n` +
-        "**Stats reset:**\n" +
-        "• Orders ➜ **0**\n" +
-        "• Revenue ➜ **$0**\n" +
-        "• Commissions ➜ **$0**\n" +
-        "• Hours ➜ **0**\n\n" +
-        "*Completed orders are archived. Drafts were deleted. Use `/payall` to pay before clearing next time.*"
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-      .setTimestamp();
-    await interaction.editReply({ embeds: [embed], components: [] });
+    try {
+      const callerRole = await detectUserRoleLevel(interaction);
+      if (!["manager", "owner"].includes(callerRole)) {
+        await interaction.editReply({ content: "❌ Managers only.", components: [] });
+        return;
+      }
+      const guildId = interaction.guildId ?? "";
+      // Archive complete AND already-paid orders so nothing is left behind still
+      // counting toward week totals after a full clear.
+      const r = await db.execute({
+        sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
+        args: [guildId]
+      });
+      // Delete draft orders entirely
+      const drafts = await db.execute({
+        sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
+        args: [guildId]
+      });
+      // Full pay-period reset: clear hours, snapshots, AND the manual commission
+      // adjustments set via /setpay. Without zeroing commission_adjustment the
+      // old fixed amount keeps accumulating on top of all new orders.
+      await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending'");
+      // Use SQLite-compatible timestamp format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly
+      await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+      const count = Number(r.rowsAffected ?? 0);
+      const draftCount = Number(drafts.rowsAffected ?? 0);
+
+      // Refresh the pay log panel to reflect the cleared state immediately
+      if (interaction.guild) {
+        const { refreshPayLogPanel } = await import("../commands/payall.js");
+        refreshPayLogPanel(interaction.guild).catch(() => {});
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🗑️  WEEK CLEARED — ALL CREW")
+        .setColor(COLORS.warning)
+        .setDescription(
+          `Cleared **${count}** completed order(s) and **${draftCount}** draft(s) for all mechanics.\n\n` +
+          "**Stats reset:**\n" +
+          "• Orders ➜ **0**\n" +
+          "• Revenue ➜ **$0**\n" +
+          "• Commissions ➜ **$0**\n" +
+          "• Hours ➜ **0**\n\n" +
+          "*Completed orders are archived. Drafts were deleted. Use `/payall` to pay before clearing next time.*"
+        )
+        .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+    } catch (err: any) {
+      console.error("[TDC] clear all error:", err);
+      try { await interaction.editReply({ content: `❌ Clear failed: ${err?.message ?? "Unknown error"}`, components: [] }); } catch { /* ignore */ }
+    }
     return;
   }
 
   // ── Clear: confirm player ─────────────────────────────────────────────────
   if (ns === "clear" && action === "confirm" && rest[0] === "player") {
-    if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
-    const mechId = rest.slice(1).join(":");
-    const guildId = interaction.guildId ?? "";
-    const profile = await getProfile(mechId);
-    // Archive complete orders
-    const r = await db.execute({
-      sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status IN ('complete','approved') AND (guild_id = ? OR guild_id = '')",
-      args: [mechId, guildId]
-    });
-    // Delete draft orders
-    const drafts = await db.execute({
-      sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
-      args: [mechId, guildId]
-    });
-    // Reset hours
-    await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0 WHERE discord_id = ?", args: [mechId] });
-    const count = Number(r.rowsAffected ?? 0);
-    const draftCount = Number(drafts.rowsAffected ?? 0);
-    const embed = new EmbedBuilder()
-      .setTitle("🗑️  PLAYER STATS CLEARED")
-      .setColor(COLORS.warning)
-      .setDescription(
-        `Cleared **${count}** order(s) and **${draftCount}** draft(s) for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
-        "**Stats reset:**\n" +
-        "• Orders ➜ **0**\n" +
-        "• Revenue ➜ **$0**\n" +
-        "• Commission ➜ **$0**\n" +
-        "• Hours ➜ **0**\n\n" +
-        "*Other mechanics' stats are unchanged.*"
-      )
-      .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
-      .setTimestamp();
-    await interaction.editReply({ embeds: [embed], components: [] });
+    try {
+      const callerRole = await detectUserRoleLevel(interaction);
+      if (!["manager", "owner"].includes(callerRole)) {
+        await interaction.editReply({ content: "❌ Managers only.", components: [] });
+        return;
+      }
+      const mechId = rest.slice(1).join(":");
+      const guildId = interaction.guildId ?? "";
+      const profile = await getProfile(mechId);
+      // Archive complete AND already-paid orders so nothing is left behind still
+      // counting toward week totals after this player's clear.
+      const r = await db.execute({
+        sql: "UPDATE orders SET status = 'cleared' WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
+        args: [mechId, guildId]
+      });
+      // Delete draft orders
+      const drafts = await db.execute({
+        sql: "DELETE FROM orders WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')",
+        args: [mechId, guildId]
+      });
+      // Full reset: hours, snapshots, manual commission adjustments from /setpay,
+      // AND pay status — otherwise a previously-"paid" mechanic keeps showing
+      // paid/green in the pay log even though their commission is now $0.
+      await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending' WHERE discord_id = ?", args: [mechId] });
+      const count = Number(r.rowsAffected ?? 0);
+      const draftCount = Number(drafts.rowsAffected ?? 0);
+
+      // Refresh the pay log panel to reflect the cleared state immediately
+      if (interaction.guild) {
+        const { refreshPayLogPanel } = await import("../commands/payall.js");
+        refreshPayLogPanel(interaction.guild).catch(() => {});
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🗑️  PLAYER STATS CLEARED")
+        .setColor(COLORS.warning)
+        .setDescription(
+          `Cleared **${count}** order(s) and **${draftCount}** draft(s) for **${profile?.display_name ?? `<@${mechId}>`}**.\n\n` +
+          "**Stats reset:**\n" +
+          "• Orders ➜ **0**\n" +
+          "• Revenue ➜ **$0**\n" +
+          "• Commission ➜ **$0**\n" +
+          "• Hours ➜ **0**\n\n" +
+          "*Other mechanics' stats are unchanged.*"
+        )
+        .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+    } catch (err: any) {
+      console.error("[TDC] clear player error:", err);
+      try { await interaction.editReply({ content: `❌ Clear failed: ${err?.message ?? "Unknown error"}`, components: [] }); } catch { /* ignore */ }
+    }
     return;
   }
 
@@ -696,22 +838,31 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Order Pay: start (manager+ pay button on order embed) ─────────────────
   if (ns === "orderpay" && action === "start") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const mechId = id;
     const profile = await getProfile(mechId);
     if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
-    const ws = weekStart();
+    const SINCE_RESET = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-      args: [mechId, ws]
+      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET}`,
+      args: [mechId]
     });
     if (!r.rows.length) {
-      await interaction.editReply({ content: `❌ No completed unpaid orders for **${profile.display_name}** this week.` });
+      await interaction.editReply({ content: `❌ No completed unpaid orders for **${profile.display_name}** this pay period.` });
       return;
     }
-    const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const totalLabour  = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
     const totalRevenue = r.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const commission = totalLabour * profile.commission_rate;
+    // Snapshot-aware commission — matches /setpay, /payall, and draft projections
+    const commAdj       = profile.commission_adjustment ?? 0;
+    const snapshot      = profile.commission_labour_snapshot ?? 0;
+    const labourAfter   = Math.max(0, totalLabour - snapshot);
+    const commission    = commAdj > 0
+      ? commAdj + labourAfter * profile.commission_rate
+      : totalLabour * profile.commission_rate;
+    const rateLabel = commAdj > 0
+      ? `set ${Math.round(commAdj).toLocaleString()} + new orders`
+      : `${(profile.commission_rate * 100).toFixed(0)}%`;
     const confirmEmbed = new EmbedBuilder()
       .setTitle(`💸  Confirm Payout  ·  ${profile.display_name}`)
       .setColor(COLORS.primary)
@@ -719,7 +870,7 @@ export async function handleButton(interaction: ButtonInteraction) {
         { name: "Orders to Pay",  value: String(r.rows.length), inline: true },
         { name: "Total Revenue",  value: money(totalRevenue),   inline: true },
         { name: "Total Labour",   value: money(totalLabour),    inline: true },
-        { name: `Commission (${(profile.commission_rate * 100).toFixed(0)}%)`, value: `**${money(commission)}**`, inline: false }
+        { name: `Commission (${rateLabel})`, value: `**${money(commission)}**`, inline: false }
       )
       .setDescription("Click **Confirm** to process this payout and mark all orders as paid.")
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." });
@@ -736,15 +887,22 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const profile = await getProfile(id);
-    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", ephemeral: true }); return; }
+    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", flags: MessageFlags.Ephemeral }); return; }
     const ws = weekStart();
+    const SINCE_RESET_OP = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-      args: [id, ws]
+      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
+      args: [id]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
     const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
-    const commission = totalLabour * profile.commission_rate;
+    // Snapshot-aware commission
+    const commAdj_op    = profile.commission_adjustment ?? 0;
+    const snapshot_op   = profile.commission_labour_snapshot ?? 0;
+    const labourAfter_op = Math.max(0, totalLabour - snapshot_op);
+    const commission = commAdj_op > 0
+      ? commAdj_op + labourAfter_op * profile.commission_rate
+      : totalLabour * profile.commission_rate;
     const payoutId = randomUUID();
     const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
     await db.execute({
@@ -752,8 +910,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
     });
     await db.execute({
-      sql: "UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-      args: [id, ws]
+      sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
+      args: [id]
     });
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
@@ -763,7 +921,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
       created_at: String(payRow[9] ?? "")
     };
-    const { buildPayoutEmbed } = await import("../lib/embeds.js");
     const approver = await getProfile(interaction.user.id);
     const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Manager", weekEnd, profile.commission_rate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -798,7 +955,6 @@ export async function handleButton(interaction: ButtonInteraction) {
         : await db.execute({ sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status != 'draft' ORDER BY created_at DESC", args: [interaction.user.id] });
 
     const rows = r.rows.map(row => rowToOrder(row));
-    const { statusEmoji } = await import("../lib/embeds.js");
     const { items, total, pages } = paginate(rows, page, 10);
     const lines = await Promise.all(items.map(async o => {
       const p = await getProfile(o.mechanic_id);
@@ -823,10 +979,10 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Order not found.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Order not found.", flags: MessageFlags.Ephemeral }); return; }
     const order = rowToOrder(r.rows[0]);
     if (!["paid", "complete", "approved"].includes(order.status)) {
-      await interaction.followUp({ content: "❌ Only completed or paid orders can be archived.", ephemeral: true });
+      await interaction.followUp({ content: "❌ Only completed or paid orders can be archived.", flags: MessageFlags.Ephemeral });
       return;
     }
     await db.execute({ sql: "UPDATE orders SET status = 'archived' WHERE id = ?", args: [id] });
@@ -856,7 +1012,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "SELECT * FROM orders WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
       args: [mechId, ws]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "ℹ️ No paid orders to archive.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "ℹ️ No paid orders to archive.", flags: MessageFlags.Ephemeral }); return; }
     await db.execute({
       sql: "UPDATE orders SET status = 'archived' WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
       args: [mechId, ws]
@@ -886,15 +1042,22 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "owner"))) return;
     await interaction.deferUpdate();
     const profile = await getProfile(id);
-    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", ephemeral: true }); return; }
+    if (!profile) { await interaction.followUp({ content: "❌ Mechanic not found.", flags: MessageFlags.Ephemeral }); return; }
     const ws = weekStart();
+    const SINCE_RESET_PC = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: "SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-      args: [id, ws]
+      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
+      args: [id]
     });
-    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", ephemeral: true }); return; }
+    if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
     const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
-    const commission = totalLabour * profile.commission_rate;
+    // Snapshot-aware commission — matches /setpay + /payall formula
+    const commAdj_pc    = profile.commission_adjustment ?? 0;
+    const snapshot_pc   = profile.commission_labour_snapshot ?? 0;
+    const labourAfter_pc = Math.max(0, totalLabour - snapshot_pc);
+    const commission = commAdj_pc > 0
+      ? commAdj_pc + labourAfter_pc * profile.commission_rate
+      : totalLabour * profile.commission_rate;
     const payoutId = randomUUID();
     const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
     await db.execute({
@@ -902,8 +1065,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
     });
     await db.execute({
-      sql: "UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?",
-      args: [id, ws]
+      sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
+      args: [id]
     });
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
@@ -913,7 +1076,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       invoice_count: Number(payRow[6]), paid_at: String(payRow[7]), paid_by: String(payRow[8]),
       created_at: String(payRow[9] ?? "")
     };
-    const { buildPayoutEmbed } = await import("../lib/embeds.js");
     const approver = await getProfile(interaction.user.id);
     const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Owner", weekEnd, profile.commission_rate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -946,67 +1108,96 @@ export async function handleButton(interaction: ButtonInteraction) {
     const result = await processPayall(interaction.guild, ws, interaction.user.id);
 
     if (!result) {
-      await interaction.followUp({ content: "❌ No unpaid orders found to process.", ephemeral: true });
+      await interaction.followUp({ content: "❌ No unpaid orders found to process.", flags: MessageFlags.Ephemeral });
       return;
     }
 
-    const { grandCommission, totalRevenue, mechanicCount, totalToBill } = result;
+    const { grandCommission, totalRevenue, mechanicCount, totalToBill, payouts } = result;
 
-    // Build per-mechanic breakdown from payouts table (saved by processPayall)
+    let notified = 0;
+    let failed   = 0;
+
+    // ── Notify each mechanic in their personal sales channel ─────────────────
+    if (interaction.guild) {
+      for (const p of payouts) {
+        if (!p.salesChanId) { failed++; continue; }
+        try {
+          const ch = await interaction.guild.channels.fetch(p.salesChanId).catch(() => null);
+          if (!ch?.isTextBased()) { failed++; continue; }
+
+          const totalPay = p.amount + p.managerCut;
+
+          if (totalPay > 0) {
+            // Owed something this week — ping them + show the billing amount
+            await (ch as any).send({
+              content:
+                `<@${p.mechanicId}>\n` +
+                `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `> 📋 **${p.orders} orders** completed this week\n` +
+                (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
+                `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+                `> 💵 **Total pay: ${money(totalPay)}**\n` +
+                `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+                `**Bill the company: ${money(totalPay)}** 🏢\n` +
+                `Keep grinding, ${p.name}! 🏁`
+            });
+          }
+
+          // New Week announcement — everyone gets this, regardless of pay
+          await (ch as any).send({
+            content: "🗓️ **New pay week — let's get it!** 🏁"
+          });
+
+          // Re-post the order panel so they can start fresh
+          const profile2 = await getProfile(p.mechanicId);
+          await postOrderPanel(ch as any, p.mechanicId, profile2?.display_name ?? p.name, profile2?.commission_rate ?? p.rate);
+
+          notified++;
+        } catch { failed++; }
+      }
+    }
+
+    // ── Post payroll log to pay-logs channel ──────────────────────────────────
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
-      const payLogsChanId = config?.payday_channel_id ?? config?.log_channel_id;
-
+      const payLogsChanId = config?.payday_channel_id;
       if (payLogsChanId) {
         try {
           const ch = await interaction.guild.channels.fetch(payLogsChanId);
           if (ch?.isTextBased()) {
-            // Pull each mechanic's payout for this week
-            const payoutsR = await db.execute({
-              sql: `SELECT pt.mechanic_id, pt.amount, pt.order_count, pt.hours_worked,
-                           pr.display_name, pr.commission_rate
-                    FROM payouts pt JOIN profiles pr ON pt.mechanic_id = pr.discord_id
-                    WHERE pt.week_start = ?
-                    ORDER BY pt.amount DESC`,
-              args: [ws]
-            });
-
-            const payLines = payoutsR.rows.map(r => {
-              const name    = String(r[4] ?? "Unknown");
-              const amount  = Number(r[1] ?? 0);
-              const orders  = Number(r[2] ?? 0);
-              const hrs     = Number(r[3] ?? 0).toFixed(1);
-              const rate    = Number(r[5] ?? 0.3);
-              return `**${name}** · ${orders} orders · ${hrs}h · ${(rate * 100).toFixed(0)}% → **${money(amount)}**`;
-            });
-
-            const panelEmbed = new EmbedBuilder()
-              .setTitle("💸  PAYDAY — WEEKLY PAYROLL PANEL")
+            const payLines = payouts
+              .filter(p => (p.amount + p.managerCut) > 0)
+              .map(p => {
+                const hrsNote = p.hours > 0 ? ` · ${p.hours.toFixed(1)}h` : "";
+                const total = p.amount + p.managerCut;
+                return `**${p.name}** · ${p.orders} orders${hrsNote} → Total: **${money(total)}**`;
+              });
+            const logEmbed = new EmbedBuilder()
+              .setTitle("💸  PAYROLL PROCESSED — New Week Started")
               .setColor(0xffd700)
               .setDescription(
                 `**Pay period:** Week of \`${ws}\`\n` +
-                `**Total revenue this week:** ${money(totalRevenue)}\n\n` +
-                "Review each mechanic's pay below. Click **Notify All Mechanics** to send pay messages to every sales channel and start the new week."
+                `**Total revenue:** ${money(totalRevenue)}\n\n` +
+                `✅ Pay messages sent to **${notified}** mechanic(s).` +
+                (failed > 0 ? `\n⚠️ ${failed} skipped (no sales channel).` : "")
               )
               .addFields(
-                { name: `🔩 Crew Payouts (${mechanicCount} people)`, value: payLines.join("\n") || "None", inline: false },
-                { name: "💰 Total Commission Out", value: money(grandCommission), inline: true },
-                { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: true }
+                { name: `🔩 Crew Paid (${mechanicCount})`,       value: payLines.join("\n") || "None", inline: false },
+                { name: "🏢 Total Billed to Company",            value: `**${money(totalToBill)}**`,   inline: true  }
               )
               .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
               .setTimestamp();
-
-            const notifyRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`payall:notifymechanics:${ws}`)
-                .setLabel("📢  Notify All Mechanics + New Week")
-                .setStyle(ButtonStyle.Success),
-            );
-
-            await (ch as any).send({ embeds: [panelEmbed], components: [notifyRow] });
+            await (ch as any).send({ embeds: [logEmbed] });
           }
         } catch { /* ignore */ }
       }
+    }
+
+    // Refresh pay log panel to reflect the post-payroll zeroed state
+    if (interaction.guild) {
+      const { refreshPayLogPanel } = await import("../commands/payall.js");
+      refreshPayLogPanel(interaction.guild).catch(() => {});
     }
 
     const summaryEmbed = new EmbedBuilder()
@@ -1018,8 +1209,8 @@ export async function handleButton(interaction: ButtonInteraction) {
         "• All completed orders marked as **paid**\n" +
         "• Weekly stats reset to **zero**\n" +
         "• Order numbers reset to **TDC-0001**\n" +
-        `• Pay panel posted in <#${(await getGuildConfig(interaction.guild?.id ?? ""))?.payday_channel_id ?? "pay-logs"}> ✅\n` +
-        "• Click **Notify All Mechanics** in the pay panel to send pay messages + start new week"
+        `• Pay messages sent to **${notified}** sales channels ✅\n` +
+        "• Each mechanic's sales channel has their new order panel ✅"
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();
@@ -1028,52 +1219,44 @@ export async function handleButton(interaction: ButtonInteraction) {
     return;
   }
 
-  // ── Payall: Notify All Mechanics + New Week ───────────────────────────────
-  if (ns === "payall" && action === "notifymechanics") {
+  // ── Payroll: Start New Week confirm ──────────────────────────────────────
+  if (ns === "payroll" && action === "newweek" && rest[0] === "confirm") {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferUpdate();
+    const guildId = interaction.guildId ?? "";
 
-    const ws = id; // week_start stored in button ID
-
-    // Re-fetch payout data for this week
-    const payoutsR = await db.execute({
-      sql: `SELECT pt.mechanic_id, pt.amount, pt.order_count, pt.hours_worked, pr.display_name, pr.sales_channel_id
-            FROM payouts pt JOIN profiles pr ON pt.mechanic_id = pr.discord_id
-            WHERE pt.week_start = ?`,
-      args: [ws]
+    // 1. Archive complete + paid orders, delete drafts
+    const archived = await db.execute({
+      sql: "UPDATE orders SET status = 'cleared' WHERE status IN ('complete','approved','paid') AND (guild_id = ? OR guild_id = '')",
+      args: [guildId]
+    });
+    await db.execute({
+      sql: "DELETE FROM orders WHERE status = 'draft' AND (guild_id = ? OR guild_id = '')",
+      args: [guildId]
     });
 
-    let notified = 0;
+    // 2. Reset all profile stats (hours, commission, snapshots)
+    await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0");
+
+    // 3. Reset pay status to pending for everyone
+    await db.execute("UPDATE profiles SET current_pay_status = 'pending'");
+
+    // 4. Mark the new pay-period start (SQLite-compatible format: YYYY-MM-DD HH:MM:SS)
+    await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+
+    // 5. Send new week messages to all sales channels
+    let sent = 0;
     let failed = 0;
-
     if (interaction.guild) {
-      for (const row of payoutsR.rows) {
-        const mechanicId  = String(row[0] ?? "");
-        const amount      = Number(row[1] ?? 0);
-        const orders      = Number(row[2] ?? 0);
-        const hrs         = Number(row[3] ?? 0).toFixed(1);
-        const name        = String(row[4] ?? "");
-        const salesChanId = row[5] ? String(row[5]) : null;
-        if (!salesChanId) { failed++; continue; }
-
+      const profiles = await db.execute(
+        "SELECT discord_id, sales_channel_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''"
+      );
+      for (const row of profiles.rows) {
+        const salesChanId = row[1] ? String(row[1]) : null;
+        if (!salesChanId) continue;
         try {
           const ch = await interaction.guild.channels.fetch(salesChanId).catch(() => null);
           if (!ch?.isTextBased()) { failed++; continue; }
-
-          // Pay notification
-          await (ch as any).send({
-            content:
-              `# 💸  PAYDAY — ${name.toUpperCase()}!\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `> 📋 **${orders} orders** completed this week\n` +
-              `> ⏱️ **${hrs} hours** worked\n` +
-              `> 💵 **Your commission: ${money(amount)}**\n` +
-              `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-              `**Bill the company: ${money(amount)}** 🏢\n` +
-              `Great work this week, ${name}! Keep grinding. 🏁`
-          });
-
-          // New Week message
           await (ch as any).send({
             content:
               "# 🗓️  NEW WEEK — LET'S GET IT!\n" +
@@ -1083,33 +1266,62 @@ export async function handleButton(interaction: ButtonInteraction) {
               "> 📈 Make this week your best one yet.\n" +
               "━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           });
-
-          // Re-post the order panel button
-          const { postOrderPanel } = await import("./orderpanel.js");
-          const { getProfile: gp2 } = await import("../db.js");
-          const profile2 = await gp2(mechanicId);
-          await postOrderPanel(ch as any, mechanicId, profile2?.display_name ?? name, profile2?.commission_rate ?? 0.3);
-
-          notified++;
+          sent++;
         } catch { failed++; }
       }
     }
 
-    const doneEmbed = new EmbedBuilder()
-      .setTitle("📢  Mechanics Notified — New Week Started")
+    // 6. Post leaderboard to the leaderboard channel (pre-reset snapshot)
+    let leaderboardPosted = false;
+    if (interaction.guild) {
+      const config = await getGuildConfig(interaction.guildId ?? "");
+      const lbChanId = config?.leaderboard_channel_id;
+      if (lbChanId) {
+        try {
+          const lbCh = await interaction.guild.channels.fetch(lbChanId).catch(() => null);
+          if (lbCh?.isTextBased()) {
+            const { postLeaderboard } = await import("../commands/leaderboard.js");
+            await postLeaderboard(lbCh as any);
+            leaderboardPosted = true;
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Refresh pay log panel to show the zeroed state
+    if (interaction.guild) {
+      const { refreshPayLogPanel } = await import("../commands/payall.js");
+      refreshPayLogPanel(interaction.guild).catch(() => {});
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🗓️  NEW WEEK STARTED")
       .setColor(COLORS.approved)
       .setDescription(
-        `✅ Pay messages sent to **${notified}** mechanic(s).\n` +
-        (failed > 0 ? `⚠️ ${failed} skipped (no sales channel or bot access).\n` : "") +
-        "\nEach sales channel now has:\n" +
-        "• 💸 Their pay amount and \"bill the company\" message\n" +
-        "• 🗓️ New Week announcement\n" +
-        "• 📋 Fresh order panel to start taking orders"
+        `🗃️ **${Number(archived.rowsAffected ?? 0)}** order(s) archived, drafts cleared.\n` +
+        "📊 All stats reset to zero.\n" +
+        "🔴 All pay statuses reset to **pending**.\n" +
+        `📢 New week message sent to **${sent}** sales channel(s).\n` +
+        (failed > 0 ? `⚠️ ${failed} channel(s) skipped (bot may lack permissions).\n` : "") +
+        (leaderboardPosted ? "🏆 Leaderboard posted.\n" : "")
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();
+    await interaction.editReply({ embeds: [embed], components: [] });
+    return;
+  }
 
-    await interaction.editReply({ embeds: [doneEmbed], components: [] });
+  if (ns === "payroll" && action === "newweek" && rest[0] === "cancel") {
+    await interaction.update({ content: "❌ Cancelled.", embeds: [], components: [] });
+    return;
+  }
+
+  // ── Lifetime Earnings: refresh embed ─────────────────────────────────────
+  if (ns === "lifetime" && action === "refresh") {
+    await interaction.deferUpdate();
+    const { buildLifetimeEarningsEmbed } = await import("./adminbuttons.js");
+    const embed = await buildLifetimeEarningsEmbed();
+    await interaction.editReply({ embeds: [embed] });
     return;
   }
 
@@ -1121,7 +1333,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Schedule Payday now ────────────────────────────────────────────────────
   if (ns === "payall" && action === "schedulenow") {
     if (!(await requireRole(interaction, "owner"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const ws = weekStart();
     const embed = await buildPayallSummaryEmbed(ws, interaction.guild ?? undefined);
     if (!embed) {
@@ -1139,21 +1351,28 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Sales view detailed ───────────────────────────────────────────────────
   if (ns === "sales" && action === "viewdetailed") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const profile = await getProfile(id);
     if (!profile) { await interaction.editReply({ content: "❌ Profile not found." }); return; }
     const ws = weekStart();
     const today = new Date().toISOString().split("T")[0];
     const yearStart = `${new Date().getFullYear()}-01-01`;
-    const weekR   = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, ws] });
+    const SINCE_RESET_VD = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+    const weekR   = await db.execute({ sql: `SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET_VD}`, args: [id] });
     const todayR  = await db.execute({ sql: "SELECT total FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) = ?",              args: [id, today] });
     const ytdR    = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, yearStart] });
-    const weekRev = weekR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const weekCommission = weekR.rows.reduce((s, row) => s + Number(row[1] ?? 0) * profile.commission_rate, 0);
-    const todayRev = todayR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const ytdRev   = ytdR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const weekRev   = weekR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const weekLabour = weekR.rows.reduce((s, row) => s + Number(row[1] ?? 0), 0);
+    const todayRev  = todayR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const ytdRev    = ytdR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
     const ytdCommission = ytdR.rows.reduce((s, row) => s + Number(row[1] ?? 0) * profile.commission_rate, 0);
-    const { buildDashboardEmbed } = await import("../lib/embeds.js");
+    // Snapshot-aware week commission — matches /setpay + draft projections
+    const commAdj_vd    = profile.commission_adjustment ?? 0;
+    const snapshot_vd   = profile.commission_labour_snapshot ?? 0;
+    const labourAfter_vd = Math.max(0, weekLabour - snapshot_vd);
+    const weekCommission = commAdj_vd > 0
+      ? commAdj_vd + labourAfter_vd * profile.commission_rate
+      : weekLabour * profile.commission_rate;
     const embed = buildDashboardEmbed(profile.display_name, profile.status, todayR.rows.length, todayRev, weekR.rows.length, weekRev, profile.hours_worked_this_week, weekCommission, ytdR.rows.length, ytdRev, ytdCommission);
     await interaction.editReply({ embeds: [embed] });
     return;
@@ -1164,7 +1383,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!(await requireRole(interaction, "owner"))) return;
     await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT title, discord_message_id FROM jobs WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Job not found.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.followUp({ content: "❌ Job not found.", flags: MessageFlags.Ephemeral }); return; }
     const [title, msgId] = [String(r.rows[0][0]), String(r.rows[0][1] ?? "")];
     await db.execute({ sql: "DELETE FROM jobs WHERE id = ?", args: [id] });
     if (msgId && interaction.guild) {
@@ -1186,15 +1405,14 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Job apply ──────────────────────────────────────────────────────────────
   if (ns === "job" && action === "apply") {
     const r = await db.execute({ sql: "SELECT title FROM jobs WHERE id = ?", args: [id] });
-    if (!r.rows[0]) { await interaction.reply({ content: "❌ This job posting no longer exists.", ephemeral: true }); return; }
+    if (!r.rows[0]) { await interaction.reply({ content: "❌ This job posting no longer exists.", flags: MessageFlags.Ephemeral }); return; }
     const title = String(r.rows[0][0]);
-    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder: AR } = await import("discord.js");
     const modal = new ModalBuilder().setCustomId(`job:applymodal:${id}`).setTitle(`Apply — ${title.slice(0, 40)}`);
     modal.addComponents(
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("message").setLabel("Why do you want this position?").setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
       ),
-      new AR<InstanceType<typeof TextInputBuilder>>().addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("experience").setLabel("Relevant experience (optional)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200)
       )
     );
@@ -1205,7 +1423,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Manager force clock-out button (from /timeclock who-is-in) ────────────
   if (ns === "tcmgr" && action === "forceout") {
     if (!(await requireRole(interaction, "manager"))) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const targetId = id;
 
     const activeR = await db.execute({
@@ -1231,9 +1449,9 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [mins / 60, targetId]
     });
 
-    const { warnedMechanics, stayedIn } = await import("../lib/warnState.js");
     warnedMechanics.delete(entry.id);
     stayedIn.delete(targetId);
+    await clearWarnMessage(entry, interaction.client);
 
     const profile = await getProfile(targetId);
     const name    = profile?.display_name ?? `<@${targetId}>`;
@@ -1241,7 +1459,6 @@ export async function handleButton(interaction: ButtonInteraction) {
     const m = Math.round(mins % 60);
 
     // Edit clock-in message in the timeclock channel if we have it
-    const { buildClockOutEmbed } = await import("../lib/embeds.js");
     const clockEmbed = buildClockOutEmbed(name, entry.clock_in_time, new Date().toISOString().replace("T", " ").slice(0, 19), mins, 0);
     if (entry.clock_message_id && entry.clock_channel_id && interaction.guild) {
       try {
@@ -1305,8 +1522,7 @@ export async function handleButton(interaction: ButtonInteraction) {
   // ── Settings catalog ───────────────────────────────────────────────────────
   if (ns === "settings" && action === "viewcatalog") {
     if (!(await requireRole(interaction, "mechanic"))) return;
-    await interaction.deferReply({ ephemeral: true });
-    const { getSetting } = await import("../db.js");
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const catalog = JSON.parse((await getSetting("parts_catalog")) ?? "{}");
     const items: any[] = catalog.items ?? [];
     const grouped: Record<string, string[]> = {};
