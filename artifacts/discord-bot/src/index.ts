@@ -119,7 +119,6 @@ const commandDefs = [
   { data: clearData,            execute: clearExecute            },
   { data: newweekData,          execute: newweekExecute          },
   { data: timeclockManageData,  execute: timeclockManageExecute  },
-  { data: setpayData,           execute: setpayExecute           },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
