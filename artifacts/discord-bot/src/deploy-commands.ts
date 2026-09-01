@@ -8,6 +8,7 @@ import { data as breakdownData } from "./commands/breakdown.js";
 import { data as analyticsData } from "./commands/analytics.js";
 import { data as commissionData } from "./commands/commission.js";
 import { data as payData } from "./commands/pay.js";
+import { data as setpayData } from "./commands/setpay.js";
 import { data as jobData } from "./commands/job.js";
 import { data as setupData } from "./commands/setup.js";
 import { data as settingsData } from "./commands/settings.js";
@@ -28,6 +29,7 @@ const commands = [
   analyticsData,
   commissionData,
   payData,
+  setpayData,
   jobData,
   setupData,
   settingsData

@@ -17,6 +17,7 @@ import { data as timeclockManageData, execute as timeclockManageExecute } from "
 import { data as mysalesData,     execute as mysalesExecute     } from "./commands/mysales.js";
 import { data as payData,         execute as payExecute         } from "./commands/pay.js";
 import { data as payallData,      execute as payallExecute      } from "./commands/payall.js";
+import { data as setpayData,      execute as setpayExecute      } from "./commands/setpay.js";
 import { data as setupData,       execute as setupExecute       } from "./commands/setup.js";
 import { data as settingsData,    execute as settingsExecute    } from "./commands/settings.js";
 import { data as helpData,        execute as helpExecute        } from "./commands/help.js";
@@ -28,7 +29,6 @@ import { data as setrankData,     execute as setrankExecute     } from "./comman
 import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { data as clearData,       execute as clearExecute       } from "./commands/clear.js";
 import { data as newweekData,     execute as newweekExecute     } from "./commands/newweek.js";
-import { data as setpayData,      execute as setpayExecute      } from "./commands/setpay.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -106,6 +106,7 @@ const commandDefs = [
   { data: mysalesData,     execute: mysalesExecute     },
   { data: payData,         execute: payExecute         },
   { data: payallData,      execute: payallExecute      },
+  { data: setpayData,      execute: setpayExecute      },
   { data: setupData,       execute: setupExecute       },
   { data: settingsData,    execute: settingsExecute    },
   { data: helpData,        execute: helpExecute        },
