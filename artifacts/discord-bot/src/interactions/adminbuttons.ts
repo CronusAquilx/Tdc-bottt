@@ -9,6 +9,7 @@ import {
 import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
+import { buildFullCrewSyncEmbed, syncFullCrew } from "../commands/crew.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { showRaffleTypeSelector } from "./raffle.js";
@@ -206,7 +207,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         "• **Resend Panel** — re-post a stuck order panel to a mechanic's channel\n" +
         "• **Job Post** — post a hiring ad to the jobs channel\n" +
         "• **LOA** — submit a Leave of Absence request\n" +
-        "• **Timeclock** — set up the clock-in/clock-out channel"
+        "• **Timeclock** — set up the clock-in/clock-out channel\n" +
+        "• **Full Crew Sync** — import members with the mechanic role and link matching sales channels"
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -216,7 +218,23 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:jobpost").setLabel("📢  Post Job Ad").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId("admin:setup:loa").setLabel("🌴  Submit LOA").setStyle(ButtonStyle.Secondary),
     );
-    await interaction.editReply({ embeds: [embed], components: [row1] });
+    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:crew:syncfull").setLabel("🔄  Full Crew Sync").setStyle(ButtonStyle.Success),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    return true;
+  }
+
+  // ── Staff: import mechanic-role members and repair sales-channel links ─────
+  if (section === "crew" && action === "syncfull") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const result = await syncFullCrew(guild);
+      await interaction.editReply({ embeds: [buildFullCrewSyncEmbed(result)] });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Full crew sync failed: ${err?.message ?? "Unknown error"}` });
+    }
     return true;
   }
 

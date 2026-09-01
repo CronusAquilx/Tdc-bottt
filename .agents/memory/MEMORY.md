@@ -4,3 +4,4 @@
 - [TDC Pay Log Panel](tdc-paylog-panel.md) — live per-mechanic embed in payday_channel; guild-scoped msg ID stored in app_settings as paylogs_panel_msg_id:<guildId>; refreshPayLogPanel() called fire-and-forget after every order completion + every reset
 - [TDC Reset Timestamp Format](tdc-reset-ts.md) — order_number_reset_ts must be saved as YYYY-MM-DD HH:MM:SS (new Date().toISOString().replace("T"," ").slice(0,19)) not ISO-Z format; leaderboard + payroll both use SINCE_RESET subquery not weekStart
 - [TDC Leaderboard](tdc-leaderboard.md) — ranks by total_labour DESC; shows "$X labour · Y% → $Z commission" per mechanic; uses SINCE_RESET (order_number_reset_ts) boundary not calendar weekStart; includes complete/approved/paid statuses
+- [TDC Full Crew Sync](tdc-full-crew-sync.md) — full repair mode is `/crew sync mode:full` because the existing `/crew` command already uses direct subcommands

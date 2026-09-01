@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder , MessageFlags} from "discord.js";
-import { db, getProfile, getGuildConfig } from "../db.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, MessageFlags, ChannelType, Guild } from "discord.js";
+import { db, getProfile, getGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 
@@ -57,8 +57,182 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand(s =>
     s.setName("sync")
-      .setDescription("Re-assign Discord roles to all crew members based on their DB role (manager+)")
+      .setDescription("Synchronize the crew database and Discord roles (manager+)")
+      .addStringOption(o =>
+        o.setName("mode")
+          .setDescription("Use full to import mechanic-role members and link their sales channels")
+          .setRequired(false)
+          .addChoices(
+            { name: "Roles only", value: "roles" },
+            { name: "Full crew + sales channels", value: "full" }
+          )
+      )
   );
+
+export interface FullCrewSyncResult {
+  scanned: number;
+  added: number;
+  alreadyInCrew: number;
+  linked: number;
+  alreadyLinked: number;
+  noChannel: number;
+  failed: number;
+  details: string[];
+  error?: string;
+}
+
+function emptyFullCrewSyncResult(): FullCrewSyncResult {
+  return {
+    scanned: 0,
+    added: 0,
+    alreadyInCrew: 0,
+    linked: 0,
+    alreadyLinked: 0,
+    noChannel: 0,
+    failed: 0,
+    details: []
+  };
+}
+
+function channelSlug(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 90);
+}
+
+function findSalesChannel(
+  channels: Array<{ id: string; name: string }>,
+  names: string[]
+): { id: string; name: string } | null {
+  const slugs = [...new Set(names.map(channelSlug).filter(Boolean))];
+  const candidates = new Set(slugs.flatMap(slug => [slug, `sales-${slug}`]));
+  const matches = channels.filter(channel => candidates.has(channelSlug(channel.name)));
+  if (!matches.length) return null;
+
+  // Prefer the conventional sales-name match when both "melvin" and
+  // "sales-melvin" exist.
+  return matches.sort((a, b) => {
+    const aSales = a.name.toLowerCase().startsWith("sales-") ? 1 : 0;
+    const bSales = b.name.toLowerCase().startsWith("sales-") ? 1 : 0;
+    return bSales - aSales;
+  })[0] ?? null;
+}
+
+export async function syncFullCrew(guild: Guild): Promise<FullCrewSyncResult> {
+  const result = emptyFullCrewSyncResult();
+  const config = await getGuildConfig(guild.id);
+  const mechanicRoleIds = splitRoleIds(config?.mechanic_role_id);
+
+  if (!mechanicRoleIds.length) {
+    result.error = "No Discord mechanic role is configured. Set it up in Admin Panel → Config first.";
+    return result;
+  }
+
+  const members = await guild.members.fetch();
+  const mechanicMembers = [...members.values()].filter(member =>
+    !member.user.bot && member.roles.cache.some(role => mechanicRoleIds.includes(role.id))
+  );
+  result.scanned = mechanicMembers.length;
+
+  let textChannels: Array<{ id: string; name: string }> = [];
+  try {
+    const channels = await guild.channels.fetch();
+    textChannels = [...channels.values()]
+      .filter(channel => channel?.type === ChannelType.GuildText)
+      .map(channel => ({ id: channel!.id, name: channel!.name }));
+  } catch {
+    result.details.push("Could not fetch the server's channels.");
+  }
+
+  for (const member of mechanicMembers) {
+    const displayName = member.displayName?.trim() || member.user.globalName?.trim() || member.user.username;
+    try {
+      const profile = await getProfile(member.id);
+      const roleRows = await db.execute({
+        sql: "SELECT role FROM user_roles WHERE discord_id = ?",
+        args: [member.id]
+      });
+
+      if (!profile) {
+        await db.execute({
+          sql: "INSERT OR IGNORE INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)",
+          args: [member.id, displayName]
+        });
+      }
+
+      if (!roleRows.rows.length) {
+        await db.execute({
+          sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
+          args: [member.id]
+        });
+        result.added++;
+      } else {
+        result.alreadyInCrew++;
+      }
+
+      const matchingChannel = findSalesChannel(
+        textChannels,
+        [displayName, profile?.display_name ?? ""]
+      );
+      const currentChannel = profile?.sales_channel_id
+        ? textChannels.find(channel => channel.id === profile.sales_channel_id)
+        : null;
+      const salesChannel = matchingChannel ?? currentChannel;
+
+      if (salesChannel) {
+        if (profile?.sales_channel_id === salesChannel.id) {
+          result.alreadyLinked++;
+        } else {
+          await db.execute({
+            sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?",
+            args: [salesChannel.id, member.id]
+          });
+          result.linked++;
+        }
+      } else {
+        result.noChannel++;
+        result.details.push(`${displayName}: no channel named ${channelSlug(displayName)} or sales-${channelSlug(displayName)}`);
+      }
+    } catch (err: any) {
+      result.failed++;
+      result.details.push(`${displayName}: ${err?.message ?? "sync failed"}`);
+    }
+  }
+
+  return result;
+}
+
+export function buildFullCrewSyncEmbed(result: FullCrewSyncResult): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle("🔄  FULL CREW SYNC")
+    .setColor(result.error ? COLORS.rejected : COLORS.approved)
+    .setFooter({ text: "Tokyo Drift Customs" })
+    .setTimestamp();
+
+  if (result.error) {
+    return embed.setDescription(`❌ ${result.error}`);
+  }
+
+  const details = result.details.length
+    ? `\n\n**Needs attention:**\n${result.details.slice(0, 8).map(detail => `• ${detail}`).join("\n")}`
+    : "";
+
+  return embed.setDescription(
+    `Scanned **${result.scanned}** members with the configured mechanic role.\n\n` +
+    `✅ **${result.added}** added to the crew\n` +
+    `↪️ **${result.alreadyInCrew}** already in the crew (skipped)\n` +
+    `🔗 **${result.linked}** sales channels linked\n` +
+    `✓ **${result.alreadyLinked}** sales channels already linked\n` +
+    `⚠️ **${result.noChannel}** without a matching sales channel\n` +
+    (result.failed > 0 ? `❌ **${result.failed}** failed\n` : "") +
+    details
+  );
+}
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
@@ -276,13 +450,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const guild = interaction.guild!;
+    const mode = interaction.options.getString("mode") ?? "roles";
+    if (mode === "full") {
+      try {
+        const result = await syncFullCrew(guild);
+        await interaction.editReply({ embeds: [buildFullCrewSyncEmbed(result)] });
+      } catch (err: any) {
+        await interaction.editReply({ content: `❌ Full crew sync failed: ${err?.message ?? "Unknown error"}` });
+      }
+      return;
+    }
+
     const config = await getGuildConfig(guild.id);
 
     const roleMap: Record<string, string[]> = {
-      owner:    config?.owner_role_id    ? [config.owner_role_id]    : [],
-      manager:  config?.manager_role_id  ? [config.manager_role_id]  : [],
-      trainer:  config?.trainer_role_id  ? [config.trainer_role_id]  : [],
-      mechanic: config?.mechanic_role_id ? [config.mechanic_role_id] : [],
+      owner:    splitRoleIds(config?.owner_role_id),
+      manager:  splitRoleIds(config?.manager_role_id),
+      trainer:  splitRoleIds(config?.trainer_role_id),
+      mechanic: splitRoleIds(config?.mechanic_role_id),
     };
 
     const crewRows = await db.execute(
