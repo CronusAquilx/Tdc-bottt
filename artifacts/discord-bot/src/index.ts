@@ -45,7 +45,7 @@ import { db } from "./db.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
-  console.error("[TDC] ❌ DISCORD_TOKEN is not set. Add it to Replit Secrets.");
+  console.error("[TDC] ❌ DISCORD_TOKEN is not set. Add it to this service's environment variables (Replit Secrets or Render Environment).");
   process.exit(1);
 }
 
