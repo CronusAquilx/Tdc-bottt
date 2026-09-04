@@ -489,6 +489,39 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Channel select menus ───────────────────────────────────────────────────
   if (interaction.isChannelSelectMenu()) {
+    // ── Pick a category before confirming child-channel deletion ───────────────
+    if (ns === "admin" && action === "crew" && rest[0] === "pickcategorydelete") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const categoryId = interaction.values[0];
+      const guild = interaction.guild!;
+      await interaction.deferUpdate();
+
+      const category = await guild.channels.fetch(categoryId).catch(() => null);
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        await interaction.editReply({ content: "❌ Category not found.", embeds: [], components: [] });
+        return;
+      }
+      const channels = await guild.channels.fetch();
+      const children = [...channels.values()].filter(channel => channel?.parentId === categoryId);
+      const names = children.slice(0, 12).map(channel => `• #${channel!.name}`).join("\n");
+      const more = children.length > 12 ? `\n• …and ${children.length - 12} more` : "";
+      const embed = new EmbedBuilder()
+        .setTitle("⚠️  CONFIRM CATEGORY DELETION")
+        .setColor(COLORS.rejected)
+        .setDescription(
+          `This will permanently delete **${children.length}** channel${children.length === 1 ? "" : "s"} inside **${category.name}**.\n\n` +
+          (names || "*No child channels found.*") + more +
+          "\n\nThe category will remain. Crew profiles, orders, and payroll history will be preserved, but deleted channel links will be cleared."
+        )
+        .setFooter({ text: FOOTER });
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`admin:crew:deletecategoryconfirm:${categoryId}`).setLabel("🗑️  Delete All Channels").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("admin:crew:deletecategorycancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+      );
+      await interaction.editReply({ embeds: [embed], components: [row] });
+      return;
+    }
+
     // ── Attach existing channel as sales channel ──────────────────────────────
     if (ns === "admin" && action === "saleschan" && rest[0] === "pickchan") {
       if (!(await requireRole(interaction, "manager"))) return;

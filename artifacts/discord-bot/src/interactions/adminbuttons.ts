@@ -3,13 +3,13 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ModalBuilder, TextInputBuilder, TextInputStyle,
   ChannelType, PermissionFlagsBits,
-  RoleSelectMenuBuilder, UserSelectMenuBuilder,
+  RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelSelectMenuBuilder,
   TextChannel
 , MessageFlags} from "discord.js";
 import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
-import { buildFullCrewSyncEmbed, syncFullCrew } from "../commands/crew.js";
+import { buildFullCrewSyncEmbed, syncFullCrew, buildCrewHealthEmbed, runCrewHealthCheck } from "../commands/crew.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { showRaffleTypeSelector } from "./raffle.js";
@@ -222,6 +222,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:crew:add").setLabel("➕  Add Crew").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:crew:syncfull").setLabel("🔄  Full Crew Sync").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("admin:crew:health").setLabel("🩺  Health Check").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:crew:deletecategory").setLabel("🗑️  Delete Category Channels").setStyle(ButtonStyle.Danger),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });
     return true;
@@ -260,6 +262,124 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     } catch (err: any) {
       await interaction.editReply({ content: `❌ Full crew sync failed: ${err?.message ?? "Unknown error"}` });
     }
+    return true;
+  }
+
+  // ── Staff: compare and repair saved crew against Discord ───────────────────
+  if (section === "crew" && action === "health") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const result = await runCrewHealthCheck(guild, false);
+      const repairRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId("admin:crew:healthrepair").setLabel("🛠️  Repair Everything").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("admin:crew:health").setLabel("🔄  Run Check Again").setStyle(ButtonStyle.Secondary),
+      );
+      await interaction.editReply({ embeds: [buildCrewHealthEmbed(result)], components: [repairRow] });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Crew health check failed: ${err?.message ?? "Unknown error"}` });
+    }
+    return true;
+  }
+
+  if (section === "crew" && action === "healthrepair") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const result = await runCrewHealthCheck(guild, true);
+      await interaction.editReply({ embeds: [buildCrewHealthEmbed(result)] });
+    } catch (err: any) {
+      await interaction.editReply({ content: `❌ Crew repair failed: ${err?.message ?? "Unknown error"}` });
+    }
+    return true;
+  }
+
+  // ── Staff: choose a category whose child channels should be deleted ─────────
+  if (section === "crew" && action === "deletecategory") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("🗑️  DELETE CATEGORY CHANNELS")
+      .setColor(COLORS.rejected)
+      .setDescription(
+        "Select a category to remove **all channels inside it**.\n\n" +
+        "The category itself will remain. This is permanent, so you will get a confirmation step before anything is deleted.\n" +
+        "Crew profiles, orders, and payroll history are preserved; only stale channel links are cleared."
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId("admin:crew:pickcategorydelete")
+        .setChannelTypes(ChannelType.GuildCategory)
+        .setPlaceholder("Select a category...")
+        .setMinValues(1).setMaxValues(1)
+    );
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
+    return true;
+  }
+
+  // ── Staff: confirm deleting every child channel under a category ────────────
+  if (section === "crew" && action === "deletecategoryconfirm") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const categoryId = parts[3];
+    if (!categoryId) return false;
+    await interaction.deferUpdate();
+
+    const category = await guild.channels.fetch(categoryId).catch(() => null);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      await interaction.editReply({ content: "❌ That category no longer exists.", embeds: [], components: [] });
+      return true;
+    }
+
+    const allChannels = await guild.channels.fetch();
+    const childChannels = [...allChannels.values()].filter(channel => channel?.parentId === categoryId);
+    if (!childChannels.length) {
+      await interaction.editReply({ content: `✅ **${category.name}** has no channels to delete.`, embeds: [], components: [] });
+      return true;
+    }
+
+    const deletedIds: string[] = [];
+    const failedNames: string[] = [];
+    for (const channel of childChannels) {
+      if (!channel) continue;
+      try {
+        await channel.delete(`Deleted all channels under category ${category.name} by ${interaction.user.tag}`);
+        deletedIds.push(channel.id);
+      } catch {
+        failedNames.push(`#${channel.name}`);
+      }
+    }
+
+    if (deletedIds.length) {
+      const placeholders = deletedIds.map(() => "?").join(",");
+      for (const field of [
+        "orders_channel_id", "jobs_channel_id", "log_channel_id", "archive_channel_id",
+        "timeclock_channel_id", "loa_channel_id", "raffle_channel_id", "leaderboard_channel_id",
+        "training_channel_id", "payday_channel_id", "clocklog_channel_id", "lifetime_earnings_channel_id"
+      ]) {
+        await db.execute({
+          sql: `UPDATE guild_config SET ${field} = NULL WHERE guild_id = ? AND ${field} IN (${placeholders})`,
+          args: [guild.id, ...deletedIds]
+        });
+      }
+      await db.execute({ sql: `UPDATE profiles SET sales_channel_id = NULL WHERE sales_channel_id IN (${placeholders})`, args: deletedIds });
+      await db.execute({ sql: `UPDATE timeclock SET clock_channel_id = NULL, clock_message_id = NULL WHERE clock_channel_id IN (${placeholders})`, args: deletedIds });
+      await db.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+    }
+
+    await interaction.editReply({
+      content:
+        `🗑️ Deleted **${deletedIds.length}** channel${deletedIds.length === 1 ? "" : "s"} under **${category.name}**.` +
+        (failedNames.length ? `\n❌ Could not delete: ${failedNames.join(", ")}` : "") +
+        "\nCrew profiles, orders, and payroll history were preserved.",
+      embeds: [],
+      components: []
+    });
+    return true;
+  }
+
+  if (section === "crew" && action === "deletecategorycancel") {
+    await interaction.deferUpdate();
+    await interaction.editReply({ content: "✅ Category cleanup cancelled.", embeds: [], components: [] });
     return true;
   }
 

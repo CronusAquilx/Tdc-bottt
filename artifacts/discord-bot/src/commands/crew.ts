@@ -81,6 +81,24 @@ export interface FullCrewSyncResult {
   error?: string;
 }
 
+export interface CrewHealthResult {
+  repaired: boolean;
+  scannedDiscordMechanics: number;
+  scannedDatabaseMechanics: number;
+  profilesCreated: number;
+  databaseRolesAdded: number;
+  discordRolesApplied: number;
+  channelsLinked: number;
+  alreadyHealthy: number;
+  missingDiscordMembers: string[];
+  missingProfiles: string[];
+  missingMechanicRoles: string[];
+  missingSalesChannels: string[];
+  staleSalesLinks: string[];
+  failures: string[];
+  error?: string;
+}
+
 function emptyFullCrewSyncResult(): FullCrewSyncResult {
   return {
     scanned: 0,
@@ -91,6 +109,25 @@ function emptyFullCrewSyncResult(): FullCrewSyncResult {
     noChannel: 0,
     failed: 0,
     details: []
+  };
+}
+
+function emptyCrewHealthResult(repaired: boolean): CrewHealthResult {
+  return {
+    repaired,
+    scannedDiscordMechanics: 0,
+    scannedDatabaseMechanics: 0,
+    profilesCreated: 0,
+    databaseRolesAdded: 0,
+    discordRolesApplied: 0,
+    channelsLinked: 0,
+    alreadyHealthy: 0,
+    missingDiscordMembers: [],
+    missingProfiles: [],
+    missingMechanicRoles: [],
+    missingSalesChannels: [],
+    staleSalesLinks: [],
+    failures: []
   };
 }
 
@@ -121,6 +158,195 @@ function findSalesChannel(
     const bSales = b.name.toLowerCase().startsWith("sales-") ? 1 : 0;
     return bSales - aSales;
   })[0] ?? null;
+}
+
+/**
+ * Compare the Discord mechanic role, saved crew records, and sales-channel links.
+ * Repair mode only adds missing membership/roles and repairs links to existing
+ * channels; it never deletes profiles, orders, or channels.
+ */
+export async function runCrewHealthCheck(guild: Guild, repaired = false): Promise<CrewHealthResult> {
+  const result = emptyCrewHealthResult(repaired);
+  const config = await getGuildConfig(guild.id);
+  const mechanicRoleIds = splitRoleIds(config?.mechanic_role_id);
+
+  if (!mechanicRoleIds.length) {
+    result.error = "No Discord mechanic role is configured. Set it up in Admin Panel → Config first.";
+    return result;
+  }
+
+  const members = await guild.members.fetch();
+  const discordMechanics = [...members.values()].filter(member =>
+    !member.user.bot && member.roles.cache.some(role => mechanicRoleIds.includes(role.id))
+  );
+  result.scannedDiscordMechanics = discordMechanics.length;
+
+  let textChannels: Array<{ id: string; name: string }> = [];
+  try {
+    const channels = await guild.channels.fetch();
+    textChannels = [...channels.values()]
+      .filter(channel => channel?.type === ChannelType.GuildText)
+      .map(channel => ({ id: channel!.id, name: channel!.name }));
+  } catch {
+    result.failures.push("Could not fetch the server's channels.");
+  }
+
+  const databaseRows = await db.execute({
+    sql: `SELECT DISTINCT p.discord_id, p.display_name, p.sales_channel_id
+          FROM profiles p
+          INNER JOIN user_roles ur ON ur.discord_id = p.discord_id AND ur.role = 'mechanic'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM user_roles senior
+            WHERE senior.discord_id = p.discord_id
+              AND senior.role IN ('owner', 'manager', 'trainer')
+          )
+          ORDER BY p.display_name`,
+    args: []
+  });
+  result.scannedDatabaseMechanics = databaseRows.rows.length;
+
+  const databaseIds = new Set(databaseRows.rows.map(row => String(row[0] ?? "")));
+  const profileMap = new Map<string, { displayName: string; salesChannelId: string | null }>(
+    databaseRows.rows.map(row => [
+      String(row[0] ?? ""),
+      { displayName: String(row[1] ?? row[0] ?? "Unknown"), salesChannelId: row[2] ? String(row[2]) : null }
+    ])
+  );
+
+  for (const member of discordMechanics) {
+    const displayName = member.displayName?.trim() || member.user.globalName?.trim() || member.user.username;
+    const roleRows = await db.execute({
+      sql: "SELECT role FROM user_roles WHERE discord_id = ?",
+      args: [member.id]
+    });
+    const roles = roleRows.rows.map(row => String(row[0] ?? ""));
+    const hasSeniorRole = roles.some(role => ["owner", "manager", "trainer"].includes(role));
+    const profile = await getProfile(member.id);
+
+    if (!profile && !hasSeniorRole) {
+      result.missingProfiles.push(displayName);
+      if (repaired) {
+        try {
+          await db.execute({
+            sql: "INSERT INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)",
+            args: [member.id, displayName]
+          });
+          await db.execute({
+            sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
+            args: [member.id]
+          });
+          result.profilesCreated++;
+          result.databaseRolesAdded++;
+          profileMap.set(member.id, { displayName, salesChannelId: null });
+        } catch (err: any) {
+          result.failures.push(`${displayName}: ${err?.message ?? "could not create crew profile"}`);
+        }
+      }
+    } else if (!roles.includes("mechanic") && !hasSeniorRole) {
+      result.missingProfiles.push(`${displayName} (database mechanic role missing)`);
+      if (repaired) {
+        try {
+          await db.execute({
+            sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
+            args: [member.id]
+          });
+          result.databaseRolesAdded++;
+          if (profile) profileMap.set(member.id, { displayName: profile.display_name, salesChannelId: profile.sales_channel_id });
+        } catch (err: any) {
+          result.failures.push(`${displayName}: ${err?.message ?? "could not restore database mechanic role"}`);
+        }
+      }
+    }
+  }
+
+  for (const [memberId, profile] of profileMap) {
+    const member = members.get(memberId);
+    if (!member) {
+      result.missingDiscordMembers.push(profile.displayName);
+      continue;
+    }
+
+    if (!member.roles.cache.some(role => mechanicRoleIds.includes(role.id))) {
+      result.missingMechanicRoles.push(profile.displayName);
+      if (repaired) {
+        try {
+          for (const roleId of mechanicRoleIds) {
+            if (!member.roles.cache.has(roleId)) {
+              await member.roles.add(roleId, "Crew health repair");
+              result.discordRolesApplied++;
+            }
+          }
+        } catch (err: any) {
+          result.failures.push(`${profile.displayName}: ${err?.message ?? "could not apply mechanic Discord role"}`);
+        }
+      }
+    }
+
+    const currentChannel = profile.salesChannelId
+      ? textChannels.find(channel => channel.id === profile.salesChannelId)
+      : null;
+    if (profile.salesChannelId && !currentChannel) {
+      result.staleSalesLinks.push(profile.displayName);
+    }
+
+    const matchingChannel = findSalesChannel(textChannels, [profile.displayName]);
+    const salesChannel = currentChannel ?? matchingChannel;
+    if (salesChannel) {
+      if (profile.salesChannelId === salesChannel.id) {
+        result.alreadyHealthy++;
+      } else if (repaired) {
+        try {
+          await db.execute({
+            sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?",
+            args: [salesChannel.id, memberId]
+          });
+          result.channelsLinked++;
+        } catch (err: any) {
+          result.failures.push(`${profile.displayName}: ${err?.message ?? "could not link sales channel"}`);
+        }
+      } else {
+        result.channelsLinked++;
+      }
+    } else {
+      result.missingSalesChannels.push(profile.displayName);
+    }
+  }
+
+  // A Discord-role mechanic with no saved profile may not have been added to
+  // profileMap in scan mode, but is still reported above as needing repair.
+  if (repaired) await checkpointDatabase();
+  return result;
+}
+
+export function buildCrewHealthEmbed(result: CrewHealthResult): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setTitle(result.repaired ? "🛠️  CREW REPAIR COMPLETE" : "🩺  CREW HEALTH CHECK")
+    .setColor(result.error ? COLORS.rejected : result.failures.length ? COLORS.warning : COLORS.approved)
+    .setFooter({ text: "Tokyo Drift Customs" })
+    .setTimestamp();
+
+  if (result.error) return embed.setDescription(`❌ ${result.error}`);
+
+  const attention: string[] = [];
+  if (result.missingProfiles.length) attention.push(`Profiles / database roles: ${result.missingProfiles.slice(0, 6).join(", ")}`);
+  if (result.missingDiscordMembers.length) attention.push(`Members no longer in this server: ${result.missingDiscordMembers.slice(0, 6).join(", ")}`);
+  if (result.missingMechanicRoles.length) attention.push(`Missing Discord mechanic role: ${result.missingMechanicRoles.slice(0, 6).join(", ")}`);
+  if (result.staleSalesLinks.length) attention.push(`Stale sales-channel links: ${result.staleSalesLinks.slice(0, 6).join(", ")}`);
+  if (result.missingSalesChannels.length) attention.push(`No matching sales channel: ${result.missingSalesChannels.slice(0, 6).join(", ")}`);
+  if (result.failures.length) attention.push(`Failures: ${result.failures.slice(0, 6).join(", ")}`);
+
+  return embed.setDescription(
+    `Scanned **${result.scannedDiscordMechanics}** Discord mechanics and **${result.scannedDatabaseMechanics}** saved mechanics.\n\n` +
+    (result.repaired
+      ? `✅ **${result.profilesCreated}** profiles created\n` +
+        `🗃️ **${result.databaseRolesAdded}** database mechanic roles restored\n` +
+        `🎭 **${result.discordRolesApplied}** Discord mechanic roles applied\n` +
+        `🔗 **${result.channelsLinked}** sales channels linked\n`
+      : `✅ **${result.alreadyHealthy}** existing links and records are healthy\n`) +
+    (attention.length
+      ? `\n**Needs attention:**\n${attention.map(item => `• ${item}`).join("\n")}`
+      : "\n✨ Everything is aligned.")
+  );
 }
 
 export async function syncFullCrew(guild: Guild): Promise<FullCrewSyncResult> {
