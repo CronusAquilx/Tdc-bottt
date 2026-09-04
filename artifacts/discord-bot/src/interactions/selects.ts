@@ -9,6 +9,7 @@ import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { mainDraftButtonRows, categoryViewButtonRow, getCommissionData } from "./draftbuttons.js";
+import { ensureMechanicSalesChannel } from "../lib/saleschannel.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -101,6 +102,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const alreadyMechanics: string[] = [];
       const preservedStaff: string[] = [];
       const failed: string[] = [];
+      const salesChannelsCreated: string[] = [];
+      const salesChannelsReused: string[] = [];
+      const salesChannelFailures: string[] = [];
+      const panelFailures: string[] = [];
 
       for (const memberId of interaction.values) {
         try {
@@ -144,6 +149,22 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
               try { await member.roles.add(roleId, "Added to crew from Admin Panel"); } catch { /* report below only if all fail */ }
             }
           }
+
+           // Every selected mechanic gets a private sales channel. Existing
+           // channels are reused and their panel is refreshed instead of
+           // creating duplicates.
+           try {
+             const salesSetup = await ensureMechanicSalesChannel(guild, memberId);
+             if (salesSetup.created) salesChannelsCreated.push(displayName);
+             else salesChannelsReused.push(displayName);
+             if (!salesSetup.panelPosted) {
+               panelFailures.push(`${displayName} (<#${salesSetup.channel.id}>)`);
+             } else if (!salesSetup.panelPinned) {
+               panelFailures.push(`${displayName} (<#${salesSetup.channel.id}> — panel sent but not pinned)`);
+             }
+           } catch (err: any) {
+             salesChannelFailures.push(`${displayName}${err?.message ? ` (${err.message})` : ""}`);
+           }
         } catch (err: any) {
           failed.push(`<@${memberId}>${err?.message ? ` (${err.message})` : ""}`);
         }
@@ -155,6 +176,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         `✅ **${added.length}** new mechanic${added.length === 1 ? "" : "s"} saved`,
         alreadyMechanics.length ? `↪️ **${alreadyMechanics.length}** already in the crew (commission preserved)` : "",
         preservedStaff.length ? `🛡️ **${preservedStaff.length}** existing staff member${preservedStaff.length === 1 ? "" : "s"} kept unchanged: ${preservedStaff.join(", ")}` : "",
+        `📁 **${salesChannelsCreated.length}** sales channel${salesChannelsCreated.length === 1 ? "" : "s"} created automatically`,
+        salesChannelsReused.length ? `🔗 **${salesChannelsReused.length}** existing sales channel${salesChannelsReused.length === 1 ? "" : "s"} reused` : "",
+        panelFailures.length ? `⚠️ Panel permission issue: ${panelFailures.join(", ")}` : "",
+        salesChannelFailures.length ? `❌ Sales channel setup failed: ${salesChannelFailures.join(", ")}` : "",
         failed.length ? `❌ **${failed.length}** failed: ${failed.join(", ")}` : "",
         mechanicRoleIds.length ? "Discord mechanic role applied where permitted." : "No Discord mechanic role is configured; the database crew entry was still saved."
       ].filter(Boolean);
