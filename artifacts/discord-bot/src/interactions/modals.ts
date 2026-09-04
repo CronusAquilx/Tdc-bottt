@@ -457,6 +457,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         sql: "UPDATE profiles SET commission_adjustment = 0, commission_labour_snapshot = 0 WHERE discord_id = ?",
         args: [memberId]
       });
+      await db.execute("PRAGMA wal_checkpoint(TRUNCATE)");
       await interaction.editReply({ content: `✅ Cleared commission for **${profile.display_name}** — back to % calculation.` });
     } else {
       // Snapshot current labour so new orders add on top of the set amount
@@ -470,6 +471,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         sql: "UPDATE profiles SET commission_adjustment = ?, commission_labour_snapshot = ? WHERE discord_id = ?",
         args: [amount, labourSnapshot, memberId]
       });
+      await db.execute("PRAGMA wal_checkpoint(TRUNCATE)");
       await interaction.editReply({ content: `✅ Set **${profile.display_name}**'s commission to **$${Math.round(amount).toLocaleString()}** — new orders will add on top.` });
     }
     return;

@@ -4,7 +4,7 @@ import {
   EmbedBuilder,
   MessageFlags
 } from "discord.js";
-import { db, getProfile, getUserRole, getGuildConfig } from "../db.js";
+import { db, getProfile, getUserRole, getGuildConfig, checkpointDatabase } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 
@@ -137,6 +137,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     sql: `UPDATE profiles SET ${updates.join(", ")} WHERE discord_id = ?`,
     args
   });
+  await checkpointDatabase();
 
   const fields: { name: string; value: string; inline: boolean }[] = [
     { name: "Crew Member", value: `<@${target.id}> — ${profile.display_name}`, inline: false }

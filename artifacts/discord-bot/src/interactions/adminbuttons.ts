@@ -208,6 +208,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         "• **Job Post** — post a hiring ad to the jobs channel\n" +
         "• **LOA** — submit a Leave of Absence request\n" +
         "• **Timeclock** — set up the clock-in/clock-out channel\n" +
+        "• **Add Crew** — select multiple members and save them as mechanics\n" +
         "• **Full Crew Sync** — import members with the mechanic role and link matching sales channels"
       )
       .setFooter({ text: FOOTER });
@@ -219,9 +220,33 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:loa").setLabel("🌴  Submit LOA").setStyle(ButtonStyle.Secondary),
     );
     const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:crew:add").setLabel("➕  Add Crew").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:crew:syncfull").setLabel("🔄  Full Crew Sync").setStyle(ButtonStyle.Success),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    return true;
+  }
+
+  // ── Staff: add multiple members as mechanics ───────────────────────────────
+  if (section === "crew" && action === "add") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    const embed = new EmbedBuilder()
+      .setTitle("➕  ADD CREW")
+      .setColor(COLORS.primary)
+      .setDescription(
+        "Select one or more server members to add to the crew as **Mechanics**.\n\n" +
+        "The bot will save each profile, preserve any existing commission settings, " +
+        "and apply the configured Discord mechanic role. You can select up to 25 at once."
+      )
+      .setFooter({ text: FOOTER });
+    const row = new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId("admin:crew:pickmembers")
+        .setPlaceholder("Select crew members...")
+        .setMinValues(1)
+        .setMaxValues(25)
+    );
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [row] });
     return true;
   }
 

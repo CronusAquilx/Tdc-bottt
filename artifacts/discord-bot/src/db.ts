@@ -296,6 +296,15 @@ export function invalidateSettingCache(key?: string) {
   else _settingCache.clear();
 }
 
+/**
+ * Flush SQLite's WAL into the main database file after important admin writes.
+ * Crew membership and payroll settings must survive a fast process restart,
+ * not just the periodic checkpoint.
+ */
+export async function checkpointDatabase(): Promise<void> {
+  try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+}
+
 export async function setSetting(key: string, value: string): Promise<void> {
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: [key, value] });
   invalidateSettingCache(key);

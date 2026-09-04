@@ -3,7 +3,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   ChannelType, PermissionFlagsBits, TextChannel, EmbedBuilder
 , MessageFlags} from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig, setGuildCrewRate, splitRoleIds } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, setGuildCrewRate, splitRoleIds, checkpointDatabase } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
@@ -117,6 +117,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return true; }
 
     await db.execute({ sql: "UPDATE profiles SET commission_rate = ? WHERE discord_id = ?", args: [rate, mechanicId] });
+    await checkpointDatabase();
 
     const embed = new EmbedBuilder()
       .setTitle("💰 Commission Rate Updated")
@@ -169,6 +170,7 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     if (!profile) { await interaction.editReply({ content: "❌ Manager not found." }); return true; }
 
     await db.execute({ sql: "UPDATE profiles SET manager_override_rate = ? WHERE discord_id = ?", args: [rate, managerId] });
+    await checkpointDatabase();
 
     // Count how many mechanics are assigned to this manager
     const mechanicsR = await db.execute({ sql: "SELECT COUNT(*) FROM profiles WHERE manager_id = ?", args: [managerId] });

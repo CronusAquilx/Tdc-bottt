@@ -4,7 +4,7 @@ import {
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
   ChannelType, PermissionFlagsBits, TextChannel, MessageFlags} from "discord.js";
-import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds } from "../db.js";
+import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds, checkpointDatabase } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
@@ -84,6 +84,91 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── User select menus ──────────────────────────────────────────────────────
   if (interaction.isUserSelectMenu()) {
+    // admin:crew:pickmembers — bulk add selected members as mechanics
+    if (ns === "admin" && action === "crew" && rest[0] === "pickmembers") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      await interaction.deferUpdate();
+
+      const guild = interaction.guild;
+      if (!guild) {
+        await interaction.editReply({ content: "❌ This can only be used inside a server.", embeds: [], components: [] });
+        return;
+      }
+
+      const config = await getGuildConfig(guild.id);
+      const mechanicRoleIds = splitRoleIds(config?.mechanic_role_id);
+      const added: string[] = [];
+      const alreadyMechanics: string[] = [];
+      const preservedStaff: string[] = [];
+      const failed: string[] = [];
+
+      for (const memberId of interaction.values) {
+        try {
+          const member = await guild.members.fetch(memberId);
+          if (member.user.bot) continue;
+
+          const displayName = member.displayName?.trim() || member.user.globalName?.trim() || member.user.username;
+          const profile = await getProfile(memberId);
+          const roleRows = await db.execute({
+            sql: "SELECT role FROM user_roles WHERE discord_id = ?",
+            args: [memberId]
+          });
+          const existingRoles = roleRows.rows.map(row => String(row[0] ?? ""));
+          const existingStaffRole = existingRoles.find(role => ["owner", "manager", "trainer"].includes(role));
+
+          // Never downgrade an existing manager/trainer/owner through the mechanic
+          // bulk-add button. New users and unassigned users become mechanics.
+          if (existingStaffRole) {
+            preservedStaff.push(`${displayName} (${existingStaffRole})`);
+            continue;
+          }
+
+          if (!profile) {
+            await db.execute({
+              sql: "INSERT INTO profiles (discord_id, display_name, commission_rate) VALUES (?, ?, 0.3)",
+              args: [memberId, displayName]
+            });
+            added.push(displayName);
+          } else {
+            alreadyMechanics.push(displayName);
+          }
+
+          await db.execute({
+            sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
+            args: [memberId]
+          });
+
+          // Keep the Discord role and database role aligned when the mapping exists.
+          for (const roleId of mechanicRoleIds) {
+            if (!member.roles.cache.has(roleId)) {
+              try { await member.roles.add(roleId, "Added to crew from Admin Panel"); } catch { /* report below only if all fail */ }
+            }
+          }
+        } catch (err: any) {
+          failed.push(`<@${memberId}>${err?.message ? ` (${err.message})` : ""}`);
+        }
+      }
+
+      try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+
+      const lines = [
+        `✅ **${added.length}** new mechanic${added.length === 1 ? "" : "s"} saved`,
+        alreadyMechanics.length ? `↪️ **${alreadyMechanics.length}** already in the crew (commission preserved)` : "",
+        preservedStaff.length ? `🛡️ **${preservedStaff.length}** existing staff member${preservedStaff.length === 1 ? "" : "s"} kept unchanged: ${preservedStaff.join(", ")}` : "",
+        failed.length ? `❌ **${failed.length}** failed: ${failed.join(", ")}` : "",
+        mechanicRoleIds.length ? "Discord mechanic role applied where permitted." : "No Discord mechanic role is configured; the database crew entry was still saved."
+      ].filter(Boolean);
+
+      const embed = new EmbedBuilder()
+        .setTitle("✅  CREW SAVED")
+        .setColor(failed.length ? COLORS.warning : COLORS.approved)
+        .setDescription(lines.join("\n"))
+        .setFooter({ text: FOOTER })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [embed], components: [] });
+      return;
+    }
+
     // admin:setrole:pickmember:(trainer|manager) — assign user a role in the DB
     if (ns === "admin" && action === "setrole" && rest[0] === "pickmember") {
       if (!(await requireRole(interaction, "manager"))) return;
@@ -98,6 +183,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         // Remove any existing role for this user then insert the new one
         await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
         await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
+        await checkpointDatabase();
         const roleEmoji = roleTarget === "trainer" ? "📚" : "👔";
         const roleDesc  = roleTarget === "manager"
           ? `<@${targetUserId}> is now recognised as a **Manager** in the bot.\n\nThey can use manager commands and will earn a cut of the mechanic commission pool each pay period.`
@@ -141,6 +227,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         assigned++;
       }
       await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingKey] });
+      await checkpointDatabase();
       const embed = new EmbedBuilder()
         .setTitle("✅  Bulk Manager Assignment Complete")
         .setColor(COLORS.approved)
@@ -390,6 +477,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         return;
       }
       await db.execute({ sql: "UPDATE profiles SET manager_id = ? WHERE discord_id = ?", args: [managerId, mechanicId] });
+      await checkpointDatabase();
       await interaction.update({
         content: `✅ **${mechanicProfile.display_name}** is now assigned to manager **${managerProfile.display_name}**.\n💰 ${managerProfile.display_name} will earn 20% of ${mechanicProfile.display_name}'s commission on each order.`,
         embeds: [], components: []

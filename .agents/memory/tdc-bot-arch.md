@@ -71,6 +71,11 @@ All draft/order view refreshes call this once and pass a `crewCutInfo` object (o
 - `firedThisWeek` is in-memory — resets to `false` on process restart. Without DB guard, a crash+restart on Monday 00:00-05 min fires payday twice, wiping all `/setpay` data.
 - Fix: check `app_settings.last_auto_payday_date` on each tick. Write the dedup key AFTER successful completion (not before), so a mid-run crash allows the next restart to retry safely (processPayall only touches unpaid orders — idempotent).
 
+## Crew and Payroll Persistence
+- Important admin writes (crew membership, role assignment, commission rates, and manual pay adjustments) call a SQLite WAL checkpoint immediately after saving.
+- **Why:** A fast bot restart should not depend on the periodic checkpoint interval for newly added crew or pay settings to reach the main database file.
+- **How to apply:** Keep using the shared `checkpointDatabase()` helper after future critical profile/payroll writes; do not rely only on the background checkpoint timer.
+
 ## /clear Must Reset Labour Snapshots
 - When `/clear` runs, it resets `order_number_reset_ts` (starts new pay period) but does NOT reset `commission_labour_snapshot`. This breaks the snapshot formula: new orders after clear won't add on top of the `/setpay` amount until new labour exceeds the old (irrelevant) snapshot.
 - Fix: `clear:confirm:all` and `clear:confirm:player` now also reset `commission_labour_snapshot = 0, manager_labour_snapshot = 0`.
