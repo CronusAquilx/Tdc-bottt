@@ -314,7 +314,12 @@ function scheduleWeeklyLeaderboard(client: Client) {
 
 initDb().then(() => {
   if (BOT_ACTIVE) {
-    client.login(token!);
+    client.login(token!).catch((err: unknown) => {
+      console.error("[TDC] ❌ Discord login failed:", err);
+      // A bot that cannot authenticate must stop so Render restarts it and
+      // surfaces the real error instead of keeping only the health server up.
+      process.exit(1);
+    });
   } else {
     console.log("[TDC] 🛑 Bot login skipped (BOT_ENABLED=false). Health server is running.");
   }

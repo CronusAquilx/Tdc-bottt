@@ -3,12 +3,19 @@ services:
     name: tdc-discord-bot
     runtime: node
     rootDir: .
-    buildCommand: pnpm install && pnpm run build
-    startCommand: node --enable-source-maps dist/index.js
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @workspace/discord-bot run build
+    startCommand: pnpm --filter @workspace/discord-bot run start
     envVars:
       - key: DISCORD_TOKEN
         sync: false
+      - key: TDC_DATA_DIR
+        value: /opt/render/project/src/artifacts/discord-bot/data
       - key: BOT_HTTP_PORT
-        value: 10000
+        value: "10000"
+      - key: NODE_ENV
+        value: production
     autoDeploy: true
-    healthCheckPath: /healthz
+    disk:
+      name: tdc-discord-data
+      mountPath: /opt/render/project/src/artifacts/discord-bot/data
+      sizeGB: 1
