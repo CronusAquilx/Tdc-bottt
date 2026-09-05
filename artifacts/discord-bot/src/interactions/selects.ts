@@ -102,10 +102,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       const alreadyMechanics: string[] = [];
       const preservedStaff: string[] = [];
       const failed: string[] = [];
-      const salesChannelsCreated: string[] = [];
-      const salesChannelsReused: string[] = [];
-      const salesChannelFailures: string[] = [];
-      const panelFailures: string[] = [];
+      const pendingMemberIds: string[] = [];
 
       for (const memberId of interaction.values) {
         try {
@@ -142,6 +139,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
             sql: "INSERT OR IGNORE INTO user_roles (discord_id, role) VALUES (?, 'mechanic')",
             args: [memberId]
           });
+           pendingMemberIds.push(memberId);
 
           // Keep the Discord role and database role aligned when the mapping exists.
           for (const roleId of mechanicRoleIds) {
@@ -149,48 +147,46 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
               try { await member.roles.add(roleId, "Added to crew from Admin Panel"); } catch { /* report below only if all fail */ }
             }
           }
-
-           // Every selected mechanic gets a private sales channel. Existing
-           // channels are reused and their panel is refreshed instead of
-           // creating duplicates.
-           try {
-             const salesSetup = await ensureMechanicSalesChannel(guild, memberId);
-             if (salesSetup.created) salesChannelsCreated.push(displayName);
-             else salesChannelsReused.push(displayName);
-             if (!salesSetup.panelPosted) {
-               panelFailures.push(`${displayName} (<#${salesSetup.channel.id}>)`);
-             } else if (!salesSetup.panelPinned) {
-               panelFailures.push(`${displayName} (<#${salesSetup.channel.id}> — panel sent but not pinned)`);
-             }
-           } catch (err: any) {
-             salesChannelFailures.push(`${displayName}${err?.message ? ` (${err.message})` : ""}`);
-           }
         } catch (err: any) {
           failed.push(`<@${memberId}>${err?.message ? ` (${err.message})` : ""}`);
         }
       }
 
-      try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+       // Persist crew membership before asking Discord to create any channels.
+       // If the bot restarts during channel setup, the people are still saved.
+       await checkpointDatabase();
 
       const lines = [
         `✅ **${added.length}** new mechanic${added.length === 1 ? "" : "s"} saved`,
         alreadyMechanics.length ? `↪️ **${alreadyMechanics.length}** already in the crew (commission preserved)` : "",
         preservedStaff.length ? `🛡️ **${preservedStaff.length}** existing staff member${preservedStaff.length === 1 ? "" : "s"} kept unchanged: ${preservedStaff.join(", ")}` : "",
-        `📁 **${salesChannelsCreated.length}** sales channel${salesChannelsCreated.length === 1 ? "" : "s"} created automatically`,
-        salesChannelsReused.length ? `🔗 **${salesChannelsReused.length}** existing sales channel${salesChannelsReused.length === 1 ? "" : "s"} reused` : "",
-        panelFailures.length ? `⚠️ Panel permission issue: ${panelFailures.join(", ")}` : "",
-        salesChannelFailures.length ? `❌ Sales channel setup failed: ${salesChannelFailures.join(", ")}` : "",
         failed.length ? `❌ **${failed.length}** failed: ${failed.join(", ")}` : "",
-        mechanicRoleIds.length ? "Discord mechanic role applied where permitted." : "No Discord mechanic role is configured; the database crew entry was still saved."
+         mechanicRoleIds.length ? "Discord mechanic role applied where permitted." : "No Discord mechanic role is configured; the database crew entry was still saved.",
+         pendingMemberIds.length ? "Next, choose the category for their private sales channels." : ""
       ].filter(Boolean);
 
       const embed = new EmbedBuilder()
-        .setTitle("✅  CREW SAVED")
+         .setTitle(pendingMemberIds.length ? "✅  CREW SAVED — CHOOSE CHANNEL CATEGORY" : "✅  CREW SAVED")
         .setColor(failed.length ? COLORS.warning : COLORS.approved)
         .setDescription(lines.join("\n"))
         .setFooter({ text: FOOTER })
         .setTimestamp();
-      await interaction.editReply({ embeds: [embed], components: [] });
+
+       if (!pendingMemberIds.length) {
+         await interaction.editReply({ embeds: [embed], components: [] });
+         return;
+       }
+
+       const pendingKey = `pending_crew_add:${guild.id}:${interaction.user.id}`;
+       await setSetting(pendingKey, JSON.stringify(pendingMemberIds));
+       const categoryRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+         new ChannelSelectMenuBuilder()
+           .setCustomId("admin:crew:pickcategory")
+           .setChannelTypes(ChannelType.GuildCategory)
+           .setPlaceholder("Choose a category for sales channels...")
+           .setMinValues(1).setMaxValues(1)
+       );
+       await interaction.editReply({ embeds: [embed], components: [categoryRow] });
       return;
     }
 
@@ -514,6 +510,91 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Channel select menus ───────────────────────────────────────────────────
   if (interaction.isChannelSelectMenu()) {
+    // ── Pick a category after bulk crew profiles have been saved ───────────────
+    if (ns === "admin" && action === "crew" && rest[0] === "pickcategory") {
+      if (!(await requireRole(interaction, "manager"))) return;
+      const guild = interaction.guild;
+      if (!guild) {
+        await interaction.reply({ content: "❌ This can only be used inside a server.", flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const categoryId = interaction.values[0];
+      await interaction.deferUpdate();
+
+      const category = await guild.channels.fetch(categoryId).catch(() => null);
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        await interaction.editReply({ content: "❌ That category could not be found.", embeds: [], components: [] });
+        return;
+      }
+
+      const pendingKey = `pending_crew_add:${guild.id}:${interaction.user.id}`;
+      const pendingValue = await getSetting(pendingKey);
+      let memberIds: string[] = [];
+      try {
+        const parsed = JSON.parse(pendingValue ?? "[]");
+        if (Array.isArray(parsed)) memberIds = parsed.filter(id => typeof id === "string");
+      } catch {
+        memberIds = [];
+      }
+
+      if (!memberIds.length) {
+        await interaction.editReply({
+          content: "⚠️ The crew save was already completed or the setup session expired. Use **Health Check** to repair missing sales channels.",
+          embeds: [],
+          components: []
+        });
+        return;
+      }
+
+      const created: string[] = [];
+      const reused: string[] = [];
+      const panelIssues: string[] = [];
+      const failures: string[] = [];
+
+      for (const memberId of memberIds) {
+        const profile = await getProfile(memberId);
+        if (!profile) {
+          failures.push(`<@${memberId}> (profile missing)`);
+          continue;
+        }
+
+        try {
+          const setup = await ensureMechanicSalesChannel(guild, memberId, categoryId);
+          if (setup.created) created.push(profile.display_name);
+          else reused.push(profile.display_name);
+          if (!setup.panelPosted) {
+            panelIssues.push(`${profile.display_name}: panel could not be posted`);
+          } else if (!setup.panelPinned) {
+            panelIssues.push(`${profile.display_name}: panel posted but could not be pinned`);
+          }
+        } catch (err: any) {
+          failures.push(`${profile.display_name}${err?.message ? ` (${err.message})` : ""}`);
+        }
+      }
+
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingKey] });
+      await checkpointDatabase();
+
+      const resultLines = [
+        `✅ Crew membership is saved permanently.`,
+        `📁 **${created.length}** sales channel${created.length === 1 ? "" : "s"} created in **${category.name}**`,
+        reused.length ? `🔗 **${reused.length}** existing sales channel${reused.length === 1 ? "" : "s"} reused` : "",
+        panelIssues.length ? `⚠️ Panel permission issue: ${panelIssues.join(", ")}` : "",
+        failures.length ? `❌ Setup failed: ${failures.join(", ")}` : "",
+        "Use **Health Check** later to find or repair anything that is missing."
+      ].filter(Boolean);
+
+      const resultEmbed = new EmbedBuilder()
+        .setTitle("✅  CREW CHANNELS READY")
+        .setColor(failures.length ? COLORS.warning : COLORS.approved)
+        .setDescription(resultLines.join("\n"))
+        .setFooter({ text: FOOTER })
+        .setTimestamp();
+      await interaction.editReply({ embeds: [resultEmbed], components: [] });
+      return;
+    }
+
     // ── Pick a category before confirming child-channel deletion ───────────────
     if (ns === "admin" && action === "crew" && rest[0] === "pickcategorydelete") {
       if (!(await requireRole(interaction, "manager"))) return;

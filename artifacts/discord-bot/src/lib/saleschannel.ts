@@ -33,6 +33,7 @@ function channelSlug(value: string): string {
 export async function ensureMechanicSalesChannel(
   guild: Guild,
   mechanicId: string,
+  categoryId?: string,
 ): Promise<SalesChannelSetupResult> {
   const profile = await getProfile(mechanicId);
   if (!profile) throw new Error("Mechanic profile was not found");
@@ -125,6 +126,7 @@ export async function ensureMechanicSalesChannel(
     channel = await guild.channels.create({
       name: channelName,
       type: ChannelType.GuildText,
+      ...(categoryId ? { parent: categoryId } : {}),
       topic: `📍 Personal sales channel — ${profile.display_name}`,
       permissionOverwrites,
     }) as TextChannel;
