@@ -393,43 +393,54 @@ export function splitRoleIds(s: string | null | undefined): string[] {
   return (s ?? "").split(",").map(r => r.trim()).filter(Boolean);
 }
 
-export async function nextOrderNumber(): Promise<string> {
-  // Ensure the sequence row exists
-  await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('order_seq', '0')");
+let orderNumberQueue: Promise<void> = Promise.resolve();
 
-  // Sync the counter up to the highest order number already in the table.
-  // This self-heals if the counter ever falls behind (e.g. after a DB restore
-  // or if orders were inserted via a different path).
-  await db.execute(
-    `UPDATE app_settings
-     SET value = CAST(
-       MAX(
-         CAST(value AS INTEGER),
-         COALESCE(
-           (SELECT MAX(CAST(SUBSTR(order_number, 5) AS INTEGER))
-            FROM orders
-            WHERE order_number LIKE 'TDC-%'
-              AND LENGTH(order_number) >= 8),
-           0
-         )
-       ) AS TEXT
-     )
-     WHERE key = 'order_seq'`
-  );
+export function nextOrderNumber(): Promise<string> {
+  // The bot is a single process, but several Discord interactions can arrive
+  // concurrently. Serialising this read/update sequence prevents two drafts
+  // from receiving the same number before the UNIQUE constraint is checked.
+  const task = orderNumberQueue.then(async () => {
+    // Ensure the sequence row exists
+    await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('order_seq', '0')");
 
-  // Atomically increment and read the new value
-  const results = await db.batch([
-    {
-      sql: "UPDATE app_settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'order_seq'",
-      args: []
-    },
-    {
-      sql: "SELECT value FROM app_settings WHERE key = 'order_seq'",
-      args: []
-    }
-  ], "write");
-  const num = parseInt(String(results[1].rows[0]?.[0] ?? "1"), 10);
-  return `TDC-${String(num).padStart(4, "0")}`;
+    // Sync the counter up to the highest order number already in the table.
+    // This self-heals if the counter ever falls behind (e.g. after a DB restore
+    // or if orders were inserted via a different path).
+    await db.execute(
+      `UPDATE app_settings
+       SET value = CAST(
+         MAX(
+           CAST(value AS INTEGER),
+           COALESCE(
+             (SELECT MAX(CAST(SUBSTR(order_number, 5) AS INTEGER))
+              FROM orders
+              WHERE order_number LIKE 'TDC-%'
+                AND LENGTH(order_number) >= 8),
+             0
+           )
+         ) AS TEXT
+       )
+       WHERE key = 'order_seq'`
+    );
+
+    // Atomically increment and read the new value
+    const results = await db.batch([
+      {
+        sql: "UPDATE app_settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'order_seq'",
+        args: []
+      },
+      {
+        sql: "SELECT value FROM app_settings WHERE key = 'order_seq'",
+        args: []
+      }
+    ], "write");
+    const num = parseInt(String(results[1].rows[0]?.[0] ?? "1"), 10);
+    return `TDC-${String(num).padStart(4, "0")}`;
+  });
+
+  // Keep the queue usable even if one database operation fails.
+  orderNumberQueue = task.then(() => undefined, () => undefined);
+  return task;
 }
 
 // NOTE: order_seq is intentionally never reset — it is a globally monotonic counter.

@@ -7,7 +7,8 @@ import {
   MessageFlags,
   REST,
   Routes,
-  ChatInputCommandInteraction
+  ChatInputCommandInteraction,
+  Status
 } from "discord.js";
 import { initDb } from "./db.js";
 import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
@@ -49,14 +50,24 @@ if (!token) {
   process.exit(1);
 }
 
-// ── Global crash guards ────────────────────────────────────────────────────────
+// ── Process recovery ───────────────────────────────────────────────────────────
+// Render restarts a worker after it exits. Prefer a clean restart over leaving
+// a process alive with a broken gateway or an unhandled async failure.
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
+function restartProcess(reason: string) {
+  if (restartTimer) return;
+  console.error(`[TDC] 🔁 Restarting process: ${reason}`);
+  restartTimer = setTimeout(() => process.exit(1), 1000);
+}
+
 process.on("unhandledRejection", (reason: unknown) => {
   console.error("[TDC] 💥 Unhandled promise rejection:", reason);
+  restartProcess("unhandled promise rejection");
 });
 
 process.on("uncaughtException", (err: Error) => {
-  console.error("[TDC] 💥 Uncaught exception — restarting:", err);
-  setTimeout(() => process.exit(1), 500);
+  console.error("[TDC] 💥 Uncaught exception:", err);
+  restartProcess("uncaught exception");
 });
 
 // Active by default — set BOT_ENABLED=false to disable (e.g. for local testing without Discord).
@@ -200,8 +211,12 @@ client.on(Events.Error, (err) => {
   console.error("[TDC] 🔌 Discord client error:", err);
 });
 
+client.on(Events.ShardError, (err, id) => {
+  console.error(`[TDC] 🔌 Discord shard ${id} error:`, err);
+});
+
 client.on(Events.ShardDisconnect, (event, id) => {
-  console.warn(`[TDC] 🔌 Shard ${id} disconnected (code ${event.code}) — Discord.js will auto-reconnect.`);
+  console.warn(`[TDC] 🔌 Shard ${id} disconnected (code ${event.code}) — watching reconnect.`);
 });
 
 client.on(Events.ShardReconnecting, (id) => {
@@ -211,6 +226,49 @@ client.on(Events.ShardReconnecting, (id) => {
 client.on(Events.ShardResume, (id, replayed) => {
   console.log(`[TDC] ✅ Shard ${id} resumed (${replayed} events replayed).`);
 });
+
+client.on(Events.Invalidated, () => {
+  // Discord will not recover an invalidated session by itself.
+  restartProcess("Discord invalidated the gateway session");
+});
+
+function startGatewayWatchdog() {
+  const CHECK_EVERY_MS = 60_000;
+  const MAX_UNHEALTHY_MS = 5 * 60_000;
+  let unhealthySince: number | null = null;
+
+  setInterval(() => {
+    const gatewayReady =
+      client.isReady() &&
+      client.ws.status === Status.Ready &&
+      client.ws.ping >= 0;
+
+    if (gatewayReady) {
+      if (unhealthySince !== null) {
+        console.log(`[TDC] ✅ Discord gateway recovered (ping ${client.ws.ping}ms).`);
+      }
+      unhealthySince = null;
+      return;
+    }
+
+    if (unhealthySince === null) {
+      unhealthySince = Date.now();
+      console.warn(
+        `[TDC] ⚠️ Discord gateway is not ready (status ${client.ws.status}, ping ${client.ws.ping}).`
+      );
+      return;
+    }
+
+    const unhealthyFor = Date.now() - unhealthySince;
+    if (unhealthyFor >= MAX_UNHEALTHY_MS) {
+      restartProcess(
+        `Discord gateway stayed unhealthy for ${Math.round(unhealthyFor / 60_000)} minutes`
+      );
+    }
+  }, CHECK_EVERY_MS);
+
+  console.log("[TDC] 🩺 Discord gateway watchdog started (60s checks, 5m recovery window)");
+}
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
@@ -314,11 +372,12 @@ function scheduleWeeklyLeaderboard(client: Client) {
 
 initDb().then(() => {
   if (BOT_ACTIVE) {
+    startGatewayWatchdog();
     client.login(token!).catch((err: unknown) => {
       console.error("[TDC] ❌ Discord login failed:", err);
       // A bot that cannot authenticate must stop so Render restarts it and
       // surfaces the real error instead of keeping only the health server up.
-      process.exit(1);
+      restartProcess("Discord login failed");
     });
   } else {
     console.log("[TDC] 🛑 Bot login skipped (BOT_ENABLED=false). Health server is running.");
