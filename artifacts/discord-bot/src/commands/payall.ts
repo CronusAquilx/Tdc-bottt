@@ -164,10 +164,36 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
       "Review all payouts below. Click **Pay All + Notify Crew** to process payroll,\n" +
       "send pay messages to every sales channel, and start the new week.\n\n" +
       "⚠️ This will **mark all orders as paid** and **reset weekly stats**."
-    )
-    .addFields(
-      { name: `🔩 Crew Payouts (${mechanicMap.size} people)`, value: payLines.join("\n") || "None", inline: false }
     );
+
+  // Discord limits each embed field value to 1,024 characters. A real crew
+  // can exceed that when every mechanic is listed, which previously caused
+  // the Pay All button to fall into the generic "Something went wrong" error.
+  const payoutFields: { name: string; value: string; inline: boolean }[] = [];
+  let payoutChunk = "";
+  let payoutChunkIndex = 0;
+  for (const line of payLines) {
+    const addition = payoutChunk ? `\n${line}` : line;
+    if (payoutChunk && payoutChunk.length + addition.length > 1000) {
+      payoutFields.push({
+        name: payoutChunkIndex === 0 ? `🔩 Crew Payouts (${mechanicMap.size} people)` : "\u200b",
+        value: payoutChunk,
+        inline: false
+      });
+      payoutChunk = line;
+      payoutChunkIndex++;
+    } else {
+      payoutChunk += addition;
+    }
+  }
+  if (payoutChunk || !payoutFields.length) {
+    payoutFields.push({
+      name: payoutChunkIndex === 0 ? `🔩 Crew Payouts (${mechanicMap.size} people)` : "\u200b",
+      value: payoutChunk || "None",
+      inline: false
+    });
+  }
+  embed.addFields(...payoutFields);
 
   embed.addFields(
     { name: "💰 Total to Bill Company", value: `**${money(totalToBill)}**`, inline: true },

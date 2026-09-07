@@ -7,3 +7,4 @@
 - [TDC Full Crew Sync](tdc-full-crew-sync.md) — full repair mode is `/crew sync mode:full` because the existing `/crew` command already uses direct subcommands
 - [TDC Crew Repair Safety](tdc-crew-repair-safety.md) — health repair only restores profiles/roles/links; category cleanup deletes child channels only and preserves crew, orders, and payroll history
 - [TDC Render Reliability](tdc-render-reliability.md) — a Discord bot can stay visibly online while its gateway is unhealthy; long-running workers need recovery watchdogs and restart-on-failure
+- [TDC Payroll Embed Limits](tdc-payroll-embed-limits.md) — payroll summaries must chunk crew lines because Discord embed field values are limited to 1,024 characters
