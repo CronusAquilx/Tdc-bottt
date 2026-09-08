@@ -4,7 +4,7 @@ import {
   PermissionFlagsBits,
   TextChannel,
 } from "discord.js";
-import { db, getGuildConfig, getProfile, splitRoleIds } from "../db.js";
+import { db, getGuildConfig, getProfile, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
 import { postOrderPanel } from "../interactions/orderpanel.js";
 
 export interface SalesChannelSetupResult {
@@ -138,6 +138,7 @@ export async function ensureMechanicSalesChannel(
       sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?",
       args: [channel.id, mechanicId],
     });
+    await saveDatabaseSnapshot();
   }
 
   let panelPosted = false;

@@ -6,7 +6,7 @@ import {
   RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelSelectMenuBuilder,
   TextChannel
 , MessageFlags} from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { buildFullCrewSyncEmbed, syncFullCrew, buildCrewHealthEmbed, runCrewHealthCheck } from "../commands/crew.js";
@@ -141,6 +141,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     }
 
     await db.execute({ sql: "UPDATE profiles SET sales_channel_id = ? WHERE discord_id = ?", args: [channel.id, mechanicId] });
+    await saveDatabaseSnapshot();
     let abPinned = false;
     try {
       const abResult = await postOrderPanel(channel, mechanicId, profile.display_name, profile.commission_rate);

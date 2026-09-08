@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, MessageFlags, ChannelType, Guild } from "discord.js";
-import { db, getProfile, getGuildConfig, splitRoleIds, checkpointDatabase } from "../db.js";
+import { db, getProfile, getGuildConfig, splitRoleIds, checkpointDatabase, saveDatabaseSnapshot } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 
@@ -314,7 +314,7 @@ export async function runCrewHealthCheck(guild: Guild, repaired = false): Promis
 
   // A Discord-role mechanic with no saved profile may not have been added to
   // profileMap in scan mode, but is still reported above as needing repair.
-  if (repaired) await checkpointDatabase();
+  if (repaired) await saveDatabaseSnapshot();
   return result;
 }
 
@@ -430,7 +430,7 @@ export async function syncFullCrew(guild: Guild): Promise<FullCrewSyncResult> {
     }
   }
 
-  await checkpointDatabase();
+  await saveDatabaseSnapshot();
   return result;
 }
 
@@ -477,7 +477,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       await db.execute({ sql: "UPDATE profiles SET display_name = ? WHERE discord_id = ?", args: [displayName, target.id] });
       await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
       await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [target.id, role] });
-      await checkpointDatabase();
+      await saveDatabaseSnapshot();
       const caller = await getProfile(interaction.user.id);
       const updatedProfile = await getProfile(target.id);
       const rateStr = `${Math.round((updatedProfile?.commission_rate ?? 0.3) * 100)}%`;

@@ -154,7 +154,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
        // Persist crew membership before asking Discord to create any channels.
        // If the bot restarts during channel setup, the people are still saved.
-       await checkpointDatabase();
+       await saveDatabaseSnapshot();
 
       const lines = [
         `✅ **${added.length}** new mechanic${added.length === 1 ? "" : "s"} saved`,
@@ -179,6 +179,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
        const pendingKey = `pending_crew_add:${guild.id}:${interaction.user.id}`;
        await setSetting(pendingKey, JSON.stringify(pendingMemberIds));
+       await saveDatabaseSnapshot();
        const categoryRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
          new ChannelSelectMenuBuilder()
            .setCustomId("admin:crew:pickcategory")
@@ -204,7 +205,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         // Remove any existing role for this user then insert the new one
         await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
         await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
-        await checkpointDatabase();
+       await saveDatabaseSnapshot();
         const roleEmoji = roleTarget === "trainer" ? "📚" : "👔";
         const roleDesc  = roleTarget === "manager"
           ? `<@${targetUserId}> is now recognised as a **Manager** in the bot.\n\nThey can use manager commands and will earn a cut of the mechanic commission pool each pay period.`
