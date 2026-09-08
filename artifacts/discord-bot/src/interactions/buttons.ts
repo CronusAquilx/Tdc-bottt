@@ -1173,6 +1173,30 @@ export async function handleButton(interaction: ButtonInteraction) {
                 const total = p.amount + p.managerCut;
                 return `**${p.name}** · ${p.orders} orders${hrsNote} → Total: **${money(total)}**`;
               });
+            const payFields: { name: string; value: string; inline: boolean }[] = [];
+            let payChunk = "";
+            let payChunkIndex = 0;
+            for (const line of payLines) {
+              const addition = payChunk ? `\n${line}` : line;
+              if (payChunk && payChunk.length + addition.length > 1000) {
+                payFields.push({
+                  name: payChunkIndex === 0 ? `🔩 Crew Paid (${mechanicCount})` : "\u200b",
+                  value: payChunk,
+                  inline: false
+                });
+                payChunk = line;
+                payChunkIndex++;
+              } else {
+                payChunk += addition;
+              }
+            }
+            if (payChunk || !payFields.length) {
+              payFields.push({
+                name: payChunkIndex === 0 ? `🔩 Crew Paid (${mechanicCount})` : "\u200b",
+                value: payChunk || "None",
+                inline: false
+              });
+            }
             const logEmbed = new EmbedBuilder()
               .setTitle("💸  PAYROLL PROCESSED — New Week Started")
               .setColor(0xffd700)
@@ -1183,8 +1207,8 @@ export async function handleButton(interaction: ButtonInteraction) {
                 (failed > 0 ? `\n⚠️ ${failed} skipped (no sales channel).` : "")
               )
               .addFields(
-                { name: `🔩 Crew Paid (${mechanicCount})`,       value: payLines.join("\n") || "None", inline: false },
-                { name: "🏢 Total Billed to Company",            value: `**${money(totalToBill)}**`,   inline: true  }
+                ...payFields,
+                { name: "🏢 Total Billed to Company", value: `**${money(totalToBill)}**`, inline: true }
               )
               .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
               .setTimestamp();

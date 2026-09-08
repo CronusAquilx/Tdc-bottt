@@ -419,9 +419,20 @@ export function buildRaffleEmbed(raffle: {
   entry_count: number;
   status: string;
   prizes?: string[];
+  minimum_sales?: number;
+  minimum_orders?: number;
 }): EmbedBuilder {
   const ts = raffle.ends_at ? Math.floor(new Date(raffle.ends_at).getTime() / 1000) : null;
   const prizes = raffle.prizes?.length ? raffle.prizes.map((p, i) => `${i + 1}. ${p}`).join("\n") : raffle.title;
+  const minimumSales = Number(raffle.minimum_sales ?? 0);
+  const minimumOrders = Number(raffle.minimum_orders ?? 0);
+  const entryRequirement = minimumSales > 0 || minimumOrders > 0
+    ? [
+        minimumSales > 0 ? `Sales: **$${minimumSales.toLocaleString()}+**` : "",
+        minimumOrders > 0 ? `Orders: **${minimumOrders}+**` : "",
+        "this pay period"
+      ].filter(Boolean).join(" · ")
+    : "Open to everyone";
 
   const statusLine = raffle.status === "active"
     ? (ts ? `⏰ Ends: <t:${ts}:R>  ·  <t:${ts}:F>` : "⏰ Ends when the owner starts the wheel")
@@ -437,7 +448,8 @@ export function buildRaffleEmbed(raffle: {
     .addFields(
       { name: "🎁 Prize(s)",      value: prizes,                          inline: true },
       { name: "🏆 Winners",       value: `**${raffle.winner_count}**`,    inline: true },
-      { name: "🎟️ Entries",      value: `**${raffle.entry_count}**`,     inline: true }
+      { name: "🎟️ Entries",      value: `**${raffle.entry_count}**`,     inline: true },
+      { name: "📈 Entry Requirement", value: entryRequirement, inline: false }
     )
     .setFooter({ text: "東京ドリフトカスタム  ·  Good luck! 🍀" })
     .setTimestamp();

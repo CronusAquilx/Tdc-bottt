@@ -8,9 +8,31 @@ const DATA_DIR = process.env.TDC_DATA_DIR?.trim()
   ? path.resolve(process.env.TDC_DATA_DIR.trim())
   : path.join(__dirname, "..", "data");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, "tdc.db");
+const DB_BACKUP_PATH = path.join(DATA_DIR, "tdc.db.backup");
+const DB_PREVIOUS_BACKUP_PATH = path.join(DATA_DIR, "tdc.db.backup.previous");
+
+// If a persistent-disk mount was recreated while the bot was down, recover the
+// last completed snapshot before libSQL opens a new empty database file.
+function restoreDatabaseSnapshotIfMissing(): void {
+  try {
+    if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) return;
+    for (const backup of [DB_BACKUP_PATH, DB_PREVIOUS_BACKUP_PATH]) {
+      if (fs.existsSync(backup) && fs.statSync(backup).size > 0) {
+        fs.copyFileSync(backup, DB_PATH);
+        console.warn(`[TDC] ♻️ Restored database from ${path.basename(backup)}`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("[TDC] ❌ Database snapshot restore failed:", err);
+  }
+}
+
+restoreDatabaseSnapshotIfMissing();
 
 export const db = createClient({
-  url: `file:${path.join(DATA_DIR, "tdc.db")}`
+  url: `file:${DB_PATH}`
 });
 
 async function exec(sql: string) {
@@ -192,7 +214,9 @@ export async function initDb() {
       started_by TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       winners TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      minimum_sales REAL NOT NULL DEFAULT 0,
+      minimum_orders INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS raffle_entries (
@@ -238,6 +262,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
+  await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_sales REAL NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_orders INTEGER NOT NULL DEFAULT 0");
 
   // Close only sessions that have been open for more than 8 hours — these are genuinely stale
   // (bot was down for a long shift). Recent sessions survive quick restarts and deploys so
@@ -264,16 +290,15 @@ export async function initDb() {
   await db.execute({ sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", args: ["parts_catalog", TDC_CATALOG] });
   await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", args: ["commission_default", "0.3"] });
 
-  // Force-flush the WAL into the main .db file right now so tdc.db is always
-  // up-to-date when git checkpoints run.  Without this, all writes since the last
-  // checkpoint live only in tdc.db-wal (which is gitignored) and are lost if the
-  // container is ever rebuilt from git.
-  try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+  console.log(`[TDC] 💾 Database path: ${DB_PATH}`);
 
-  // Schedule a WAL checkpoint every 3 minutes so the main file stays current.
-  setInterval(async () => {
-    try { await db.execute("PRAGMA wal_checkpoint(PASSIVE)"); } catch { /* ignore */ }
-  }, 3 * 60 * 1000);
+  // Create a recovery copy immediately after startup, then repeat every ten
+  // minutes. The main database is checkpointed before it is copied so the
+  // backup contains committed data even if the process dies mid-write.
+  await saveDatabaseSnapshot();
+  setInterval(() => {
+    saveDatabaseSnapshot().catch(err => console.error("[TDC] ⚠️ Scheduled database save failed:", err));
+  }, 10 * 60 * 1000);
 
   console.log("[TDC] Database initialized.");
 }
@@ -305,6 +330,26 @@ export function invalidateSettingCache(key?: string) {
  */
 export async function checkpointDatabase(): Promise<void> {
   try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+}
+
+/**
+ * Persist the committed SQLite state into a rotating recovery snapshot.
+ * The previous snapshot is retained so a failed copy never destroys the last
+ * known-good backup.
+ */
+export async function saveDatabaseSnapshot(): Promise<void> {
+  await checkpointDatabase();
+  try {
+    if (fs.existsSync(DB_BACKUP_PATH)) {
+      fs.copyFileSync(DB_BACKUP_PATH, DB_PREVIOUS_BACKUP_PATH);
+    }
+    const tempPath = `${DB_BACKUP_PATH}.tmp`;
+    fs.copyFileSync(DB_PATH, tempPath);
+    fs.renameSync(tempPath, DB_BACKUP_PATH);
+    console.log(`[TDC] 💾 Database snapshot saved (${new Date().toISOString()})`);
+  } catch (err) {
+    console.error("[TDC] ⚠️ Database snapshot copy failed:", err);
+  }
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
