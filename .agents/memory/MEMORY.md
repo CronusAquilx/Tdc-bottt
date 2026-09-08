@@ -8,3 +8,4 @@
 - [TDC Crew Repair Safety](tdc-crew-repair-safety.md) — health repair only restores profiles/roles/links; category cleanup deletes child channels only and preserves crew, orders, and payroll history
 - [TDC Render Reliability](tdc-render-reliability.md) — a Discord bot can stay visibly online while its gateway is unhealthy; long-running workers need recovery watchdogs and restart-on-failure
 - [TDC Payroll Embed Limits](tdc-payroll-embed-limits.md) — payroll summaries must chunk crew lines because Discord embed field values are limited to 1,024 characters
+- [TDC Database Recovery](tdc-database-recovery.md) — SQLite data uses the configured persistent data directory, rotating snapshots every 10 minutes, startup restore, and immediate checkpoints after payroll/raffle writes
