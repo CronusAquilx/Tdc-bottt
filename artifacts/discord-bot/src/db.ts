@@ -100,8 +100,10 @@ const TDC_CATALOG = JSON.stringify({
 });
 
 export async function initDb() {
-  // Enable WAL mode + busy timeout so concurrent reads/writes don't deadlock
+  // Enable WAL mode + full synchronous durability so committed pay/order data
+  // is flushed to the persistent disk before SQLite reports success.
   await db.execute("PRAGMA journal_mode=WAL");
+  await db.execute("PRAGMA synchronous=FULL");
   await db.execute("PRAGMA busy_timeout=5000");
 
   await exec(`
@@ -292,13 +294,13 @@ export async function initDb() {
 
   console.log(`[TDC] 💾 Database path: ${DB_PATH}`);
 
-  // Create a recovery copy immediately after startup, then repeat every ten
-  // minutes. The main database is checkpointed before it is copied so the
-  // backup contains committed data even if the process dies mid-write.
+  // Create a recovery copy immediately after startup, then repeat every
+  // minute. Critical pay writes also call saveDatabaseSnapshot directly, so a
+  // reset cannot discard a pay change waiting for the next scheduled save.
   await saveDatabaseSnapshot();
   setInterval(() => {
     saveDatabaseSnapshot().catch(err => console.error("[TDC] ⚠️ Scheduled database save failed:", err));
-  }, 10 * 60 * 1000);
+  }, 60 * 1000);
 
   console.log("[TDC] Database initialized.");
 }

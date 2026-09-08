@@ -4,7 +4,7 @@ import {
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle
 } from "discord.js";
-import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock, getSetting, setSetting, nextOrderNumber } from "../db.js";
+import { db, getProfile, getGuildConfig, getUserRole, rowToOrder, rowToTimeclock, getSetting, setSetting, nextOrderNumber, saveDatabaseSnapshot } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildClockInEmbed, buildClockOutEmbed, buildDraftEmbed, buildPayoutEmbed, buildDashboardEmbed, statusEmoji, COLORS, money } from "../lib/embeds.js";
 import { randomUUID, weekStart, paginate } from "../lib/utils.js";
@@ -740,6 +740,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       await db.execute("UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending'");
       // Use SQLite-compatible timestamp format (YYYY-MM-DD HH:MM:SS) so datetime() parses it correctly
       await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+      await saveDatabaseSnapshot();
       const count = Number(r.rowsAffected ?? 0);
       const draftCount = Number(drafts.rowsAffected ?? 0);
 
@@ -798,6 +799,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       // AND pay status — otherwise a previously-"paid" mechanic keeps showing
       // paid/green in the pay log even though their commission is now $0.
       await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0, current_pay_status = 'pending' WHERE discord_id = ?", args: [mechId] });
+      await saveDatabaseSnapshot();
       const count = Number(r.rowsAffected ?? 0);
       const draftCount = Number(drafts.rowsAffected ?? 0);
 
@@ -913,6 +915,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
       args: [id]
     });
+    await saveDatabaseSnapshot();
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
     const payout = {
@@ -1017,6 +1020,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE orders SET status = 'archived' WHERE mechanic_id = ? AND status = 'paid' AND DATE(created_at) >= ?",
       args: [mechId, ws]
     });
+    await saveDatabaseSnapshot();
     const profile = await getProfile(mechId);
     if (interaction.guild) {
       const config = await getGuildConfig(interaction.guild.id);
@@ -1068,6 +1072,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
       args: [id]
     });
+    await saveDatabaseSnapshot();
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
     const payout = {
@@ -1267,6 +1272,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     // 4. Mark the new pay-period start (SQLite-compatible format: YYYY-MM-DD HH:MM:SS)
     await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+    await saveDatabaseSnapshot();
 
     // 5. Send new week messages to all sales channels
     let sent = 0;

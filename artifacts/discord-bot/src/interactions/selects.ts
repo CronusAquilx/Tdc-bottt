@@ -4,7 +4,7 @@ import {
   StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   ChannelSelectMenuBuilder, UserSelectMenuBuilder, EmbedBuilder,
   ChannelType, PermissionFlagsBits, TextChannel, MessageFlags} from "discord.js";
-import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds, checkpointDatabase } from "../db.js";
+import { db, getProfile, getSetting, setSetting, rowToOrder, setGuildRoleMapping, getGuildConfig, splitRoleIds, checkpointDatabase, saveDatabaseSnapshot } from "../db.js";
 import { buildDraftEmbed, money, COLORS } from "../lib/embeds.js";
 import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
@@ -359,6 +359,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         return;
       }
       await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'paid' WHERE discord_id = ?", args: [memberId] });
+      await saveDatabaseSnapshot();
       await interaction.update({ content: `✅ **${profile.display_name}** marked as 💚 **paid** this week.`, embeds: [], components: [] });
     }
 
@@ -371,6 +372,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         return;
       }
       await db.execute({ sql: "UPDATE profiles SET current_pay_status = 'pending' WHERE discord_id = ?", args: [memberId] });
+      await saveDatabaseSnapshot();
       await interaction.update({ content: `✅ **${profile.display_name}** marked as 🔴 **pending** this week.`, embeds: [], components: [] });
     }
 

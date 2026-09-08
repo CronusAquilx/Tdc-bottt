@@ -2,7 +2,7 @@ import {
   SlashCommandBuilder, ChatInputCommandInteraction,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Guild, TextChannel
 , MessageFlags} from "discord.js";
-import { db, getProfile, getGuildConfig, splitRoleIds, checkpointDatabase } from "../db.js";
+import { db, getProfile, getGuildConfig, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 import { weekStart } from "../lib/utils.js";
@@ -608,7 +608,7 @@ export async function processPayall(
   await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
   // Do not leave a completed Pay All only in the WAL. This makes the payout,
   // paid order statuses, and reset boundary survive an immediate restart.
-  await checkpointDatabase();
+  await saveDatabaseSnapshot();
 
   // Log the payout event
   const { logEvent } = await import("../lib/eventLog.js");
