@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-20", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -63,3 +63,6 @@ externalPort = 3002
 
 [userenv.shared]
 DISCORD_GUILD_ID = "1503609933365514393"
+
+[nix]
+channel = "stable-25_05"
