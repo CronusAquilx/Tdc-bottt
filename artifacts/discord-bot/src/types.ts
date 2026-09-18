@@ -94,6 +94,7 @@ export interface GuildConfig {
   trainer_role_id: string | null;
   mechanic_role_id: string | null;
   timeclock_channel_id: string | null;
+  bank_account_channel_id: string | null;
 }
 
 export interface AppSetting {

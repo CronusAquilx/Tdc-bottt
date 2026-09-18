@@ -14,6 +14,7 @@ import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { showRaffleTypeSelector } from "./raffle.js";
 import { showLoaModal } from "./loa.js";
+import { postBankAccountPanel } from "./bankaccount.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -209,6 +210,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         "• **Job Post** — post a hiring ad to the jobs channel\n" +
         "• **LOA** — submit a Leave of Absence request\n" +
         "• **Timeclock** — set up the clock-in/clock-out channel\n" +
+        "• **Bank Account** — set up the daily bank-balance log and reminders\n" +
         "• **Add Crew** — select multiple members and save them as mechanics\n" +
         "• **Full Crew Sync** — import members with the mechanic role and link matching sales channels"
       )
@@ -226,7 +228,10 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:crew:health").setLabel("🩺  Health Check").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:crew:deletecategory").setLabel("🗑️  Delete Category Channels").setStyle(ButtonStyle.Danger),
     );
-    await interaction.editReply({ embeds: [embed], components: [row1, row2] });
+    const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("admin:setup:bankaccount").setLabel("🏦  Bank Account").setStyle(ButtonStyle.Primary),
+    );
+    await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     return true;
   }
 
@@ -355,7 +360,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       for (const field of [
         "orders_channel_id", "jobs_channel_id", "log_channel_id", "archive_channel_id",
         "timeclock_channel_id", "loa_channel_id", "raffle_channel_id", "leaderboard_channel_id",
-        "training_channel_id", "payday_channel_id", "clocklog_channel_id", "lifetime_earnings_channel_id"
+        "training_channel_id", "payday_channel_id", "clocklog_channel_id", "lifetime_earnings_channel_id",
+        "bank_account_channel_id"
       ]) {
         await db.execute({
           sql: `UPDATE guild_config SET ${field} = NULL WHERE guild_id = ? AND ${field} IN (${placeholders})`,
@@ -424,7 +430,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         `🏆 Leaderboard: ${ch(config?.leaderboard_channel_id)}\n` +
         `📚 Training: ${ch(config?.training_channel_id)}\n` +
         `💸 Pay Logs: ${ch(config?.payday_channel_id)}\n` +
-        `🏆 Lifetime Earnings: ${ch(config?.lifetime_earnings_channel_id)}`
+        `🏆 Lifetime Earnings: ${ch(config?.lifetime_earnings_channel_id)}\n` +
+        `🏦 Bank Account: ${ch(config?.bank_account_channel_id)}`
       )
       .setFooter({ text: FOOTER });
     const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -444,6 +451,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:setup:paylogs").setLabel("💸 Pay Logs").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:setup:lifetimeearnings").setLabel("🏆 Lifetime Earnings").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:setup:bankaccount").setLabel("🏦 Bank Account").setStyle(ButtonStyle.Primary),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     return true;
@@ -1036,7 +1044,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
 // Channel map (used for generic setup + modal attach flows)
 // ─────────────────────────────────────────────────────────────────────────────
 export const CHANNEL_MAP: Record<string, {
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id" | "lifetime_earnings_channel_id";
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "clocklog_channel_id" | "payday_channel_id" | "lifetime_earnings_channel_id" | "bank_account_channel_id";
   name: string; topic: string; label: string;
 }> = {
   orders:           { field: "orders_channel_id",             name: "tdc-orders",           topic: "Tokyo Drift Customs — Order submissions",             label: "Orders"           },
@@ -1050,6 +1058,7 @@ export const CHANNEL_MAP: Record<string, {
   clocklogch:       { field: "clocklog_channel_id",           name: "tdc-clock-logs",       topic: "Tokyo Drift Customs — Clock in/out logs",            label: "Clock Logs"       },
   paylogs:          { field: "payday_channel_id",             name: "tdc-pay-logs",         topic: "Tokyo Drift Customs — Payroll logs & payday panels", label: "Pay Logs"         },
   lifetimeearnings: { field: "lifetime_earnings_channel_id",  name: "tdc-lifetime-earnings",topic: "Tokyo Drift Customs — All-time earnings tracker",    label: "Lifetime Earnings"},
+  bankaccount:      { field: "bank_account_channel_id",       name: "tdc-bank-account",     topic: "Tokyo Drift Customs — Daily bank account logs",     label: "Bank Account"      },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1068,6 +1077,8 @@ async function postChannelPanel(channel: TextChannel, chanType: string, guild?: 
     await postPayLogPanel(channel, guild);
   } else if (chanType === "lifetimeearnings") {
     await postLifetimeEarningsPanel(channel);
+  } else if (chanType === "bankaccount") {
+    await postBankAccountPanel(channel, guild?.id);
   } else if (chanType === "leaderboard") {
     const { postLeaderboard } = await import("../commands/leaderboard.js");
     await postLeaderboard(channel);

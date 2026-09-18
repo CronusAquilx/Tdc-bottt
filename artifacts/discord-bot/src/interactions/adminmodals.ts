@@ -9,6 +9,7 @@ import { buildJobEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { postTimeclockPanel, postLoaPanel, postRafflePanel, postLifetimeEarningsPanel, CHANNEL_MAP } from "./adminbuttons.js";
+import { postBankAccountPanel } from "./bankaccount.js";
 
 export async function handleAdminModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const parts = interaction.customId.split(":");
@@ -369,9 +370,11 @@ export async function handleAdminModal(interaction: ModalSubmitInteraction): Pro
     } else if (chanType === "paylogs") {
       const { postPayLogPanel } = await import("../commands/payall.js");
       await postPayLogPanel(ch as TextChannel, guild);
+    } else if (chanType === "bankaccount") {
+      await postBankAccountPanel(ch as TextChannel, guild.id);
     }
 
-    const panelTypes = ["loach", "rafflech", "lifetimeearnings", "trainingch", "paylogs"];
+    const panelTypes = ["loach", "rafflech", "lifetimeearnings", "trainingch", "paylogs", "bankaccount"];
     await interaction.editReply({ content: `✅ **${cfg.label}** channel set → <#${channelId}>${panelTypes.includes(chanType) ? " and panel posted." : "."}` });
     return true;
   }

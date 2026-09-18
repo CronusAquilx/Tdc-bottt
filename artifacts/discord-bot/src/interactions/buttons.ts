@@ -14,6 +14,7 @@ import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
 import { logEvent } from "../lib/eventLog.js";
+import { sendBankReminder } from "./bankaccount.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -1224,9 +1225,15 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     // Refresh pay log panel to reflect the post-payroll zeroed state
+    let bankReminderSent = false;
     if (interaction.guild) {
       const { refreshPayLogPanel } = await import("../commands/payall.js");
       refreshPayLogPanel(interaction.guild).catch(() => {});
+      try {
+        bankReminderSent = await sendBankReminder(interaction.guild, "payday");
+      } catch (error) {
+        console.error("[TDC] Payday bank-account reminder failed:", error);
+      }
     }
 
     const summaryEmbed = new EmbedBuilder()
@@ -1239,7 +1246,10 @@ export async function handleButton(interaction: ButtonInteraction) {
         "• Weekly stats reset to **zero**\n" +
         "• Order numbers reset to **TDC-0001**\n" +
         `• Pay messages sent to **${notified}** sales channels ✅\n` +
-        "• Each mechanic's sales channel has their new order panel ✅"
+        "• Each mechanic's sales channel has their new order panel ✅" +
+        (bankReminderSent
+          ? "\n• Owners and managers were reminded to log the bank account 🏦"
+          : "\n• Bank-account channel is not configured yet")
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })
       .setTimestamp();

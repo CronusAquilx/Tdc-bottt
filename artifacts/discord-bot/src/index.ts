@@ -39,6 +39,7 @@ import { handleAdminModal }    from "./interactions/adminmodals.js";
 import { handleRaffleButton, handleRaffleModal } from "./interactions/raffle.js";
 import { handleLoaButton, handleLoaModal }       from "./interactions/loa.js";
 import { handleTrainingButton, handleTrainingModal } from "./interactions/training.js";
+import { handleBankButton, handleBankModal, scheduleDailyBankPrompts } from "./interactions/bankaccount.js";
 import { postLoaPanel, postRafflePanel } from "./interactions/adminbuttons.js";
 import { postLeaderboard }                       from "./commands/leaderboard.js";
 import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
@@ -163,11 +164,12 @@ client.once(Events.ClientReady, async (c) => {
 
   // Auto-post panels to configured channels that are missing them
   try {
-    const rows = await db.execute("SELECT guild_id, loa_channel_id, raffle_channel_id FROM guild_config");
+    const rows = await db.execute("SELECT guild_id, loa_channel_id, raffle_channel_id, bank_account_channel_id FROM guild_config");
     for (const row of rows.rows) {
       const guildId      = String(row[0] ?? "");
       const loaChanId    = row[1] ? String(row[1]) : null;
       const raffleChanId = row[2] ? String(row[2]) : null;
+      const bankChanId   = row[3] ? String(row[3]) : null;
       if (!guildId) continue;
 
       let guild: any;
@@ -176,6 +178,10 @@ client.once(Events.ClientReady, async (c) => {
       for (const [chanId, panelFn, label] of [
         [loaChanId,    postLoaPanel,    "LOA"],
         [raffleChanId, postRafflePanel, "Raffle"],
+        [bankChanId,   async (ch: any) => {
+          const { postBankAccountPanel } = await import("./interactions/bankaccount.js");
+          return postBankAccountPanel(ch, guild.id);
+        }, "Bank Account"],
       ] as [string | null, (ch: any) => Promise<any>, string][]) {
         if (!chanId) continue;
         try {
@@ -200,6 +206,7 @@ client.once(Events.ClientReady, async (c) => {
 
   // Start auto clock-out monitor (every 5 min, idle threshold)
   startAutoClockOutMonitor(c);
+  scheduleDailyBankPrompts(c);
 
   // Weekly leaderboard auto-post — every Monday at midnight UTC
   scheduleWeeklyLeaderboard(c);
@@ -280,6 +287,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isButton()) {
       if (await handleAdminButton(interaction)) return;
+      if (await handleBankButton(interaction)) return;
       if (await handleRaffleButton(interaction)) return;
       if (await handleLoaButton(interaction)) return;
       if (await handleTrainingButton(interaction)) return;
@@ -290,6 +298,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isModalSubmit()) {
       if (await handleAdminModal(interaction)) return;
+      if (await handleBankModal(interaction)) return;
       if (await handleRaffleModal(interaction)) return;
       if (await handleLoaModal(interaction)) return;
       if (await handleTrainingModal(interaction)) return;

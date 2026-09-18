@@ -189,6 +189,21 @@ export async function initDb() {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS bank_account_logs (
+      id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      log_date TEXT NOT NULL,
+      balance REAL NOT NULL,
+      expected_change REAL NOT NULL DEFAULT 0,
+      expected_balance REAL NOT NULL DEFAULT 0,
+      actual_change REAL NOT NULL DEFAULT 0,
+      variance REAL NOT NULL DEFAULT 0,
+      order_count INTEGER NOT NULL DEFAULT 0,
+      logged_by TEXT NOT NULL,
+      logged_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(guild_id, log_date)
+    );
+
     CREATE TABLE IF NOT EXISTS loa_requests (
       id TEXT PRIMARY KEY,
       mechanic_id TEXT NOT NULL,
@@ -263,6 +278,7 @@ export async function initDb() {
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_name TEXT NOT NULL DEFAULT ''");
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN bank_account_channel_id TEXT");
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_sales REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_orders INTEGER NOT NULL DEFAULT 0");
@@ -367,7 +383,7 @@ export async function getGuildConfig(guildId: string) {
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
                  payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id,
-                 lifetime_earnings_channel_id
+                 lifetime_earnings_channel_id, bank_account_channel_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
@@ -394,12 +410,13 @@ export async function getGuildConfig(guildId: string) {
     manager_crew_rate:             row[17] != null ? Number(row[17]) : 0.20,
     clocklog_channel_id:           row[18] ? String(row[18]) : null,
     lifetime_earnings_channel_id:  row[19] ? String(row[19]) : null,
+    bank_account_channel_id:       row[20] ? String(row[20]) : null,
   };
 }
 
 export async function setGuildConfig(
   guildId: string,
-  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id" | "lifetime_earnings_channel_id",
+  field: "orders_channel_id" | "jobs_channel_id" | "log_channel_id" | "archive_channel_id" | "timeclock_channel_id" | "loa_channel_id" | "raffle_channel_id" | "leaderboard_channel_id" | "training_channel_id" | "payday_channel_id" | "clocklog_channel_id" | "lifetime_earnings_channel_id" | "bank_account_channel_id",
   channelId: string
 ): Promise<void> {
   await db.execute({
