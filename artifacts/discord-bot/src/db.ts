@@ -163,7 +163,8 @@ export async function initDb() {
       invoice_count INTEGER NOT NULL DEFAULT 0,
       paid_at TEXT,
       paid_by TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      manager_cut REAL NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -201,6 +202,7 @@ export async function initDb() {
       order_count INTEGER NOT NULL DEFAULT 0,
       logged_by TEXT NOT NULL,
       logged_at TEXT NOT NULL DEFAULT (datetime('now')),
+      payout_total REAL NOT NULL DEFAULT 0,
       UNIQUE(guild_id, log_date)
     );
 
@@ -279,6 +281,8 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN current_pay_status TEXT NOT NULL DEFAULT 'pending'");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN lifetime_earnings_channel_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN bank_account_channel_id TEXT");
+  await safeAlter("ALTER TABLE payouts ADD COLUMN manager_cut REAL NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE bank_account_logs ADD COLUMN payout_total REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_sales REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_orders INTEGER NOT NULL DEFAULT 0");

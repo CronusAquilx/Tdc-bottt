@@ -14,7 +14,7 @@ import { processPayall, buildPayallSummaryEmbed } from "../commands/payall.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
 import { logEvent } from "../lib/eventLog.js";
-import { sendBankReminder } from "./bankaccount.js";
+import { scheduleNextBankReminder } from "./bankaccount.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -913,7 +913,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
     });
     await db.execute({
-      sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
+      sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
       args: [id]
     });
     await saveDatabaseSnapshot();
@@ -1070,7 +1070,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       args: [payoutId, id, ws, commission, r.rows.length, profile.hours_worked_this_week, r.rows.length, interaction.user.id]
     });
     await db.execute({
-      sql: `UPDATE orders SET status = 'paid', completed_at = datetime('now') WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
+      sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
       args: [id]
     });
     await saveDatabaseSnapshot();
@@ -1208,7 +1208,8 @@ export async function handleButton(interaction: ButtonInteraction) {
               .setColor(0xffd700)
               .setDescription(
                 `**Pay period:** Week of \`${ws}\`\n` +
-                `**Total revenue:** ${money(totalRevenue)}\n\n` +
+                `**Total revenue:** ${money(totalRevenue)}\n` +
+                `**Taken from bank for payouts:** ${money(totalToBill)}\n\n` +
                 `✅ Pay messages sent to **${notified}** mechanic(s).` +
                 (failed > 0 ? `\n⚠️ ${failed} skipped (no sales channel).` : "")
               )
@@ -1225,12 +1226,12 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     // Refresh pay log panel to reflect the post-payroll zeroed state
-    let bankReminderSent = false;
+    let bankReminderScheduled = false;
     if (interaction.guild) {
       const { refreshPayLogPanel } = await import("../commands/payall.js");
       refreshPayLogPanel(interaction.guild).catch(() => {});
       try {
-        bankReminderSent = await sendBankReminder(interaction.guild, "payday");
+        bankReminderScheduled = await scheduleNextBankReminder(interaction.guild);
       } catch (error) {
         console.error("[TDC] Payday bank-account reminder failed:", error);
       }
@@ -1247,8 +1248,8 @@ export async function handleButton(interaction: ButtonInteraction) {
         "• Order numbers reset to **TDC-0001**\n" +
         `• Pay messages sent to **${notified}** sales channels ✅\n` +
         "• Each mechanic's sales channel has their new order panel ✅" +
-        (bankReminderSent
-          ? "\n• Owners and managers were reminded to log the bank account 🏦"
+        (bankReminderScheduled
+          ? "\n• Next bank-account reminder is set for the next daily check 🏦"
           : "\n• Bank-account channel is not configured yet")
       )
       .setFooter({ text: "東京ドリフトカスタム  ·  Built Different. Driven Hard." })

@@ -57,6 +57,8 @@ type BankComparison = {
   previousBalance: number | null;
   orderRevenue: number;
   orderCount: number;
+  payoutTotal: number;
+  payoutCount: number;
   expectedBalance: number;
   actualChange: number;
   variance: number;
@@ -79,17 +81,35 @@ async function getPreviousLog(guildId: string, logDate: string) {
   return result.rows[0] ?? null;
 }
 
-async function getOrdersSince(guildId: string, loggedAt: string | null) {
+async function getOrdersSince(guildId: string, loggedAt: string | null, through: string) {
   const result = await db.execute({
     sql: `SELECT COALESCE(SUM(total), 0), COUNT(*)
           FROM orders
           WHERE guild_id = ?
             AND status IN ('complete', 'approved', 'paid')
-            AND datetime(COALESCE(completed_at, created_at)) > datetime(?)`,
-    args: [guildId, loggedAt ?? "2000-01-01 00:00:00"],
+            AND datetime(COALESCE(completed_at, created_at)) > datetime(?)
+            AND datetime(COALESCE(completed_at, created_at)) <= datetime(?)`,
+    args: [guildId, loggedAt ?? "2000-01-01 00:00:00", through],
   });
   return {
     revenue: Number(result.rows[0]?.[0] ?? 0),
+    count: Number(result.rows[0]?.[1] ?? 0),
+  };
+}
+
+async function getPayoutsSince(loggedAt: string | null, through: string) {
+  const result = await db.execute({
+    sql: `SELECT
+            COALESCE(SUM(amount + COALESCE(manager_cut, 0)), 0),
+            COUNT(CASE WHEN amount + COALESCE(manager_cut, 0) > 0 THEN 1 END)
+          FROM payouts
+          WHERE paid_at IS NOT NULL
+            AND datetime(paid_at) > datetime(?)
+            AND datetime(paid_at) <= datetime(?)`,
+    args: [loggedAt ?? "2000-01-01 00:00:00", through],
+  });
+  return {
+    amount: Number(result.rows[0]?.[0] ?? 0),
     count: Number(result.rows[0]?.[1] ?? 0),
   };
 }
@@ -101,14 +121,18 @@ export async function recordBankBalance(
   date = localDate(),
 ): Promise<BankComparison> {
   const previous = await getPreviousLog(guildId, date);
+  const loggedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
   const orderTotals = previous
-    ? await getOrdersSince(guildId, String(previous[2]))
+    ? await getOrdersSince(guildId, String(previous[2]), loggedAt)
     : { revenue: 0, count: 0 };
+  const payoutTotals = previous
+    ? await getPayoutsSince(String(previous[2]), loggedAt)
+    : { amount: 0, count: 0 };
   const previousBalance = previous ? Number(previous[1] ?? 0) : null;
   const actualChange = previousBalance === null ? 0 : balance - previousBalance;
-  const expectedBalance = previousBalance === null ? balance : previousBalance + orderTotals.revenue;
-  const variance = previousBalance === null ? 0 : actualChange - orderTotals.revenue;
-  const loggedAt = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const expectedChange = orderTotals.revenue - payoutTotals.amount;
+  const expectedBalance = previousBalance === null ? balance : previousBalance + expectedChange;
+  const variance = previousBalance === null ? 0 : actualChange - expectedChange;
 
   const existing = await db.execute({
     sql: "SELECT id FROM bank_account_logs WHERE guild_id = ? AND log_date = ?",
@@ -117,12 +141,13 @@ export async function recordBankBalance(
   const id = existing.rows[0]?.[0] ? String(existing.rows[0][0]) : randomUUID();
   await db.execute({
     sql: `INSERT INTO bank_account_logs
-            (id, guild_id, log_date, balance, expected_change, expected_balance,
-             actual_change, variance, order_count, logged_by, logged_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, guild_id, log_date, balance, expected_change, payout_total,
+             expected_balance, actual_change, variance, order_count, logged_by, logged_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(guild_id, log_date) DO UPDATE SET
             balance = excluded.balance,
             expected_change = excluded.expected_change,
+            payout_total = excluded.payout_total,
             expected_balance = excluded.expected_balance,
             actual_change = excluded.actual_change,
             variance = excluded.variance,
@@ -134,7 +159,8 @@ export async function recordBankBalance(
       guildId,
       date,
       balance,
-      orderTotals.revenue,
+      expectedChange,
+      payoutTotals.amount,
       expectedBalance,
       actualChange,
       variance,
@@ -143,6 +169,7 @@ export async function recordBankBalance(
       loggedAt,
     ],
   });
+  await setSetting(`bank_daily_prompt:${guildId}`, date);
   await checkpointDatabase();
 
   return {
@@ -151,6 +178,8 @@ export async function recordBankBalance(
     previousBalance,
     orderRevenue: orderTotals.revenue,
     orderCount: orderTotals.count,
+    payoutTotal: payoutTotals.amount,
+    payoutCount: payoutTotals.count,
     expectedBalance,
     actualChange,
     variance,
@@ -202,6 +231,11 @@ export function buildBankLogEmbed(comparison: BankComparison): EmbedBuilder {
         inline: true,
       },
       {
+        name: "💸 Paid out since last log",
+        value: `**${money(comparison.payoutTotal)}** across ${comparison.payoutCount} payout${comparison.payoutCount === 1 ? "" : "s"}`,
+        inline: false,
+      },
+      {
         name: "Car-order revenue expected",
         value: `**${money(comparison.orderRevenue)}** from ${comparison.orderCount} completed order${comparison.orderCount === 1 ? "" : "s"}`,
         inline: false,
@@ -222,9 +256,9 @@ export async function buildBankPanelEmbed(guildId: string): Promise<EmbedBuilder
     .setColor(COLORS.primary)
     .setDescription(
       "**Managers and owners:** use the button below to log the current daily bank balance.\n\n" +
-      "The bot compares the change since the last log with completed car-order revenue and reports:\n" +
+      "The bot compares the change since the last log with completed car-order revenue minus recorded payouts and reports:\n" +
       "• the actual change in the bank\n" +
-      "• how much the bank should be at from orders\n" +
+      "• the expected balance after order revenue and recorded payouts\n" +
       "• any shortfall or surplus\n\n" +
       latestText
     )
@@ -315,10 +349,7 @@ async function managementMentions(guildId: string, config: any): Promise<{ conte
   return { content: userIds.map(id => `<@${id}>`).join(" "), roles: [] };
 }
 
-export async function sendBankReminder(
-  guild: import("discord.js").Guild,
-  reason: "daily" | "payday",
-): Promise<boolean> {
+export async function sendBankReminder(guild: import("discord.js").Guild): Promise<boolean> {
   const config = await getGuildConfig(guild.id);
   const channelId = config?.bank_account_channel_id;
   if (!channelId) return false;
@@ -326,16 +357,23 @@ export async function sendBankReminder(
   if (!channel?.isTextBased()) return false;
 
   const mentions = await managementMentions(guild.id, config);
-  const title = reason === "payday"
-    ? "💸 Payday is complete — log the bank account now."
-    : "🌙 Daily bank-account check — please log the current balance.";
   const message = await (channel as TextChannel).send({
-    content: `${mentions.content}\n${title}`,
+    content: `${mentions.content}\n🌙 Daily bank-account check — please log the current balance.`,
     embeds: [await buildBankPanelEmbed(guild.id)],
     components: [bankButtonRow()],
     allowedMentions: { roles: mentions.roles, users: mentions.roles.length ? [] : undefined },
   });
   return Boolean(message);
+}
+
+export async function scheduleNextBankReminder(guild: import("discord.js").Guild): Promise<boolean> {
+  const config = await getGuildConfig(guild.id);
+  const channelId = config?.bank_account_channel_id;
+  if (!channelId) return false;
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased()) return false;
+  await setSetting(`bank_daily_prompt:${guild.id}`, localDate());
+  return true;
 }
 
 export function scheduleDailyBankPrompts(client: Client): void {
@@ -345,7 +383,7 @@ export function scheduleDailyBankPrompts(client: Client): void {
       timeZone: BANK_TIME_ZONE,
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hourCycle: "h23",
     }).formatToParts(now);
     const hour = Number(parts.find(part => part.type === "hour")?.value ?? -1);
     const minute = Number(parts.find(part => part.type === "minute")?.value ?? -1);
@@ -363,7 +401,7 @@ export function scheduleDailyBankPrompts(client: Client): void {
       if (String(sentFor.rows[0]?.[0] ?? "") === date) continue;
       try {
         const guild = await client.guilds.fetch(guildId);
-        if (await sendBankReminder(guild, "daily")) await setSetting(settingKey, date);
+        if (await sendBankReminder(guild)) await setSetting(settingKey, date);
       } catch (error) {
         console.error(`[TDC] Bank-account daily reminder failed for guild ${guildId}:`, error);
       }

@@ -1089,7 +1089,7 @@ async function postChannelPanel(channel: TextChannel, chanType: string, guild?: 
 export async function buildLifetimeEarningsEmbed(): Promise<EmbedBuilder> {
   const r = await db.execute({
     sql: `SELECT p.discord_id, p.display_name,
-                 COALESCE(SUM(po.amount), 0) AS total_paid,
+                 COALESCE(SUM(po.amount + COALESCE(po.manager_cut, 0)), 0) AS total_paid,
                  COUNT(po.id) AS payout_count
           FROM profiles p
           LEFT JOIN payouts po ON po.mechanic_id = p.discord_id

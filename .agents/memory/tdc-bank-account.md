@@ -3,8 +3,8 @@ name: TDC Daily Bank Account
 description: Daily bank-balance tracking and reconciliation rules for the Tokyo Drift Customs bot
 ---
 
-The bank-account check treats each completed car order's recorded `total` as expected bank revenue between two balance logs. The first log is a baseline; later logs compare actual balance change with that revenue and report the expected balance plus any shortfall or surplus. Daily reminders use the configured America/Chicago default unless `TDC_TIMEZONE` is set.
+The bank-account check treats each completed car order's recorded `total` as expected bank revenue and bot-recorded payouts as bank outflows between two balance logs. The first log is a baseline; later logs compare actual change against order revenue minus payouts. Daily reminders use the configured America/Chicago default unless `TDC_TIMEZONE` is set. Logging the balance or processing payday suppresses another bank reminder for that local date; the next daily check can ping the following day.
 
-**Why:** Management needs a simple daily reconciliation against the same order totals already recorded by the bot, and the reminder must match the server's operating day rather than UTC.
+**Why:** Paying crew reduces the bank balance, so reconciliation must subtract recorded payouts or they appear as unexplained shortfalls. Reminder timing should follow the server's operating day and avoid repeat same-day pings.
 
-**How to apply:** Preserve the baseline-plus-revenue comparison when changing bank-account logs, reminders, payday prompts, or order revenue semantics.
+**How to apply:** Preserve the baseline-plus-revenue-minus-payouts comparison when changing bank-account logs, reminder scheduling, payday processing, or order revenue semantics.

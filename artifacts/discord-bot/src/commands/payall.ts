@@ -425,7 +425,7 @@ export async function processPayall(
   guild: Guild | null,
   ws: string,
   paidById: string
-): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
+): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ payoutId: string | null; mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
   // Use order_number_reset_ts as the pay-period boundary — same as all other commission calculations
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
@@ -476,7 +476,7 @@ export async function processPayall(
     profileMetaMap.set(id, { name, rate, hours });
   }
 
-  const payoutResults: Array<{ mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
+  const payoutResults: Array<{ payoutId: string | null; mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> = [];
   const processedIds = new Set<string>();
 
   for (const [mid, m] of mechanicMap) {
@@ -494,6 +494,7 @@ export async function processPayall(
       args: [payoutId, mid, ws, commission, m.orders, m.hours, m.orders, paidById]
     });
     payoutResults.push({
+      payoutId,
       mechanicId: mid,
       amount: commission,
       managerCut: 0,
@@ -518,6 +519,7 @@ export async function processPayall(
       args: [payoutId, id, ws, commission, 0, meta.hours, 0, paidById]
     });
     payoutResults.push({
+      payoutId,
       mechanicId: id,
       amount: commission,
       managerCut: 0,
@@ -555,10 +557,22 @@ export async function processPayall(
     const pRecord = payoutResults.find(p => p.mechanicId === managerId);
     if (pRecord) {
       pRecord.managerCut = cut;
+      if (pRecord.payoutId) {
+        await db.execute({
+          sql: "UPDATE payouts SET manager_cut = ? WHERE id = ?",
+          args: [cut, pRecord.payoutId],
+        });
+      }
     } else if (cut > 0) {
       // Manager has no orders/manual pay of their own but still earned a crew cut
       const meta = profileMetaMap.get(managerId) ?? { name: "Unknown", rate: overrideRate, hours: 0 };
+      const payoutId = randomUUID();
+      await db.execute({
+        sql: "INSERT INTO payouts (id, mechanic_id, week_start, amount, order_count, hours_worked, invoice_count, paid_at, paid_by, manager_cut) VALUES (?, ?, ?, 0, 0, ?, 0, datetime('now'), ?, ?)",
+        args: [payoutId, managerId, ws, meta.hours, paidById, cut],
+      });
       payoutResults.push({
+        payoutId,
         mechanicId: managerId,
         amount: 0,
         managerCut: cut,
@@ -578,6 +592,7 @@ export async function processPayall(
     if (processedIds.has(id) || !salesChan) continue;
     const meta = profileMetaMap.get(id) ?? { name: "Unknown", rate: 0.3, hours: 0 };
     payoutResults.push({
+      payoutId: null,
       mechanicId: id,
       amount: 0,
       managerCut: 0,
