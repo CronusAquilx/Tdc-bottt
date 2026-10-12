@@ -116,7 +116,7 @@ const client = new Client({
 });
 
 type CommandDefinition = {
-  data: import("discord.js").SlashCommandBuilder;
+  data: { name: string; toJSON: () => unknown };
   execute: (i: ChatInputCommandInteraction) => Promise<void>;
 };
 

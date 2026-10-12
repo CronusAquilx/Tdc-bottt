@@ -51,7 +51,7 @@ async function checkIdleMechanics(client: Client) {
       if (updateEnabled) {
         const lastOrderR = await db.execute({
           sql: `SELECT MAX(completed_at) FROM orders
-                WHERE mechanic_id = ? AND status = 'complete'
+                WHERE mechanic_id = ? AND completed_at IS NOT NULL
                   AND datetime(completed_at) >= datetime(?)`,
           args: [mechanicId, clockInTime],
         });

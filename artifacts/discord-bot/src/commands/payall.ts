@@ -685,6 +685,7 @@ async function loadUpdatedPayroll(guild?: Guild): Promise<{
     sql: `SELECT o.mechanic_id, o.labour, o.total, COALESCE(o.is_own_car, 0), o.role_level
           FROM orders o
           WHERE o.status IN ('complete','approved') AND ${sinceReset}`,
+    args: [],
   });
   const grouped = new Map<string, { labour: number; orders: number; revenue: number }>();
   let totalRevenue = 0;
@@ -921,6 +922,7 @@ async function processUpdatedPayall(
   await db.execute({
     sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now'))
           WHERE status IN ('complete','approved') AND ${sinceResetBare}`,
+    args: [],
   });
   await db.execute(
     "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0",

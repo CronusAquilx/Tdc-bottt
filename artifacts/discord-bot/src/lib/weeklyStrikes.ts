@@ -73,14 +73,18 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
   const profiles = await db.execute(
     "SELECT discord_id, display_name, sales_channel_id, strike_count, terminated_at FROM profiles"
   );
-  const shifts = await db.execute(
-    `SELECT id, mechanic_id, clock_in_time, clock_out_time, duration_minutes, status
-     FROM timeclock
-     WHERE (guild_id = ? OR guild_id IS NULL OR guild_id = '')
-       AND datetime(clock_in_time) < datetime(?)
-       AND (clock_out_time IS NULL OR datetime(clock_out_time) > datetime(?))`,
-    [guild.id, new Date(end).toISOString().replace("T", " ").slice(0, 19), new Date(start).toISOString().replace("T", " ").slice(0, 19)],
-  );
+  const shifts = await db.execute({
+    sql: `SELECT id, mechanic_id, clock_in_time, clock_out_time, duration_minutes, status
+          FROM timeclock
+          WHERE (guild_id = ? OR guild_id IS NULL OR guild_id = '')
+            AND datetime(clock_in_time) < datetime(?)
+            AND (clock_out_time IS NULL OR datetime(clock_out_time) > datetime(?))`,
+    args: [
+      guild.id,
+      new Date(end).toISOString().replace("T", " ").slice(0, 19),
+      new Date(start).toISOString().replace("T", " ").slice(0, 19),
+    ],
+  });
 
   const hoursByMechanic = new Map<string, number>();
   for (const shift of shifts.rows) {
