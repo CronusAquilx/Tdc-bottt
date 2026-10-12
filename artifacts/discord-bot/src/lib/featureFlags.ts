@@ -8,5 +8,7 @@ export async function isUpdateEnabled(): Promise<boolean> {
 
 export async function enableUpdate(): Promise<void> {
   await setSetting(UPDATE_ROLLOUT_KEY, "true");
-  await saveDatabaseSnapshot();
+  await saveDatabaseSnapshot().catch(error => {
+    console.error("[TDC] Update is enabled, but its extra database snapshot failed:", error);
+  });
 }

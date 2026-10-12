@@ -2,6 +2,7 @@ import { Client, Guild, TextChannel } from "discord.js";
 import { db, getGuildConfig, splitRoleIds } from "../db.js";
 import { isUpdateEnabled } from "./featureFlags.js";
 import { LOW_HOURS_STRIKE_THRESHOLD, WEEKLY_HOURS_GOAL } from "./payrollPolicy.js";
+import { calculateCreditedShiftMinutes } from "./timeclock.js";
 
 const TIME_ZONE = process.env.TDC_TIMEZONE?.trim() || "America/Chicago";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -73,7 +74,7 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
     "SELECT discord_id, display_name, sales_channel_id, strike_count, terminated_at FROM profiles"
   );
   const shifts = await db.execute(
-    `SELECT mechanic_id, clock_in_time, clock_out_time, status
+    `SELECT id, mechanic_id, clock_in_time, clock_out_time, duration_minutes, status
      FROM timeclock
      WHERE (guild_id = ? OR guild_id IS NULL OR guild_id = '')
        AND datetime(clock_in_time) < datetime(?)
@@ -83,12 +84,26 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
 
   const hoursByMechanic = new Map<string, number>();
   for (const shift of shifts.rows) {
-    if (String(shift[3] ?? "") === "rejected") continue;
-    const mechanicId = String(shift[0] ?? "");
-    const shiftStart = Math.max(start, parseDatabaseUtc(shift[1]));
-    const shiftEnd = Math.min(end, shift[2] ? parseDatabaseUtc(shift[2]) : end);
+    if (String(shift[5] ?? "") === "rejected") continue;
+    const shiftId = String(shift[0] ?? "");
+    const mechanicId = String(shift[1] ?? "");
+    const clockInTime = String(shift[2] ?? "");
+    const originalStart = parseDatabaseUtc(clockInTime);
+    const actualEnd = shift[3] ? parseDatabaseUtc(shift[3]) : end;
+    const shiftStart = Math.max(start, originalStart);
+    const shiftEnd = Math.min(end, actualEnd);
     if (shiftEnd <= shiftStart) continue;
-    hoursByMechanic.set(mechanicId, (hoursByMechanic.get(mechanicId) ?? 0) + (shiftEnd - shiftStart) / 3_600_000);
+    const eligibleAtEnd = await calculateCreditedShiftMinutes(
+      shiftId, mechanicId, clockInTime, shiftEnd, true,
+    );
+    const eligibleAtStart = await calculateCreditedShiftMinutes(
+      shiftId, mechanicId, clockInTime, shiftStart, true,
+    );
+    const eligibleMinutes = Math.max(0, eligibleAtEnd - eligibleAtStart);
+    hoursByMechanic.set(
+      mechanicId,
+      (hoursByMechanic.get(mechanicId) ?? 0) + eligibleMinutes / 60,
+    );
   }
 
   const config = await getGuildConfig(guild.id);

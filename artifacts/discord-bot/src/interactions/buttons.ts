@@ -15,6 +15,7 @@ import { postOrderPanel } from "./orderpanel.js";
 import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
 import { logEvent } from "../lib/eventLog.js";
 import { scheduleNextBankReminder } from "./bankaccount.js";
+import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -53,7 +54,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     const tcId = id;
 
     // Verify this timeclock entry exists and belongs to the user clicking
-    const tcR = await db.execute({ sql: "SELECT mechanic_id FROM timeclock WHERE id = ?", args: [tcId] });
+    const tcR = await db.execute({ sql: "SELECT mechanic_id, clock_out_time FROM timeclock WHERE id = ?", args: [tcId] });
     if (!tcR.rows[0]) {
       // Entry doesn't exist — remove buttons from the warning message so it can't be clicked again
       try { await interaction.message.edit({ content: "ℹ️ This warning is no longer active.", components: [] }); } catch { /* ignore */ }
@@ -65,13 +66,26 @@ export async function handleButton(interaction: ButtonInteraction) {
       await interaction.editReply({ content: "❌ This warning isn't for you." });
       return;
     }
+    if (tcR.rows[0][1]) {
+      try { await interaction.message.edit({ content: "ℹ️ This shift has already ended.", components: [] }); } catch { /* ignore */ }
+      await interaction.editReply({ content: "ℹ️ That shift has already ended." });
+      return;
+    }
 
     // Clear warn state and record stay-in time — persisted to DB so it survives restarts
     warnedMechanics.delete(tcId);
-    await db.execute({
-      sql: "UPDATE timeclock SET warned_at = NULL, stayed_in_at = datetime('now') WHERE id = ?",
+    const resumed = await db.execute({
+      sql: "UPDATE timeclock SET warned_at = NULL, stayed_in_at = datetime('now') WHERE id = ? AND clock_out_time IS NULL",
       args: [tcId]
-    }).catch(() => {});
+    });
+    if (!resumed.rowsAffected) {
+      await interaction.editReply({ content: "ℹ️ That shift has already ended." });
+      return;
+    }
+    await db.execute({
+      sql: "INSERT INTO timeclock_confirmations (id, timeclock_id, mechanic_id, confirmed_at) VALUES (?, ?, ?, datetime('now'))",
+      args: [randomUUID(), tcId, ownerId],
+    });
 
     // Disable the warning message buttons using interaction.message directly
     // (works even after a bot restart when warnedMechanics is empty)
@@ -97,7 +111,6 @@ export async function handleButton(interaction: ButtonInteraction) {
       return;
     }
     const entry = rowToTimeclock(tcR.rows[0]);
-    const warnedAtRaw = tcR.rows[0][11] ? String(tcR.rows[0][11]) : null;
 
     if (entry.clock_out_time) {
       // Already clocked out — remove buttons so it stops showing
@@ -109,9 +122,9 @@ export async function handleButton(interaction: ButtonInteraction) {
       await interaction.editReply({ content: "❌ This isn't your timeclock entry." }); return;
     }
 
-    // Clear warn state — both in-memory and in DB
+    // Keep the persisted confirmation/order timestamps available while calculating
+    // credited time; the shift is closed immediately afterwards.
     warnedMechanics.delete(tcId);
-    await db.execute({ sql: "UPDATE timeclock SET warned_at = NULL WHERE id = ?", args: [tcId] }).catch(() => {});
 
     // Disable warning message buttons
     try { await interaction.message.edit({ content: `🔴 <@${interaction.user.id}> clocked out.`, components: [] }); } catch { /* ignore */ }
@@ -126,20 +139,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       entry.clock_channel_id ?? null
     );
 
-    // Calculate displayed duration — cap at warned_at + 30 min buffer if this was a stale shift
-    // (prevents showing "27 hours" when the shift should have been auto-clocked-out long ago)
-    const clockInMs  = parseUtc(entry.clock_in_time);
-    const warnedAtMs = warnedAtRaw ? parseUtc(warnedAtRaw) : 0;
-    const realMins   = (Date.now() - clockInMs) / 60000;
-    // If shift was warned and the button is clicked long after the idle window,
-    // show duration as of the expected auto-out window rather than overstating time.
-    const WARN_MINS     = 30;
-    const AUTO_OUT_MINS = 15;
-    let displayMins = realMins;
-    if (warnedAtMs > 0 && realMins > WARN_MINS + AUTO_OUT_MINS + 10) {
-      displayMins = (warnedAtMs + AUTO_OUT_MINS * 60000 - clockInMs) / 60000;
-      if (displayMins < 1) displayMins = realMins; // safety fallback
-    }
+    const closedR = await db.execute({ sql: "SELECT duration_minutes FROM timeclock WHERE id = ?", args: [tcId] });
+    const displayMins = Number(closedR.rows[0]?.[0] ?? 0);
     const hrs = Math.floor(displayMins / 60);
     const m = Math.round(displayMins % 60);
     await interaction.editReply({ content: `✅ Clocked out! **${hrs}h ${m}m**` });
@@ -419,7 +420,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
+    const mins = await calculateCreditedShiftMinutes(entry.id, entry.mechanic_id, entry.clock_in_time);
 
     await db.execute({
       sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', stayed_in_at = NULL, warned_at = NULL WHERE id = ?",
@@ -554,7 +555,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
+    const mins = await calculateCreditedShiftMinutes(entry.id, entry.mechanic_id, entry.clock_in_time);
 
     await db.execute({
       sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?",
@@ -630,15 +631,16 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "checktime" && action === "panel") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const active = await db.execute({
-      sql: "SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
+      sql: "SELECT id, clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1",
       args: [interaction.user.id]
     });
     if (!active.rows[0]) {
       await interaction.editReply({ content: "⚫ You're not currently clocked in." });
       return;
     }
-    const clockInTime = String(active.rows[0][0]);
-    const mins = (Date.now() - new Date(clockInTime).getTime()) / 60000;
+    const timeclockId = String(active.rows[0][0]);
+    const clockInTime = String(active.rows[0][1]);
+    const mins = await calculateCreditedShiftMinutes(timeclockId, interaction.user.id, clockInTime);
     const hrs = Math.floor(mins / 60);
     const m = Math.round(mins % 60);
     const unixTs = Math.floor(new Date(clockInTime).getTime() / 1000);
@@ -1488,7 +1490,7 @@ export async function handleButton(interaction: ButtonInteraction) {
     }
 
     const entry = rowToTimeclock(activeR.rows[0]);
-    const mins  = (Date.now() - parseUtc(entry.clock_in_time)) / 60000;
+    const mins  = await calculateCreditedShiftMinutes(entry.id, targetId, entry.clock_in_time);
     const reason = `Clocked out by manager via panel`;
 
     await db.execute({

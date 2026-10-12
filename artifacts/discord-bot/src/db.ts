@@ -304,9 +304,22 @@ export async function initDb() {
   await safeAlter("ALTER TABLE profiles ADD COLUMN strike_pay_cut_pending INTEGER NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE payouts ADD COLUMN hourly_pay REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE timeclock ADD COLUMN last_idle_ping_at TEXT");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS timeclock_confirmations (
+      id TEXT PRIMARY KEY,
+      timeclock_id TEXT NOT NULL,
+      mechanic_id TEXT NOT NULL,
+      confirmed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  await db.execute(
+    "CREATE INDEX IF NOT EXISTS idx_timeclock_confirmations_shift_time ON timeclock_confirmations(timeclock_id, confirmed_at)",
+  );
 
-  // Close only genuinely stale sessions at startup and credit their elapsed time
-  // before doing so. Short sessions remain open across deploys/restarts.
+  // Close only genuinely stale sessions at startup. Active sessions under eight
+  // hours remain open across deploys/restarts, and staged payroll applies the
+  // same idle cap as a normal clock-out.
+  const { calculateCreditedShiftMinutes } = await import("./lib/timeclock.js");
   const staleSessions = await db.execute(
     `SELECT id, mechanic_id, clock_in_time FROM timeclock
      WHERE clock_out_time IS NULL
@@ -316,7 +329,7 @@ export async function initDb() {
     const id = String(row[0] ?? "");
     const mechanicId = String(row[1] ?? "");
     const clockIn = String(row[2] ?? "");
-    const minutes = Math.max(0, (Date.now() - new Date(`${clockIn.replace(" ", "T")}Z`).getTime()) / 60000);
+    const minutes = await calculateCreditedShiftMinutes(id, mechanicId, clockIn);
     await db.execute({
       sql: `UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?,
             status = 'approved', warned_at = NULL, stayed_in_at = NULL

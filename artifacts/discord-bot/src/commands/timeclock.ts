@@ -6,6 +6,7 @@ import { requireRole } from "../lib/roles.js";
 import { buildClockInEmbed, buildClockOutEmbed } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
+import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clock")
@@ -72,7 +73,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
     const entry = rowToTimeclock(active.rows[0]);
-    const mins = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins = await calculateCreditedShiftMinutes(entry.id, entry.mechanic_id, entry.clock_in_time);
     await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?", args: [mins, notes ?? null, entry.id] });
     await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
     // Clear any in-memory warn/stay state for this shift

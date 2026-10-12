@@ -3,6 +3,7 @@ import { db, getProfile, getGuildConfig } from "../db.js";
 import { buildClockOutEmbed } from "./embeds.js";
 import { warnedMechanics } from "./warnState.js";
 import { isUpdateEnabled } from "./featureFlags.js";
+import { calculateCreditedShiftMinutes } from "./timeclock.js";
 
 const AUTO_OUT_AFTER_WARN_MINS = 15;
 
@@ -26,7 +27,7 @@ async function checkIdleMechanics(client: Client) {
     if (!updateEnabled && new Date().getMinutes() % 5 !== 0) return;
     const warnAfterMins = updateEnabled ? 30 : 45;
     const active = await db.execute(
-      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at, stayed_in_at, guild_id, warn_msg_id, warn_chan_id
+      `SELECT id, mechanic_id, clock_in_time, clock_message_id, clock_channel_id, warned_at, stayed_in_at, guild_id, warn_msg_id, warn_chan_id, last_idle_ping_at
        FROM timeclock
        WHERE clock_out_time IS NULL`
     );
@@ -42,6 +43,7 @@ async function checkIdleMechanics(client: Client) {
       const guildId     = row[7] ? String(row[7]) : null;
       const warnMsgId   = row[8] ? String(row[8]) : null;
       const warnChanId  = row[9] ? String(row[9]) : null;
+      const lastPingRaw = row[10] ? String(row[10]) : null;
 
       const clockInMs   = parseUtc(clockInTime);
       const stayedInMs  = stayedInDb ? parseUtc(stayedInDb) : 0;
@@ -132,6 +134,10 @@ async function checkIdleMechanics(client: Client) {
         continue;
       }
 
+      const lastPingMs = lastPingRaw ? parseUtc(lastPingRaw) : 0;
+      if (updateEnabled && lastPingMs >= idleStartMs && Date.now() - lastPingMs < warnAfterMins * 60_000) {
+        continue;
+      }
       await sendIdleWarning(client, guild, tcId, mechanicId, chanId, warnAfterMins);
     }
   } catch (err) {
@@ -169,7 +175,7 @@ async function sendIdleWarning(
               components: [row]
             });
             await db.execute({
-              sql: "UPDATE timeclock SET warned_at = datetime('now'), warn_msg_id = ?, warn_chan_id = ? WHERE id = ?",
+              sql: "UPDATE timeclock SET warned_at = datetime('now'), last_idle_ping_at = datetime('now'), warn_msg_id = ?, warn_chan_id = ? WHERE id = ?",
               args: [msg.id, ch.id, tcId]
             });
             warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: ch.id, mechanicId });
@@ -191,7 +197,7 @@ async function sendIdleWarning(
           components: [row]
         });
         await db.execute({
-          sql: "UPDATE timeclock SET warned_at = datetime('now'), warn_msg_id = ?, warn_chan_id = ? WHERE id = ?",
+          sql: "UPDATE timeclock SET warned_at = datetime('now'), last_idle_ping_at = datetime('now'), warn_msg_id = ?, warn_chan_id = ? WHERE id = ?",
           args: [msg.id, dm.id, tcId]
         });
         warnedMechanics.set(tcId, { warnedAt: Date.now(), msgId: msg.id, chanId: dm.id, mechanicId });
@@ -209,8 +215,7 @@ export async function autoClockOut(
   client: Client, guild: any, tcId: string, mechanicId: string,
   clockInTime: string, msgId: string | null, chanId: string | null, warnAfterMins = 45
 ) {
-  const clockInMs = parseUtc(clockInTime);
-  const mins = (Date.now() - clockInMs) / 60000;
+  const mins = await calculateCreditedShiftMinutes(tcId, mechanicId, clockInTime);
 
   await db.execute({
     sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL, warn_msg_id = NULL, warn_chan_id = NULL WHERE id = ?",

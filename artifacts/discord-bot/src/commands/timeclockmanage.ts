@@ -7,6 +7,7 @@ import { requireRole } from "../lib/roles.js";
 import { buildTimeclockEmbed, buildClockOutEmbed, COLORS } from "../lib/embeds.js";
 import { formatDuration } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
+import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
 
 export const data = new SlashCommandBuilder()
   .setName("timeclock")
@@ -61,7 +62,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const tcId       = String(row[0] ?? "");
       const mechanicId = String(row[1] ?? "");
       const clockIn    = String(row[2] ?? "");
-      const mins       = (Date.now() - new Date(clockIn).getTime()) / 60000;
+      const mins       = await calculateCreditedShiftMinutes(tcId, mechanicId, clockIn);
 
       await db.execute({
         sql: `UPDATE timeclock
@@ -192,15 +193,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     // Active session (if clocked in right now)
     const activeR = await db.execute({
-      sql: `SELECT clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1`,
+      sql: `SELECT id, clock_in_time FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL LIMIT 1`,
       args: [userId]
     });
     let activeMinutes = 0;
     let clockedInSince: number | null = null;
     if (activeR.rows[0]) {
-      const clockIn = String(activeR.rows[0][0]);
-      activeMinutes = (Date.now() - new Date(clockIn).getTime()) / 60000;
-      clockedInSince = Math.floor(new Date(clockIn).getTime() / 1000);
+      const timeclockId = String(activeR.rows[0][0]);
+      const clockIn = String(activeR.rows[0][1]);
+      activeMinutes = await calculateCreditedShiftMinutes(timeclockId, userId, clockIn);
+      clockedInSince = Math.floor(new Date(`${clockIn.replace(" ", "T")}Z`).getTime() / 1000);
     }
 
     const totalHrs = completedHrs + activeMinutes / 60;
@@ -247,7 +249,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
 
     const entry = rowToTimeclock(activeR.rows[0]);
-    const mins  = (Date.now() - new Date(entry.clock_in_time).getTime()) / 60000;
+    const mins  = await calculateCreditedShiftMinutes(entry.id, target.id, entry.clock_in_time);
 
     await db.execute({
       sql: `UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, status = 'approved', warned_at = NULL, notes = ?
