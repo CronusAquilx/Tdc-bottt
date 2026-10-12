@@ -10,10 +10,12 @@ import { requireRole } from "../lib/roles.js";
 import { postOrderPanel } from "./orderpanel.js";
 import { mainDraftButtonRows, categoryViewButtonRow, getCommissionData } from "./draftbuttons.js";
 import { ensureMechanicSalesChannel } from "../lib/saleschannel.js";
+import { handleBankSelect } from "./bankaccount.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
 export async function handleSelect(interaction: AnySelectMenuInteraction) {
+  if (await handleBankSelect(interaction)) return;
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
 

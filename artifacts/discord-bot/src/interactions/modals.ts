@@ -10,17 +10,23 @@ import { buildDraftEmbed, buildJobEmbed, buildOrderEmbed, buildClockInPromptEmbe
 import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent } from "../lib/eventLog.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
 
   // ── New Order: customer name modal → create draft and show category selector ─
-  if (ns === "order" && action === "startorder") {
+  if (ns === "order" && (action === "startorder" || action === "startowncar")) {
     const customerName = interaction.fields.getTextInputValue("customer_name").trim();
+    const isOwnCar = action === "startowncar";
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (!(await requireRole(interaction, "mechanic"))) return;
+    if (isOwnCar && !(await isUpdateEnabled())) {
+      await interaction.editReply({ content: "The own-car order feature has not been activated yet." });
+      return;
+    }
 
     const clickerId = interaction.user.id;
     const guildId   = interaction.guildId ?? "";
@@ -44,6 +50,25 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       }
     }
 
+    if (await isUpdateEnabled()) {
+      const restrictions = await db.execute({
+        sql: "SELECT terminated_at, order_hold_until FROM profiles WHERE discord_id = ?",
+        args: [targetMechanicId],
+      });
+      const terminated = Boolean(restrictions.rows[0]?.[0]);
+      const holdUntil = restrictions.rows[0]?.[1]
+        ? new Date(`${String(restrictions.rows[0][1]).replace(" ", "T")}Z`).getTime()
+        : 0;
+      if (terminated || holdUntil > Date.now()) {
+        await interaction.editReply({
+          content: terminated
+            ? "That shop profile is inactive and cannot start an order."
+            : `That mechanic is on an order hold until <t:${Math.floor(holdUntil / 1000)}:F>.`,
+        });
+        return;
+      }
+    }
+
     // Check clock-in state (required for mechanics and for managers acting as themselves)
     if (!isManager || targetMechanicId === clickerId) {
       const active = await db.execute({
@@ -56,6 +81,12 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
           sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
           args: [`pending_customer_name_${clickerId}`, customerName]
         });
+        if (isOwnCar) {
+          await db.execute({
+            sql: "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, '1')",
+            args: [`pending_own_car_${clickerId}`]
+          });
+        }
         const clockRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId("clockin:then:order").setLabel("🟢  Clock In & Start Order").setStyle(ButtonStyle.Success)
         );
@@ -88,15 +119,18 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     if (existingDraftR.rows[0]) {
       orderId = String(existingDraftR.rows[0][0]);
-      await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [customerName, orderId] });
+      await db.execute({
+        sql: "UPDATE orders SET customer_name = ?, is_own_car = ? WHERE id = ?",
+        args: [customerName, isOwnCar ? 1 : 0, orderId],
+      });
     } else {
       orderId = randomUUID();
       let orderNumber = await nextOrderNumber();
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
           await db.execute({
-            sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level, customer_name) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?, ?)",
-            args: [orderId, orderNumber, targetMechanicId, guildId, roleLevel, customerName]
+            sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level, customer_name, is_own_car) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?, ?, ?)",
+            args: [orderId, orderNumber, targetMechanicId, guildId, roleLevel, customerName, isOwnCar ? 1 : 0]
           });
           break;
         } catch (err: any) {
@@ -181,7 +215,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     const ur       = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
-    const thisOrderCut       = Math.round(completed.labour * prevCommData.rate);
+    const thisOrderCut       = completed.is_own_car ? 0 : Math.round(completed.labour * prevCommData.rate);
     const finalWeekCommission = prevCommData.weekCommission + thisOrderCut;
 
     const crewCutInfo = prevCommData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)

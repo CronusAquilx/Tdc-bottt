@@ -9,6 +9,8 @@ import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent } from "../lib/eventLog.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole } from "../lib/payrollPolicy.js";
 
 // Use completed_at so orders started before a reset but finished after it still count toward
 // the current pay period. Fall back to created_at for older rows that lack completed_at.
@@ -28,12 +30,15 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
     getProfile(userId),
     getGuildConfig(guildId)
   ]);
+  const updateEnabled = await isUpdateEnabled();
   // Mechanics default to 30%; managers/trainers/owners default to 40%
   const defaultRate = roleLevel === "mechanic" ? 0.3 : 0.4;
-  const rate = profile?.commission_rate ?? defaultRate;
+  const rate = updateEnabled
+    ? payrollRateForRole(roleLevel).commissionRate
+    : profile?.commission_rate ?? defaultRate;
 
   const weekLabourR = await db.execute({
-    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
+    sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_SQL}`,
     args: [userId]
   });
   const totalLabour = Number(weekLabourR.rows[0]?.[0] ?? 0);
@@ -55,9 +60,11 @@ export async function getCommissionData(userId: string, guildId: string, roleLev
 
   // Only managers/owners get a crew cut — trainer crew cut is removed
   if (roleLevel === "manager" || roleLevel === "owner") {
-    crewCutRate = profile?.manager_override_rate ?? config?.manager_crew_rate ?? 0.20;
+    crewCutRate = updateEnabled
+      ? payrollRateForRole(roleLevel).crewCutRate
+      : profile?.manager_override_rate ?? config?.manager_crew_rate ?? 0.20;
     const r = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE ${DONE_STATUSES} AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_SQL} AND mechanic_id != ? AND role_level IN ('mechanic', 'trainer')`,
       args: [userId]
     });
     const totalCrewLabour    = Number(r.rows[0]?.[0] ?? 0);
@@ -130,6 +137,46 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
           .setMinLength(1)
           .setMaxLength(100)
           .setPlaceholder("e.g. John Smith")
+      )
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (ns === "order" && action === "owncar") {
+    if (!(await isUpdateEnabled())) {
+      await interaction.reply({ content: "The update has not been activated yet.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (!(await requireRole(interaction, "mechanic"))) return true;
+    const restrictions = await db.execute({
+      sql: "SELECT terminated_at, order_hold_until FROM profiles WHERE discord_id = ?",
+      args: [interaction.user.id],
+    });
+    const terminated = Boolean(restrictions.rows[0]?.[0]);
+    const holdUntil = restrictions.rows[0]?.[1] ? new Date(`${String(restrictions.rows[0][1]).replace(" ", "T")}Z`).getTime() : 0;
+    if (terminated || holdUntil > Date.now()) {
+      await interaction.reply({
+        content: terminated
+          ? "Your shop profile is inactive, so you cannot start an order."
+          : `You are on an order hold until <t:${Math.floor(holdUntil / 1000)}:F>.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId("order:startowncar")
+      .setTitle("🚗  Your Own Car");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("customer_name")
+          .setLabel("Your name")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(100)
+          .setPlaceholder("Name for the order record")
       )
     );
     await interaction.showModal(modal);
@@ -551,7 +598,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     // Add this order's cut on top of the previous week total.
     // commission_adjustment is additive, so no special-casing needed.
-    const thisOrderCut = Math.round(completed.labour * prevCommData.rate);
+    const thisOrderCut = completed.is_own_car ? 0 : Math.round(completed.labour * prevCommData.rate);
     const finalWeekCommission = prevCommData.weekCommission + thisOrderCut;
 
     const crewCutInfo = prevCommData.crewCut > 0 || ["trainer","manager","owner"].includes(mechanicRoleLevel)

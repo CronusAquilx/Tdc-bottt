@@ -131,10 +131,10 @@ export async function handleButton(interaction: ButtonInteraction) {
     const clockInMs  = parseUtc(entry.clock_in_time);
     const warnedAtMs = warnedAtRaw ? parseUtc(warnedAtRaw) : 0;
     const realMins   = (Date.now() - clockInMs) / 60000;
-    // If shift was warned and button clicked more than 35 min after the warning,
-    // show duration as of (warned_at + 30 min) — the expected auto-out window
-    const WARN_MINS     = 120;
-    const AUTO_OUT_MINS = 30;
+    // If shift was warned and the button is clicked long after the idle window,
+    // show duration as of the expected auto-out window rather than overstating time.
+    const WARN_MINS     = 30;
+    const AUTO_OUT_MINS = 15;
     let displayMins = realMins;
     if (warnedAtMs > 0 && realMins > WARN_MINS + AUTO_OUT_MINS + 10) {
       displayMins = (warnedAtMs + AUTO_OUT_MINS * 60000 - clockInMs) / 60000;
@@ -217,9 +217,15 @@ export async function handleButton(interaction: ButtonInteraction) {
     // Apply any pending customer name (stored before clock-in was required)
     const pendingNameKey = `pending_customer_name_${interaction.user.id}`;
     const pendingName = await getSetting(pendingNameKey);
+    const ownCarKey = `pending_own_car_${interaction.user.id}`;
+    const pendingOwnCar = (await getSetting(ownCarKey)) === "1";
     if (pendingName) {
-      await db.execute({ sql: "UPDATE orders SET customer_name = ? WHERE id = ?", args: [pendingName, newOrderId] });
+      await db.execute({
+        sql: "UPDATE orders SET customer_name = ?, is_own_car = ? WHERE id = ?",
+        args: [pendingName, pendingOwnCar ? 1 : 0, newOrderId],
+      });
       await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingNameKey] });
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [ownCarKey] });
     }
 
     // Log the order creation
@@ -1138,14 +1144,17 @@ export async function handleButton(interaction: ButtonInteraction) {
             await (ch as any).send({
               content:
                 `<@${p.mechanicId}>\n` +
-                `# 💸  PAYDAY — ${p.name.toUpperCase()}!\n` +
+                `# 💸  PAY STATEMENT — ${p.name.toUpperCase()}!\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
                 `> 📋 **${p.orders} orders** completed this week\n` +
                 (p.hours > 0 ? `> ⏱️ **${p.hours.toFixed(1)} hours** worked this week\n` : "") +
                 `> 💰 Commission rate: **${(p.rate * 100).toFixed(0)}%**\n` +
+                ((p as any).hourlyPay ? `> 🕒 Hourly pay: **${money((p as any).hourlyPay)}**\n` : "") +
+                ((p as any).strikeCutApplied ? `> ⚠️ Second-strike pay reduction: **50%**\n` : "") +
                 `> 💵 **Total pay: ${money(totalPay)}**\n` +
                 `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-                `**Bill the company: ${money(totalPay)}** 🏢\n` +
+                `**Pending payment: ${money(totalPay)}** 🏢\n` +
+                `Management will mark you paid after issuing your paycheck.\n` +
                 `Keep grinding, ${p.name}! 🏁`
             });
           }
@@ -1204,12 +1213,12 @@ export async function handleButton(interaction: ButtonInteraction) {
               });
             }
             const logEmbed = new EmbedBuilder()
-              .setTitle("💸  PAYROLL PROCESSED — New Week Started")
+              .setTitle("💸  PAYROLL FINALIZED — New Week Started")
               .setColor(0xffd700)
               .setDescription(
                 `**Pay period:** Week of \`${ws}\`\n` +
                 `**Total revenue:** ${money(totalRevenue)}\n` +
-                `**Taken from bank for payouts:** ${money(totalToBill)}\n\n` +
+                `**Pending payout total:** ${money(totalToBill)}\n\n` +
                 `✅ Pay messages sent to **${notified}** mechanic(s).` +
                 (failed > 0 ? `\n⚠️ ${failed} skipped (no sales channel).` : "")
               )
@@ -1241,9 +1250,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       .setTitle("✅  PAYROLL PROCESSED")
       .setColor(COLORS.paid)
       .setDescription(
-        `**${mechanicCount}** crew members paid for week of \`${ws}\`\n` +
+        `**${mechanicCount}** crew payouts created for week of \`${ws}\`\n` +
         `Total billed to company: **${money(totalToBill)}**\n\n` +
         "• All completed orders marked as **paid**\n" +
+        "• Crew payouts stay **pending** until actually paid and marked with the bank panel\n" +
         "• Weekly stats reset to **zero**\n" +
         "• Order numbers reset to **TDC-0001**\n" +
         `• Pay messages sent to **${notified}** sales channels ✅\n` +

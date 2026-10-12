@@ -11,11 +11,14 @@ import {
   TextChannel,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
+  AnySelectMenuInteraction,
 } from "discord.js";
-import { db, getGuildConfig, setSetting, checkpointDatabase, splitRoleIds } from "../db.js";
+import { db, getGuildConfig, getSetting, setSetting, checkpointDatabase, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different.";
 const BANK_PANEL_TITLE = "🏦  DAILY BANK ACCOUNT";
@@ -43,12 +46,28 @@ function formatDate(date: string): string {
 }
 
 function bankButtonRow(): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId("bank:log")
       .setLabel("🏦 Log Bank Balance")
       .setStyle(ButtonStyle.Primary)
   );
+  return row;
+}
+
+export function buildBankPaidComponents(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("bank:log")
+        .setLabel("🏦 Log Bank Balance")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("bank:selectpaid")
+        .setLabel("✅ Mark Crew Paid")
+        .setStyle(ButtonStyle.Success),
+    ),
+  ];
 }
 
 type BankComparison = {
@@ -70,15 +89,20 @@ type BankComparison = {
 };
 
 async function getPreviousLog(guildId: string, logDate: string) {
+  const resetAt = await getSetting(`bank_tracking_reset_at:${guildId}`);
   const result = await db.execute({
     sql: `SELECT id, balance, logged_at
           FROM bank_account_logs
           WHERE guild_id = ? AND log_date <> ?
+            AND (? IS NULL OR datetime(logged_at) > datetime(?))
           ORDER BY datetime(logged_at) DESC
           LIMIT 1`,
-    args: [guildId, logDate],
+    args: [guildId, logDate, resetAt, resetAt],
   });
-  return result.rows[0] ?? null;
+  if (result.rows[0]) return result.rows[0];
+  const baseline = await getSetting(`bank_tracking_baseline:${guildId}`);
+  if (baseline === null || resetAt === null) return null;
+  return ["baseline", Number(baseline), resetAt];
 }
 
 async function getOrdersSince(guildId: string, loggedAt: string | null, through: string) {
@@ -191,6 +215,14 @@ export async function recordBankBalance(
   };
 }
 
+export async function resetBankBaseline(guildId: string, balance: number, resetBy: string): Promise<void> {
+  const resetAt = new Date().toISOString().replace("T", " ").slice(0, 19);
+  await setSetting(`bank_tracking_baseline:${guildId}`, String(balance));
+  await setSetting(`bank_tracking_reset_at:${guildId}`, resetAt);
+  await setSetting(`bank_tracking_reset_by:${guildId}`, resetBy);
+  await checkpointDatabase();
+}
+
 async function getLatestLog(guildId: string) {
   const result = await db.execute({
     sql: `SELECT log_date, balance, expected_balance, variance, logged_by
@@ -255,7 +287,7 @@ export async function buildBankPanelEmbed(guildId: string): Promise<EmbedBuilder
     .setTitle(BANK_PANEL_TITLE)
     .setColor(COLORS.primary)
     .setDescription(
-      "**Managers and owners:** use the button below to log the current daily bank balance.\n\n" +
+      "**Managers and owners:** use the buttons below to log the current balance and record which crew members have actually been paid.\n\n" +
       "The bot compares the change since the last log with completed car-order revenue minus recorded payouts and reports:\n" +
       "• the actual change in the bank\n" +
       "• the expected balance after order revenue and recorded payouts\n" +
@@ -269,6 +301,7 @@ export async function postBankAccountPanel(channel: TextChannel, guildId?: strin
   const resolvedGuildId = guildId ?? channel.guild?.id;
   if (!resolvedGuildId) return;
   const embed = await buildBankPanelEmbed(resolvedGuildId);
+  const components = (await isUpdateEnabled()) ? buildBankPaidComponents() : [bankButtonRow()];
   try {
     const pins = await channel.messages.fetchPinned();
     const existing = pins.find(message =>
@@ -276,15 +309,33 @@ export async function postBankAccountPanel(channel: TextChannel, guildId?: strin
       message.embeds[0]?.title?.includes("DAILY BANK ACCOUNT")
     );
     if (existing) {
-      await existing.edit({ embeds: [embed], components: [bankButtonRow()] });
+      await existing.edit({ embeds: [embed], components });
       return;
     }
   } catch { /* post a fresh panel */ }
-  const message = await channel.send({ embeds: [embed], components: [bankButtonRow()] });
+  const message = await channel.send({ embeds: [embed], components });
   try { await message.pin(); } catch { /* pinning is optional */ }
 }
 
 export async function handleBankButton(interaction: ButtonInteraction): Promise<boolean> {
+  if (interaction.customId === "bank:selectpaid") {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    if (!(await isUpdateEnabled())) {
+      await interaction.reply({ content: "The payroll update has not been activated yet.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const selector = new UserSelectMenuBuilder()
+      .setCustomId("bank:paidmembers")
+      .setPlaceholder("Select crew members who have been paid...")
+      .setMinValues(1)
+      .setMaxValues(25);
+    await interaction.reply({
+      content: "Select the crew members who have actually received their pay. This records only those selected as paid.",
+      components: [new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(selector)],
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
   if (interaction.customId !== "bank:log") return false;
   if (!(await requireRole(interaction, "manager"))) return true;
   const modal = new ModalBuilder()
@@ -327,9 +378,55 @@ export async function handleBankModal(interaction: ModalSubmitInteraction): Prom
     return true;
   }
 
-  await (channel as TextChannel).send({ embeds: [buildBankLogEmbed(comparison)] });
+  await (channel as TextChannel).send({
+    embeds: [buildBankLogEmbed(comparison)],
+    components: (await isUpdateEnabled()) ? buildBankPaidComponents() : [bankButtonRow()],
+  });
   await interaction.editReply({
     content: `✅ Bank balance saved for **${formatDate(comparison.logDate)}**.\n${varianceText(comparison)}`,
+  });
+  return true;
+}
+
+export async function handleBankSelect(interaction: AnySelectMenuInteraction): Promise<boolean> {
+  if (!interaction.isUserSelectMenu() || interaction.customId !== "bank:paidmembers") return false;
+  if (!(await requireRole(interaction, "manager"))) return true;
+  if (!interaction.guild) {
+    await interaction.update({ content: "This selection must be used in the shop server.", components: [] });
+    return true;
+  }
+
+  let count = 0;
+  let total = 0;
+  for (const mechanicId of interaction.values) {
+    const unpaid = await db.execute({
+      sql: `SELECT COALESCE(SUM(amount + COALESCE(manager_cut, 0)), 0), COUNT(*)
+            FROM payouts WHERE mechanic_id = ? AND paid_at IS NULL`,
+      args: [mechanicId],
+    });
+    const amount = Number(unpaid.rows[0]?.[0] ?? 0);
+    const rows = Number(unpaid.rows[0]?.[1] ?? 0);
+    if (!rows) continue;
+    await db.execute({
+      sql: "UPDATE payouts SET paid_at = datetime('now'), paid_by = ? WHERE mechanic_id = ? AND paid_at IS NULL",
+      args: [interaction.user.id, mechanicId],
+    });
+    await db.execute({
+      sql: "UPDATE profiles SET current_pay_status = 'paid' WHERE discord_id = ?",
+      args: [mechanicId],
+    });
+    count++;
+    total += amount;
+  }
+
+  await saveDatabaseSnapshot();
+  const { refreshPayLogPanel } = await import("../commands/payall.js");
+  refreshPayLogPanel(interaction.guild).catch(() => {});
+  await interaction.update({
+    content: count
+      ? `✅ Marked **${count}** crew member(s) as paid, totaling **${money(total)}**.`
+      : "No selected crew members had pending payout records.",
+    components: [],
   });
   return true;
 }
@@ -360,7 +457,7 @@ export async function sendBankReminder(guild: import("discord.js").Guild): Promi
   const message = await (channel as TextChannel).send({
     content: `${mentions.content}\n🌙 Daily bank-account check — please log the current balance.`,
     embeds: [await buildBankPanelEmbed(guild.id)],
-    components: [bankButtonRow()],
+    components: (await isUpdateEnabled()) ? buildBankPaidComponents() : [bankButtonRow()],
     allowedMentions: { roles: mentions.roles, users: mentions.roles.length ? [] : undefined },
   });
   return Boolean(message);

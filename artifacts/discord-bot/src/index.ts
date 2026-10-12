@@ -30,6 +30,9 @@ import { data as setrankData,     execute as setrankExecute     } from "./comman
 import { data as managerData,     execute as managerExecute     } from "./commands/manager.js";
 import { data as clearData,       execute as clearExecute       } from "./commands/clear.js";
 import { data as newweekData,     execute as newweekExecute     } from "./commands/newweek.js";
+import { data as implementUpdateData, execute as implementUpdateExecute } from "./commands/implementupdate.js";
+import { data as setBankTotalData, execute as setBankTotalExecute } from "./commands/setbanktotal.js";
+import { data as restartBankData, execute as restartBankExecute } from "./commands/restartbank.js";
 import { handleButton }        from "./interactions/buttons.js";
 import { handleDraftButton }   from "./interactions/draftbuttons.js";
 import { handleModal }         from "./interactions/modals.js";
@@ -43,6 +46,7 @@ import { handleBankButton, handleBankModal, scheduleDailyBankPrompts } from "./i
 import { postLoaPanel, postRafflePanel } from "./interactions/adminbuttons.js";
 import { postLeaderboard }                       from "./commands/leaderboard.js";
 import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
+import { isUpdateEnabled } from "./lib/featureFlags.js";
 import { db } from "./db.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -111,7 +115,12 @@ const client = new Client({
   ]
 });
 
-const commandDefs = [
+type CommandDefinition = {
+  data: import("discord.js").SlashCommandBuilder;
+  execute: (i: ChatInputCommandInteraction) => Promise<void>;
+};
+
+let commandDefs: CommandDefinition[] = [
   { data: orderData,       execute: orderExecute       },
   { data: crewData,        execute: crewExecute        },
   { data: timeclockData,   execute: timeclockExecute   },
@@ -131,6 +140,12 @@ const commandDefs = [
   { data: clearData,            execute: clearExecute            },
   { data: newweekData,          execute: newweekExecute          },
   { data: timeclockManageData,  execute: timeclockManageExecute  },
+  {
+    data: implementUpdateData,
+    execute: interaction => implementUpdateExecute(interaction, commandDefs),
+  },
+  { data: setBankTotalData, execute: setBankTotalExecute },
+  { data: restartBankData, execute: restartBankExecute },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -142,21 +157,26 @@ for (const cmd of commandDefs) {
 client.once(Events.ClientReady, async (c) => {
   console.log(`[TDC] 🏁 Logged in as ${c.user.tag}`);
   const guildId = process.env.DISCORD_GUILD_ID?.trim();
-  const body = commandDefs.map(c => c.data.toJSON());
+  const updateEnabled = await isUpdateEnabled();
+  const stagedNames = new Set(["setbanktotal", "restartbank"]);
+  const commandsToRegister = updateEnabled
+    ? commandDefs
+    : commandDefs.filter(command => !stagedNames.has(command.data.name));
+  const body = commandsToRegister.map(command => command.data.toJSON());
   try {
     const rest = new REST().setToken(token!);
     if (guildId) {
-      console.log(`[TDC] ⚡ Registering ${commandDefs.length} commands to guild ${guildId} (instant)...`);
+      console.log(`[TDC] ⚡ Registering ${commandsToRegister.length} ${updateEnabled ? "active" : "baseline"} commands to guild ${guildId} (instant)...`);
       const result = await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body }) as any[];
-      console.log(`[TDC] ✅ Guild commands registered instantly (${result.length}): ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+      console.log(`[TDC] ✅ Guild commands registered (${result.length}): ${commandsToRegister.map(command => `/${command.data.name}`).join(", ")}`);
       try {
         await rest.put(Routes.applicationCommands(clientId), { body: [] });
         console.log(`[TDC] 🧹 Cleared global commands (using guild-only mode).`);
       } catch { /* ignore */ }
     } else {
-      console.log(`[TDC] 🔧 Registering ${commandDefs.length} slash commands globally (up to 1hr propagation)...`);
+      console.log(`[TDC] 🔧 Registering ${commandsToRegister.length} ${updateEnabled ? "active" : "baseline"} slash commands globally (up to 1hr propagation)...`);
       const result = await rest.put(Routes.applicationCommands(clientId), { body }) as any[];
-      console.log(`[TDC] ✅ Registered ${result.length} commands: ${commandDefs.map(c => `/${c.data.name}`).join(", ")}`);
+      console.log(`[TDC] ✅ Registered ${result.length} commands: ${commandsToRegister.map(command => `/${command.data.name}`).join(", ")}`);
     }
   } catch (err) {
     console.error("[TDC] ❌ Failed to register commands:", err);
@@ -204,8 +224,10 @@ client.once(Events.ClientReady, async (c) => {
     console.error("[TDC] ⚠️ Panel auto-post error:", err);
   }
 
-  // Start auto clock-out monitor (every 5 min, idle threshold)
+  // Start the persisted idle monitor and staged weekly attendance checks.
   startAutoClockOutMonitor(c);
+  const { startWeeklyStrikeChecks } = await import("./lib/weeklyStrikes.js");
+  startWeeklyStrikeChecks(c);
   scheduleDailyBankPrompts(c);
 
   // Weekly leaderboard auto-post — every Monday at midnight UTC

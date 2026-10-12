@@ -164,7 +164,8 @@ export async function initDb() {
       paid_at TEXT,
       paid_by TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      manager_cut REAL NOT NULL DEFAULT 0
+      manager_cut REAL NOT NULL DEFAULT 0,
+      hourly_pay REAL NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -204,6 +205,16 @@ export async function initDb() {
       logged_at TEXT NOT NULL DEFAULT (datetime('now')),
       payout_total REAL NOT NULL DEFAULT 0,
       UNIQUE(guild_id, log_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS weekly_strike_checks (
+      guild_id TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      mechanic_id TEXT NOT NULL,
+      hours_worked REAL NOT NULL DEFAULT 0,
+      strike_number INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (guild_id, period_start, mechanic_id)
     );
 
     CREATE TABLE IF NOT EXISTS loa_requests (
@@ -284,22 +295,39 @@ export async function initDb() {
   await safeAlter("ALTER TABLE payouts ADD COLUMN manager_cut REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE bank_account_logs ADD COLUMN payout_total REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE orders ADD COLUMN customer_total_override REAL");
+  await safeAlter("ALTER TABLE orders ADD COLUMN is_own_car INTEGER NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_sales REAL NOT NULL DEFAULT 0");
   await safeAlter("ALTER TABLE raffles ADD COLUMN minimum_orders INTEGER NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN strike_count INTEGER NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN order_hold_until TEXT");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN terminated_at TEXT");
+  await safeAlter("ALTER TABLE profiles ADD COLUMN strike_pay_cut_pending INTEGER NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE payouts ADD COLUMN hourly_pay REAL NOT NULL DEFAULT 0");
+  await safeAlter("ALTER TABLE timeclock ADD COLUMN last_idle_ping_at TEXT");
 
-  // Close only sessions that have been open for more than 8 hours — these are genuinely stale
-  // (bot was down for a long shift). Recent sessions survive quick restarts and deploys so
-  // mechanics who are actively clocked in don't get kicked out unexpectedly.
-  await db.execute({
-    sql: `UPDATE timeclock
-          SET clock_out_time = datetime('now'),
-              duration_minutes = ROUND((strftime('%s','now') - strftime('%s', REPLACE(clock_in_time,' ','T') || 'Z')) / 60.0, 2),
-              status = 'approved',
-              warned_at = NULL, stayed_in_at = NULL
-          WHERE clock_out_time IS NULL
-          AND datetime(COALESCE(clock_in_time, '2000-01-01')) < datetime('now', '-8 hours')`,
-    args: []
-  });
+  // Close only genuinely stale sessions at startup and credit their elapsed time
+  // before doing so. Short sessions remain open across deploys/restarts.
+  const staleSessions = await db.execute(
+    `SELECT id, mechanic_id, clock_in_time FROM timeclock
+     WHERE clock_out_time IS NULL
+       AND datetime(COALESCE(clock_in_time, '2000-01-01')) < datetime('now', '-8 hours')`
+  );
+  for (const row of staleSessions.rows) {
+    const id = String(row[0] ?? "");
+    const mechanicId = String(row[1] ?? "");
+    const clockIn = String(row[2] ?? "");
+    const minutes = Math.max(0, (Date.now() - new Date(`${clockIn.replace(" ", "T")}Z`).getTime()) / 60000);
+    await db.execute({
+      sql: `UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?,
+            status = 'approved', warned_at = NULL, stayed_in_at = NULL
+            WHERE id = ? AND clock_out_time IS NULL`,
+      args: [minutes, id]
+    });
+    await db.execute({
+      sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
+      args: [minutes / 60, mechanicId]
+    });
+  }
   // Only mark offline mechanics whose session was just closed (not those still clocked in)
   await db.execute({
     sql: `UPDATE profiles SET status = 'offline'
@@ -583,6 +611,7 @@ export function rowToOrder(row: unknown): import("./types.js").Order {
     role_level:              c(16) ? String(c(16)) : "mechanic",
     customer_name:           c(17) ? String(c(17)) : "",
     customer_total_override: c(18) != null ? Number(c(18)) : null,
+    is_own_car:               Number(c(19) ?? 0) === 1,
   };
 }
 

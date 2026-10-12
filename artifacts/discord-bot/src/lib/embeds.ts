@@ -79,14 +79,14 @@ export function buildOrderEmbed(
   const noteBlock = order.notes ? `\n📋 **Notes:** ${order.notes.slice(0, 300)}` : "";
   const customerBlock = order.customer_name ? `\n👤 **Customer:** ${order.customer_name}` : "";
 
-  const thisOrderCommission = Math.round(order.labour * commissionRate);
+  const thisOrderCommission = order.is_own_car ? 0 : Math.round(order.labour * commissionRate);
   const commissionPct = (commissionRate * 100).toFixed(0);
 
   const embed = new EmbedBuilder()
     .setTitle(`🏁  ${order.order_number}  ·  ${statusLabel[order.status] ?? order.status.toUpperCase()}`)
     .setColor(statusColor(order.status))
     .setDescription(
-      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${customerBlock}${noteBlock}`
+      `**Mechanic:** ${mechanicName}  ·  <t:${dateTs}:D>${customerBlock}${order.is_own_car ? "\n🚗 **Own-car order — no mechanic commission**" : ""}${noteBlock}`
     )
     .addFields(
       { name: "🔧 Services", value: itemLines.slice(0, 1024), inline: false },
@@ -101,7 +101,7 @@ export function buildOrderEmbed(
       },
       {
         name:  "💵 Commission (This Order)",
-        value: `**${money(thisOrderCommission)}**\n-# ${commissionPct}% of labour`,
+        value: order.is_own_car ? "**$0**\n-# Own-car orders do not earn commission" : `**${money(thisOrderCommission)}**\n-# ${commissionPct}% of labour`,
         inline: true
       },
       {
@@ -152,7 +152,7 @@ export function buildDraftEmbed(
     ? items.map(i => `> **${i.label}** · ${money(i.price)}`).join("\n")
     : "*No services yet — pick a category below*";
 
-  const thisOrderCommission = Math.round(order.labour * commissionRate);
+  const thisOrderCommission = order.is_own_car ? 0 : Math.round(order.labour * commissionRate);
   const pct = (commissionRate * 100).toFixed(0);
 
   const summaryParts: string[] = [];
@@ -174,7 +174,9 @@ export function buildDraftEmbed(
     },
     {
       name: "💵 Your Cut (This Order)",
-      value: order.labour > 0
+      value: order.is_own_car
+        ? "**$0**\n-# Own-car orders do not earn commission"
+        : order.labour > 0
         ? `**${money(thisOrderCommission)}**\n-# ${pct}% of ${money(order.labour)} labour`
         : `*—*\n-# Set labour above`,
       inline: true

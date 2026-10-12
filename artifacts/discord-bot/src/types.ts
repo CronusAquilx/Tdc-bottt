@@ -42,6 +42,7 @@ export interface Order {
   role_level: string;
   customer_name: string;
   customer_total_override: number | null;
+  is_own_car: boolean;
 }
 
 export interface Timeclock {

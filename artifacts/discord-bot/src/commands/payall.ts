@@ -6,6 +6,9 @@ import { db, getProfile, getGuildConfig, splitRoleIds, saveDatabaseSnapshot } fr
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 import { weekStart } from "../lib/utils.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
+import { latestCheckedHours } from "../lib/weeklyStrikes.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -32,6 +35,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 }
 
 export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promise<EmbedBuilder | null> {
+  if (await isUpdateEnabled()) return buildUpdatedPayallSummary(ws, guild);
   // Always use order_number_reset_ts as the pay-period boundary so it stays in sync
   // with the snapshot formula used everywhere else (getCommissionData, mysales, etc.)
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
@@ -425,7 +429,8 @@ export async function processPayall(
   guild: Guild | null,
   ws: string,
   paidById: string
-): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ payoutId: string | null; mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number }> } | null> {
+): Promise<{ grandCommission: number; totalRevenue: number; mechanicCount: number; totalToBill: number; payouts: Array<{ payoutId: string | null; mechanicId: string; amount: number; managerCut: number; orders: number; hours: number; name: string; salesChanId: string | null; rate: number; hourlyPay?: number; strikeCount?: number; strikeCutApplied?: boolean }> } | null> {
+  if (await isUpdateEnabled()) return processUpdatedPayall(guild, ws, paidById);
   // Use order_number_reset_ts as the pay-period boundary — same as all other commission calculations
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
@@ -643,5 +648,300 @@ export async function processPayall(
     mechanicCount: paidCount,
     totalToBill: grandCommission + totalManagerCuts,
     payouts: payoutResults
+  };
+}
+
+type UpdatedCrewMember = {
+  id: string;
+  name: string;
+  role: string;
+  rate: number;
+  hourlyRate: number;
+  labour: number;
+  orders: number;
+  revenue: number;
+  hours: number;
+  commission: number;
+  hourlyPay: number;
+  managerCut: number;
+  managerCutRate: number;
+  commissionAdjustment: number;
+  commissionSnapshot: number;
+  managerAdjustment: number;
+  managerSnapshot: number;
+  strikeCount: number;
+  strikePayCutPending: boolean;
+  salesChannelId: string | null;
+};
+
+async function loadUpdatedPayroll(guild?: Guild): Promise<{
+  crew: UpdatedCrewMember[];
+  totalRevenue: number;
+  orderCount: number;
+  totalCrewLabour: number;
+}> {
+  const sinceReset = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  const ordersR = await db.execute({
+    sql: `SELECT o.mechanic_id, o.labour, o.total, COALESCE(o.is_own_car, 0), o.role_level
+          FROM orders o
+          WHERE o.status IN ('complete','approved') AND ${sinceReset}`,
+  });
+  const grouped = new Map<string, { labour: number; orders: number; revenue: number }>();
+  let totalRevenue = 0;
+  let totalCrewLabour = 0;
+  for (const row of ordersR.rows) {
+    const id = String(row[0] ?? "");
+    const labour = Number(row[1] ?? 0);
+    const revenue = Number(row[2] ?? 0);
+    const ownCar = Number(row[3] ?? 0) === 1;
+    const orderRole = String(row[4] ?? "mechanic");
+    const current = grouped.get(id) ?? { labour: 0, orders: 0, revenue: 0 };
+    current.labour += ownCar ? 0 : labour;
+    current.orders++;
+    current.revenue += revenue;
+    grouped.set(id, current);
+    totalRevenue += revenue;
+    if (!ownCar && (orderRole === "mechanic" || orderRole === "trainer")) totalCrewLabour += labour;
+  }
+
+  const profilesR = await db.execute(
+    `SELECT discord_id, display_name, commission_rate, hours_worked_this_week,
+            commission_adjustment, commission_labour_snapshot, manager_cut_adjustment,
+            manager_labour_snapshot, sales_channel_id, strike_count,
+            strike_pay_cut_pending, terminated_at
+     FROM profiles`,
+  );
+  const crew: UpdatedCrewMember[] = [];
+  for (const row of profilesR.rows) {
+    const id = String(row[0] ?? "");
+    const profileName = String(row[1] ?? "Unknown");
+    const groupedPay = grouped.get(id) ?? { labour: 0, orders: 0, revenue: 0 };
+    const fallbackHours = Number(row[3] ?? 0);
+    const hours = guild ? await latestCheckedHours(guild.id, id, fallbackHours) : fallbackHours;
+    const salesChannelId = row[8] ? String(row[8]) : null;
+    const role = await resolveTdcRole(guild, id);
+    const rolePolicy = payrollRateForRole(role);
+    const commissionAdjustment = Number(row[4] ?? 0);
+    const commissionSnapshot = Number(row[5] ?? 0);
+    const managerAdjustment = Number(row[6] ?? 0);
+    const managerSnapshot = Number(row[7] ?? 0);
+    const strikeCount = Number(row[9] ?? 0);
+    const strikePayCutPending = Number(row[10] ?? 0) === 1;
+    const terminated = Boolean(row[11]);
+    const hasPayroll = groupedPay.orders > 0 || commissionAdjustment > 0 || hours > 0 ||
+      Boolean(salesChannelId) || (role === "manager" || role === "owner");
+    if (!hasPayroll) continue;
+
+    const rate = rolePolicy.commissionRate;
+    const labourAfterSnapshot = Math.max(0, groupedPay.labour - commissionSnapshot);
+    const commission = commissionAdjustment > 0
+      ? commissionAdjustment + labourAfterSnapshot * rate
+      : groupedPay.labour * rate;
+    const hourlyPay = hours * rolePolicy.hourlyRate;
+    const managerCutRate = rolePolicy.crewCutRate;
+    const managerCut = (role === "manager" || role === "owner")
+      ? managerAdjustment > 0
+        ? managerAdjustment + Math.max(0, totalCrewLabour - managerSnapshot) * managerCutRate
+        : totalCrewLabour * managerCutRate
+      : 0;
+    crew.push({
+      id,
+      name: profileName,
+      role: terminated ? `${role} (terminated)` : role,
+      rate,
+      hourlyRate: rolePolicy.hourlyRate,
+      labour: groupedPay.labour,
+      orders: groupedPay.orders,
+      revenue: groupedPay.revenue,
+      hours,
+      commission,
+      hourlyPay,
+      managerCut,
+      managerCutRate,
+      commissionAdjustment,
+      commissionSnapshot,
+      managerAdjustment,
+      managerSnapshot,
+      strikeCount,
+      strikePayCutPending,
+      salesChannelId,
+    });
+  }
+  return { crew, totalRevenue, orderCount: ordersR.rows.length, totalCrewLabour };
+}
+
+async function buildUpdatedPayallSummary(ws: string, guild?: Guild): Promise<EmbedBuilder | null> {
+  const { crew, totalRevenue, orderCount } = await loadUpdatedPayroll(guild);
+  if (!crew.length) return null;
+
+  let totalToBill = 0;
+  const lines: string[] = [];
+  let donorWinner: UpdatedCrewMember | null = null;
+  for (const member of crew) {
+    const gross = member.commission + member.hourlyPay + member.managerCut;
+    const payable = gross * (member.strikePayCutPending ? 0.5 : 1);
+    totalToBill += payable;
+    const roleForPrize = member.role.replace(" (terminated)", "");
+    if (member.labour > 0 && ["mechanic", "trainer"].includes(roleForPrize) &&
+        (!donorWinner || member.labour > donorWinner.labour)) donorWinner = member;
+    const strikeNote = member.strikePayCutPending ? " · ⚠️ 50% strike cut" : "";
+    const hoursNote = `${member.hours.toFixed(2)}h`;
+    const minimumNote = member.hours < 3.5 ? " · ⚠️ strike check" : member.hours < 5 ? " · below 5h goal" : "";
+    lines.push(
+      `**${member.name}** · ${member.orders} orders · ${hoursNote}${minimumNote} → ` +
+      `${money(Math.round(payable))} *(commission ${money(Math.round(member.commission))} + hourly ${money(Math.round(member.hourlyPay))}` +
+      `${member.managerCut ? ` + crew ${money(Math.round(member.managerCut))}` : ""})${strikeNote}`,
+    );
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle("💸 WEEKLY PAYROLL SUMMARY")
+    .setColor(0xffd700)
+    .setDescription(
+      `**Pay period:** Week of \`${ws}\`\n` +
+      `**Shop revenue:** ${money(totalRevenue)}\n\n` +
+      "Review the projected pay below. Confirming finalizes the period, but does not mark anyone as paid; use **Mark Crew Paid** on the bank log after money is handed out.\n\n" +
+      "Active hours are paid at the crew member's role rate. A second hours strike halves that paycheck once.",
+    );
+
+  const fields: { name: string; value: string; inline: boolean }[] = [];
+  let chunk = "";
+  let index = 0;
+  for (const line of lines) {
+    const next = chunk ? `\n${line}` : line;
+    if (chunk && chunk.length + next.length > 1000) {
+      fields.push({ name: index === 0 ? `🔩 Crew Payouts (${crew.length} people)` : "\u200b", value: chunk, inline: false });
+      chunk = line;
+      index++;
+    } else {
+      chunk += next;
+    }
+  }
+  if (chunk) fields.push({ name: index === 0 ? `🔩 Crew Payouts (${crew.length} people)` : "\u200b", value: chunk, inline: false });
+  fields.push({ name: "💰 Total projected pay", value: `**${money(Math.round(totalToBill))}**`, inline: true });
+  fields.push({ name: "📋 Completed orders", value: String(orderCount), inline: true });
+  const donorText = totalRevenue < 500_000
+    ? `Not qualified — shop revenue is below ${money(500_000)}.`
+    : donorWinner
+      ? `Qualified winner: <@${donorWinner.id}> · ${money(Math.round(donorWinner.labour))} eligible labour.`
+      : `Qualified, but no mechanic or trainer has eligible labour this period.`;
+  fields.push({ name: "🏆 Weekly donor-car prize", value: donorText, inline: false });
+  embed.addFields(...fields).setFooter({ text: FOOTER }).setTimestamp();
+  return embed;
+}
+
+async function processUpdatedPayall(
+  guild: Guild | null,
+  ws: string,
+  paidById: string,
+): Promise<{
+  grandCommission: number;
+  totalRevenue: number;
+  mechanicCount: number;
+  totalToBill: number;
+  payouts: Array<{
+    payoutId: string | null;
+    mechanicId: string;
+    amount: number;
+    managerCut: number;
+    orders: number;
+    hours: number;
+    name: string;
+    salesChanId: string | null;
+    rate: number;
+    hourlyPay: number;
+    strikeCount: number;
+    strikeCutApplied: boolean;
+  }>;
+} | null> {
+  const { crew, totalRevenue } = await loadUpdatedPayroll(guild ?? undefined);
+  if (!crew.length) return null;
+
+  const { randomUUID } = await import("../lib/utils.js");
+  const payoutResults: Array<{
+    payoutId: string | null;
+    mechanicId: string;
+    amount: number;
+    managerCut: number;
+    orders: number;
+    hours: number;
+    name: string;
+    salesChanId: string | null;
+    rate: number;
+    hourlyPay: number;
+    strikeCount: number;
+    strikeCutApplied: boolean;
+  }> = [];
+  let grandCommission = 0;
+  let totalBilled = 0;
+  let paidCount = 0;
+
+  for (const member of crew) {
+    const gross = member.commission + member.hourlyPay + member.managerCut;
+    const factor = member.strikePayCutPending ? 0.5 : 1;
+    const amount = Math.round((member.commission + member.hourlyPay) * factor);
+    const managerCut = Math.round(member.managerCut * factor);
+    let payoutId: string | null = null;
+    if (gross > 0) {
+      payoutId = randomUUID();
+      await db.execute({
+        sql: `INSERT INTO payouts
+              (id, mechanic_id, week_start, amount, order_count, hours_worked,
+               invoice_count, paid_at, paid_by, manager_cut, hourly_pay)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+        args: [payoutId, member.id, ws, amount, member.orders, member.hours, member.orders, managerCut, Math.round(member.hourlyPay * factor)],
+      });
+      await db.execute({
+        sql: `UPDATE profiles SET current_pay_status = 'pending',
+              strike_pay_cut_pending = CASE WHEN ? THEN 0 ELSE strike_pay_cut_pending END
+              WHERE discord_id = ?`,
+        args: [member.strikePayCutPending ? 1 : 0, member.id],
+      });
+      totalBilled += amount + managerCut;
+      grandCommission += member.commission * factor;
+      paidCount++;
+    }
+    payoutResults.push({
+      payoutId,
+      mechanicId: member.id,
+      amount,
+      managerCut,
+      orders: member.orders,
+      hours: member.hours,
+      name: member.name,
+      salesChanId: member.salesChannelId,
+      rate: member.rate,
+      hourlyPay: Math.round(member.hourlyPay * factor),
+      strikeCount: member.strikeCount,
+      strikeCutApplied: member.strikePayCutPending,
+    });
+  }
+
+  const sinceResetBare = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
+  await db.execute({
+    sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now'))
+          WHERE status IN ('complete','approved') AND ${sinceResetBare}`,
+  });
+  await db.execute(
+    "UPDATE profiles SET hours_worked_this_week = 0, commission_adjustment = 0, manager_cut_adjustment = 0, commission_labour_snapshot = 0, manager_labour_snapshot = 0",
+  );
+  const { setSetting } = await import("../db.js");
+  await setSetting("order_number_reset_ts", new Date().toISOString().replace("T", " ").slice(0, 19));
+  await saveDatabaseSnapshot();
+
+  const { logEvent } = await import("../lib/eventLog.js");
+  logEvent({
+    kind: "payout_processed",
+    guildId: guild?.id,
+    userId: paidById,
+    amount: totalBilled,
+    detail: `${paidCount} pending crew payouts, week ${ws}`,
+  });
+  return {
+    grandCommission,
+    totalRevenue,
+    mechanicCount: paidCount,
+    totalToBill: totalBilled,
+    payouts: payoutResults,
   };
 }
