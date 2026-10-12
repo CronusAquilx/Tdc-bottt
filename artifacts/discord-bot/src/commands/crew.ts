@@ -2,6 +2,8 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, Message
 import { db, getProfile, getGuildConfig, splitRoleIds, checkpointDatabase, saveDatabaseSnapshot } from "../db.js";
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { COLORS, statusEmoji, money } from "../lib/embeds.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 
 export const data = new SlashCommandBuilder()
   .setName("crew")
@@ -611,7 +613,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    const role = roleRow.rows[0] ? String(roleRow.rows[0][0]) : "none";
+    const updateEnabled = await isUpdateEnabled();
+    const detectedRole = updateEnabled
+      ? await resolveTdcRole(interaction.guild ?? undefined, targetId)
+      : null;
+    const role = detectedRole ?? (roleRow.rows[0] ? String(roleRow.rows[0][0]) : "none");
 
     const SINCE_RESET_SQL =
       `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
@@ -619,7 +625,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     const [weekStats, allTimeStats, draftCount] = await Promise.all([
       db.execute({
-        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue, COALESCE(SUM(labour), 0) as labour
+        sql: `SELECT COUNT(*) as orders, COALESCE(SUM(COALESCE(customer_total_override, total)), 0) as revenue,
+                     COALESCE(SUM(CASE WHEN COALESCE(is_own_car, 0) = 0 THEN labour ELSE 0 END), 0) as labour
               FROM orders WHERE mechanic_id = ? AND ${DONE} AND ${SINCE_RESET_SQL}`,
         args: [targetId]
       }),
@@ -641,11 +648,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const allRevenue  = Number(allTimeStats.rows[0]?.[1] ?? 0);
     const drafts      = Number(draftCount.rows[0]?.[0] ?? 0);
 
-    const rate = profile.commission_rate;
+    const rate = updateEnabled
+      ? payrollRateForRole(detectedRole ?? "mechanic").commissionRate
+      : profile.commission_rate;
     const weekCommission = Math.round(weekLabour * rate);
 
     const roleDisplay: Record<string, string> = {
-      owner: "👑 Owner", manager: "🔑 Manager", trainer: "🎓 Trainer", mechanic: "🔧 Mechanic"
+      owner: "👑 Head Manager", manager: "🔑 Manager", trainer: "🎓 Trainer", mechanic: "🔧 Mechanic"
     };
 
     const statusDisplay = statusEmoji(profile.status) + " " + profile.status.replace("_", " ").toUpperCase();
@@ -692,7 +701,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const config = await getGuildConfig(guild.id);
 
     const roleMap: Record<string, string[]> = {
-      owner:    splitRoleIds(config?.owner_role_id),
+      owner:    [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.head_manager_role_id)],
       manager:  splitRoleIds(config?.manager_role_id),
       trainer:  splitRoleIds(config?.trainer_role_id),
       mechanic: splitRoleIds(config?.mechanic_role_id),

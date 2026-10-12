@@ -9,10 +9,12 @@ import {
   ButtonStyle,
   EmbedBuilder
 , MessageFlags} from "discord.js";
-import { db, getProfile, getUserRole, rowToOrder } from "../db.js";
+import { db, getProfile, rowToOrder } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildOrderEmbed, COLORS, money, statusEmoji } from "../lib/embeds.js";
 import { paginate } from "../lib/utils.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 
 export const data = new SlashCommandBuilder()
   .setName("order")
@@ -59,8 +61,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "list") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const role = await getUserRole(interaction.user.id);
+    const role = await resolveTdcRole(interaction.guild ?? undefined, interaction.user.id);
     const isManager = role === "owner" || role === "manager";
+    const updateEnabled = await isUpdateEnabled();
     const status = interaction.options.getString("status");
     const page = (interaction.options.getInteger("page") ?? 1) - 1;
 
@@ -75,13 +78,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const rows = r.rows.map(rowToOrder);
     const { items, total, pages } = paginate(rows, page, 10);
 
-    if (!items.length) { await interaction.editReply({ content: "No orders found." }); return; }
+    if (!items.length) {
+      const components = updateEnabled
+        ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId("order:owncar").setLabel("🚗 My Own Car").setStyle(ButtonStyle.Secondary)
+          )]
+        : [];
+      await interaction.editReply({ content: "No orders found.", components });
+      return;
+    }
 
     const lines = await Promise.all(items.map(async o => {
       const p = await getProfile(o.mechanic_id);
-      const commRate = p?.commission_rate ?? 0.3;
-      const commission = o.labour * commRate;
-      return `${statusEmoji(o.status)} **${o.order_number}** — ${p?.display_name ?? "?"} — ${money(o.total)} — Cut: ${money(commission)} — \`${o.status.toUpperCase()}\``;
+      const commRate = updateEnabled
+        ? payrollRateForRole(o.role_level).commissionRate
+        : p?.commission_rate ?? 0.3;
+      const commission = o.is_own_car ? 0 : Math.round(o.labour * commRate);
+      const commissionLabel = o.is_own_car ? "Own-car · $0 commission" : `Cut: ${money(commission)}`;
+      return `${statusEmoji(o.status)} **${o.order_number}** — ${p?.display_name ?? "?"} — ${money(o.total)} — ${commissionLabel} — \`${o.status.toUpperCase()}\``;
     }));
 
     const embed = new EmbedBuilder()
@@ -91,7 +105,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       .setFooter({ text: `東京ドリフトカスタム  ·  Page ${page + 1} / ${pages} · ${total} total` })
       .setTimestamp();
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    if (updateEnabled) {
+      row.addComponents(
+        new ButtonBuilder().setCustomId("order:owncar").setLabel("🚗 My Own Car").setStyle(ButtonStyle.Secondary)
+      );
+    }
+    row.addComponents(
       new ButtonBuilder().setCustomId(`order:list:${page - 1}:${status ?? ""}`).setLabel("◀ Prev").setStyle(ButtonStyle.Secondary).setDisabled(page <= 0),
       new ButtonBuilder().setCustomId(`order:list:${page + 1}:${status ?? ""}`).setLabel("Next ▶").setStyle(ButtonStyle.Secondary).setDisabled(page >= pages - 1)
     );
@@ -105,14 +125,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE order_number = ?", args: [orderNum] });
     if (!r.rows[0]) { await interaction.editReply({ content: `❌ Order **${orderNum}** not found.` }); return; }
     const order = rowToOrder(r.rows[0]);
-    const role = await getUserRole(interaction.user.id);
+    const role = await resolveTdcRole(interaction.guild ?? undefined, interaction.user.id);
     const isManager = role === "owner" || role === "manager";
     if (!isManager && order.mechanic_id !== interaction.user.id) {
       await interaction.editReply({ content: "❌ You can only view your own orders." });
       return;
     }
     const mechanic = await getProfile(order.mechanic_id);
-    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown", 0, mechanic?.commission_rate ?? 0.3);
+    const updateEnabled = await isUpdateEnabled();
+    const commissionRate = updateEnabled
+      ? payrollRateForRole(order.role_level).commissionRate
+      : mechanic?.commission_rate ?? 0.3;
+    const embed = buildOrderEmbed(order, mechanic?.display_name ?? "Unknown", 0, commissionRate);
     await interaction.editReply({ embeds: [embed] });
     return;
   }

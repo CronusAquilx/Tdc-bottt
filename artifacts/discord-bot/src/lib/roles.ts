@@ -33,7 +33,7 @@ async function checkDiscordRoles(interaction: AnyInteraction, minRole: string): 
     const minLevel = HIERARCHY[minRole] ?? 0;
 
     const mappings = [
-      { level: 4, roleIds: splitRoleIds(config.owner_role_id) },
+      { level: 4, roleIds: [...splitRoleIds(config.owner_role_id), ...splitRoleIds(config.head_manager_role_id)] },
       { level: 3, roleIds: splitRoleIds(config.manager_role_id) },
       { level: 2, roleIds: splitRoleIds(config.trainer_role_id) },
       { level: 1, roleIds: splitRoleIds(config.mechanic_role_id) },
@@ -68,7 +68,7 @@ export async function detectUserRoleLevel(interaction: AnyInteraction): Promise<
               : [...(member.roles as any).cache.keys()]
           );
           const mappings = [
-            { level: 'owner',    roleIds: splitRoleIds(config.owner_role_id)   },
+            { level: 'owner',    roleIds: [...splitRoleIds(config.owner_role_id), ...splitRoleIds(config.head_manager_role_id)] },
             { level: 'manager',  roleIds: splitRoleIds(config.manager_role_id) },
             { level: 'trainer',  roleIds: splitRoleIds(config.trainer_role_id) },
             { level: 'mechanic', roleIds: splitRoleIds(config.mechanic_role_id) },
@@ -116,7 +116,7 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
   // Check if any roles are configured — if none are set, allow through gracefully
   const config = await getGuildConfig(interaction.guild.id);
   const hasAnyRoleConfig = !!(
-    config?.owner_role_id || config?.manager_role_id ||
+    config?.owner_role_id || config?.head_manager_role_id || config?.manager_role_id ||
     config?.trainer_role_id || config?.mechanic_role_id ||
     (config as any)?.needs_training_role_id
   );

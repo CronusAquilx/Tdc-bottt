@@ -497,7 +497,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       // Snapshot current labour so new orders add on top of the set amount
       const SINCE_RESET = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
       const snapR = await db.execute({
-        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET}`,
+        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET}`,
         args: [memberId]
       });
       const labourSnapshot = Number(snapR.rows[0]?.[0] ?? 0);

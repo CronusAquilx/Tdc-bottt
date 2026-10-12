@@ -374,6 +374,7 @@ export function buildAdminPanelEmbed(config: {
   loa_channel_id?: string | null;
   raffle_channel_id?: string | null;
   owner_role_id: string | null;
+  head_manager_role_id?: string | null;
   manager_role_id: string | null;
   trainer_role_id: string | null;
   mechanic_role_id: string | null;
@@ -402,6 +403,7 @@ export function buildAdminPanelEmbed(config: {
       },
       { name: "🎭 Roles", value:
           `👑 Owner: ${ro(config?.owner_role_id)}\n` +
+          `👑 Head Manager: ${ro(config?.head_manager_role_id)}\n` +
           `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
           `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
           `🔩 Mechanic: ${ro(config?.mechanic_role_id)}`,

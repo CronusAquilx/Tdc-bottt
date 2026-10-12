@@ -114,6 +114,7 @@ export async function handleTrainingButton(interaction: ButtonInteraction): Prom
     });
     for (const rid of [
       ...splitRoleIds(config?.owner_role_id),
+      ...splitRoleIds(config?.head_manager_role_id),
       ...splitRoleIds(config?.manager_role_id),
       ...splitRoleIds(config?.trainer_role_id)
     ]) {
@@ -279,6 +280,7 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     // Owners, managers, trainers can see it — use splitRoleIds to handle multi-role configs
     for (const rid of [
       ...splitRoleIds(config?.owner_role_id),
+      ...splitRoleIds(config?.head_manager_role_id),
       ...splitRoleIds(config?.manager_role_id),
       ...splitRoleIds(config?.trainer_role_id)
     ]) {
@@ -372,6 +374,7 @@ export async function handleTrainingModal(interaction: ModalSubmitInteraction): 
     // ── Build owner/manager mention lists (roles + individual DB users) ──────────
     const ownerRoleMentions = [
       ...splitRoleIds(config?.owner_role_id).map(r => `<@&${r}>`),
+      ...splitRoleIds(config?.head_manager_role_id).map(r => `<@&${r}>`),
     ];
     const managerRoleMentions = [
       ...splitRoleIds(config?.manager_role_id).map(r => `<@&${r}>`),

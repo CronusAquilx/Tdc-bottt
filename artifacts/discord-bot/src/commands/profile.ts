@@ -3,6 +3,8 @@ import { db, getProfile, getUserRole } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { drawProfileCard } from "../lib/profilecard.js";
 import type { CrewRank } from "../lib/profilecard.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 
 export const data = new SlashCommandBuilder()
   .setName("profile")
@@ -24,7 +26,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  const rank = (await getUserRole(target.id) ?? "mechanic") as CrewRank;
+  const updateEnabled = await isUpdateEnabled();
+  const role = updateEnabled
+    ? await resolveTdcRole(interaction.guild ?? undefined, target.id)
+    : await getUserRole(target.id) ?? "mechanic";
+  const rank = role as CrewRank;
+  const commissionRate = updateEnabled
+    ? payrollRateForRole(role).commissionRate
+    : profile.commission_rate;
 
   // Orders this week
   const weekStart = getWeekStart();
@@ -47,7 +56,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     inCityId:       profile.in_city_id ?? null,
     rank,
     discordId:      target.id,
-    commissionRate: profile.commission_rate,
+    commissionRate,
     hoursThisWeek:  profile.hours_worked_this_week,
     ordersThisWeek,
     totalRevenue,

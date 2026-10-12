@@ -23,8 +23,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
   if (interaction.isRoleSelectMenu()) {
     // setup:setrole:level
     if (ns === "setup" && action === "setrole") {
-      const level = rest[0] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
-      const validLevels = ["owner", "manager", "trainer", "mechanic", "needs_training"];
+      const level = rest[0] as "owner" | "head_manager" | "manager" | "trainer" | "mechanic" | "needs_training";
+      const validLevels = ["owner", "head_manager", "manager", "trainer", "mechanic", "needs_training"];
       if (!validLevels.includes(level)) { await interaction.reply({ content: "❌ Invalid role level.", flags: MessageFlags.Ephemeral }); return; }
       const roleIds = interaction.values;
       if (!interaction.guild) { await interaction.reply({ content: "❌ Must be used in a server.", flags: MessageFlags.Ephemeral }); return; }
@@ -708,7 +708,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
       }
       permOverwrites.push({ id: mechanicId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      for (const rid of [...srid(config?.owner_role_id), ...srid(config?.manager_role_id), ...srid(config?.trainer_role_id)]) {
+      for (const rid of [...srid(config?.owner_role_id), ...srid(config?.head_manager_role_id), ...srid(config?.manager_role_id), ...srid(config?.trainer_role_id)]) {
         permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       }
       // Individual staff from DB

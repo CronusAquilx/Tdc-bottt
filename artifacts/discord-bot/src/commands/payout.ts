@@ -5,6 +5,8 @@ import { db, getProfile, getUserRole } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 import { weekStart } from "../lib/utils.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 
 export const data = new SlashCommandBuilder()
   .setName("payout")
@@ -20,7 +22,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const targetUser = interaction.options.getUser("mechanic");
-  const role = await getUserRole(interaction.user.id);
+  const role = await resolveTdcRole(interaction.guild ?? undefined, interaction.user.id);
   const isManager = role === "owner" || role === "manager";
 
   if (targetUser && targetUser.id !== interaction.user.id && !isManager) {
@@ -41,14 +43,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const yearStart = `${now.getFullYear()}-01-01`;
 
   const [weekR, monthR, ytdR, allTimeR] = await Promise.all([
-    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?", args: [mechanicId, ws] }),
-    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?", args: [mechanicId, monthStart] }),
-    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND DATE(created_at) >= ?", args: [mechanicId, yearStart] }),
-    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved')", args: [mechanicId] })
+    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0 AND DATE(created_at) >= ?", args: [mechanicId, ws] }),
+    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0 AND DATE(created_at) >= ?", args: [mechanicId, monthStart] }),
+    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0 AND DATE(created_at) >= ?", args: [mechanicId, yearStart] }),
+    db.execute({ sql: "SELECT labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0", args: [mechanicId] })
   ]);
 
   const sumLabour = (rows: any[]) => rows.reduce((s: number, row: any) => s + Number(row[0] ?? 0), 0);
-  const rate = profile.commission_rate;
+  const updateEnabled = await isUpdateEnabled();
+  const rate = updateEnabled
+    ? payrollRateForRole(await resolveTdcRole(interaction.guild ?? undefined, mechanicId)).commissionRate
+    : profile.commission_rate;
 
   const weekLabour = sumLabour(weekR.rows);
   const monthLabour = sumLabour(monthR.rows);

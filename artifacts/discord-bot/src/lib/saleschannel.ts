@@ -85,6 +85,7 @@ export async function ensureMechanicSalesChannel(
 
     for (const roleId of [
       ...splitRoleIds(config?.owner_role_id),
+      ...splitRoleIds(config?.head_manager_role_id),
       ...splitRoleIds(config?.manager_role_id),
       ...splitRoleIds(config?.trainer_role_id),
     ]) {

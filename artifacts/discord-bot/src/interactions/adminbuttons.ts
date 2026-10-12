@@ -115,7 +115,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       permOverwrites.push({ id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] });
     }
     permOverwrites.push({ id: mechanicId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-    for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
+    for (const rid of [...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.head_manager_role_id), ...splitRoleIds(config?.manager_role_id), ...splitRoleIds(config?.trainer_role_id)]) {
       permOverwrites.push({ id: rid, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
     }
     // Individual staff from DB
@@ -491,7 +491,8 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
     // Pull every profile and their current-period labour
     const crewR = await db.execute({
       sql: `SELECT p.discord_id, p.display_name, p.commission_rate, p.commission_adjustment,
-                   COALESCE(SUM(o.labour), 0) AS week_labour, COUNT(o.id) AS order_count,
+                   COALESCE(SUM(CASE WHEN COALESCE(o.is_own_car, 0) = 0 THEN o.labour ELSE 0 END), 0) AS week_labour,
+                   COUNT(o.id) AS order_count,
                    p.commission_labour_snapshot, p.current_pay_status
             FROM profiles p
             LEFT JOIN orders o ON o.mechanic_id = p.discord_id
@@ -515,7 +516,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       const manualBonus  = Number(mrow[2] ?? 0);
       const managerSnap  = Number(mrow[3] ?? 0);
       const crewLabourR  = await db.execute({
-        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+        sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
         args: [managerId]
       });
       const crewLabour    = Number(crewLabourR.rows[0]?.[0] ?? 0);
@@ -724,6 +725,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
         "**Configure role assignments and commission rates.**\n" +
         "*You can assign multiple roles per level — all selected roles will be accepted.*\n\n" +
         `👑 Owner: ${roMany(config?.owner_role_id)}\n` +
+          `👑 Head Manager: ${roMany(config?.head_manager_role_id)}\n` +
         `🔧 Manager: ${roMany(config?.manager_role_id)}\n` +
         `📚 Trainer: ${roMany(config?.trainer_role_id)}\n` +
         `🔩 Mechanic: ${roMany(config?.mechanic_role_id)}\n` +
@@ -733,6 +735,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       .setFooter({ text: FOOTER });
     const roleRow1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("admin:roles:set:owner").setLabel("👑 Owner Role").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("admin:roles:set:head_manager").setLabel("👑 Head Manager Role").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:roles:set:manager").setLabel("🔧 Manager Role").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId("admin:roles:set:trainer").setLabel("📚 Trainer Role").setStyle(ButtonStyle.Secondary),
     );
@@ -758,9 +761,9 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── Config: set role level ────────────────────────────────────────────────
   if (section === "roles" && action === "set") {
     if (!(await requireRole(interaction, "manager"))) return true;
-    const level = parts[3] as "owner" | "manager" | "trainer" | "mechanic" | "needs_training";
+    const level = parts[3] as "owner" | "head_manager" | "manager" | "trainer" | "mechanic" | "needs_training";
     const levelLabels: Record<string, string> = {
-      owner: "👑 Owner", manager: "🔧 Manager", trainer: "📚 Trainer",
+      owner: "👑 Owner", head_manager: "👑 Head Manager", manager: "🔧 Manager", trainer: "📚 Trainer",
       mechanic: "🔩 Mechanic", needs_training: "🎓 Needs Training"
     };
     const { RoleSelectMenuBuilder: RSM } = await import("discord.js");

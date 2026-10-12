@@ -41,7 +41,7 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
   const ordersR = await db.execute({
-    sql: `SELECT o.mechanic_id, o.labour, o.total, p.display_name, p.commission_rate, p.hours_worked_this_week
+    sql: `SELECT o.mechanic_id, o.labour, o.total, p.display_name, p.commission_rate, p.hours_worked_this_week, COALESCE(o.is_own_car, 0)
           FROM orders o JOIN profiles p ON o.mechanic_id = p.discord_id
           WHERE o.status IN ('complete','approved') AND ${SINCE_RESET}`,
     args: []
@@ -57,7 +57,7 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
     const hours  = Number(row[5] ?? 0);
     if (!mechanicMap.has(mid)) mechanicMap.set(mid, { name, rate, labour: 0, orders: 0, revenue: 0, hours });
     const e = mechanicMap.get(mid)!;
-    e.labour += labour; e.orders += 1; e.revenue += total;
+    e.labour += Number(row[6] ?? 0) === 1 ? 0 : labour; e.orders += 1; e.revenue += total;
   }
 
   // Also include anyone with mechanic/trainer guild roles (even if no orders this week)
@@ -131,7 +131,7 @@ export async function buildPayallSummaryEmbed(ws: string, guild?: Guild): Promis
     const overrideRate = Number(row[2] ?? 0.20);
     // Fetch crew labour (mechanic/trainer role_level orders, excluding the manager's own)
     const crewLabourR = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
       args: [managerId]
     });
     const crewLabour = Number(crewLabourR.rows[0]?.[0] ?? 0);
@@ -267,7 +267,7 @@ export async function buildPayLogPanelEmbed(guild?: Guild): Promise<EmbedBuilder
     const manualBonus  = Number(row[2] ?? 0);
     const managerSnap  = Number(row[3] ?? 0);
     const crewLabourR = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved','paid') AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
       args: [managerId]
     });
     const crewLabour = Number(crewLabourR.rows[0]?.[0] ?? 0);
@@ -435,7 +435,7 @@ export async function processPayall(
   const SINCE_RESET = `datetime(COALESCE(o.completed_at, o.created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
 
   const ordersR = await db.execute({
-    sql: `SELECT o.mechanic_id, o.labour, o.total, p.display_name, p.commission_rate, p.hours_worked_this_week
+    sql: `SELECT o.mechanic_id, o.labour, o.total, p.display_name, p.commission_rate, p.hours_worked_this_week, COALESCE(o.is_own_car, 0)
           FROM orders o JOIN profiles p ON o.mechanic_id = p.discord_id
           WHERE o.status IN ('complete','approved') AND ${SINCE_RESET}`,
     args: []
@@ -451,7 +451,7 @@ export async function processPayall(
     const hours  = Number(row[5] ?? 0);
     if (!mechanicMap.has(mid)) mechanicMap.set(mid, { name, rate, labour: 0, orders: 0, revenue: 0, hours });
     const e = mechanicMap.get(mid)!;
-    e.labour += labour; e.orders += 1; e.revenue += total;
+    e.labour += Number(row[6] ?? 0) === 1 ? 0 : labour; e.orders += 1; e.revenue += total;
   }
 
   let grandCommission = 0;
@@ -549,7 +549,7 @@ export async function processPayall(
     const manualBonus  = Number(row[2] ?? 0);
     const managerSnap  = Number(row[3] ?? 0);
     const crewLabourR  = await db.execute({
-      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved') AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
+      sql: `SELECT COALESCE(SUM(labour), 0) FROM orders WHERE status IN ('complete','approved') AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_BARE} AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`,
       args: [managerId]
     });
     const crewLabour   = Number(crewLabourR.rows[0]?.[0] ?? 0);

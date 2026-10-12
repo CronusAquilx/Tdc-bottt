@@ -48,7 +48,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       sql: `SELECT o.labour, p.commission_rate
             FROM orders o
             JOIN profiles p ON o.mechanic_id = p.discord_id
-            WHERE o.status IN ('complete','approved') AND DATE(o.created_at) >= ?`,
+            WHERE o.status IN ('complete','approved') AND COALESCE(o.is_own_car, 0) = 0 AND DATE(o.created_at) >= ?`,
       args: [ws]
     });
 
@@ -144,7 +144,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       sql: `SELECT o.labour, p.commission_rate
             FROM orders o
             JOIN profiles p ON o.mechanic_id = p.discord_id
-            WHERE o.status IN ('complete','approved') AND DATE(o.created_at) >= ?`,
+            WHERE o.status IN ('complete','approved') AND COALESCE(o.is_own_car, 0) = 0 AND DATE(o.created_at) >= ?`,
       args: [ws]
     });
     const grandCommission = ordersR.rows.reduce((sum, row) => {

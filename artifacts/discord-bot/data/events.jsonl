@@ -34,3 +34,6 @@
 {"ts":"2026-09-06T23:13:13.634Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":".nxtcloudy","orderId":"379e9bfc-2085-40cb-9b99-c5d4c65a4ecf","orderNumber":"TDC-0100"}
 {"ts":"2026-09-06T23:13:18.017Z","kind":"order_cancelled","guildId":"1503609933365514393","userId":"1363222342800511058","orderId":"379e9bfc-2085-40cb-9b99-c5d4c65a4ecf","orderNumber":"TDC-0100"}
 {"ts":"2026-09-06T23:15:49.975Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":".nxtcloudy","orderId":"35f5dc69-57d3-4ec4-b302-2fd7e9e43a38","orderNumber":"TDC-0101"}
+{"ts":"2026-10-12T16:20:00.289Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":".nxtcloudy","orderId":"e0ac0466-5942-43af-887f-dfe40f1afb38","orderNumber":"TDC-0102"}
+{"ts":"2026-10-12T16:23:18.329Z","kind":"order_completed","guildId":"1503609933365514393","userId":"1363222342800511058","orderId":"e0ac0466-5942-43af-887f-dfe40f1afb38","orderNumber":"TDC-0102","amount":10500,"detail":"total=11500 parts=1000"}
+{"ts":"2026-10-12T16:23:30.577Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":".nxtcloudy","orderId":"a15c4c82-9cf4-4ddc-8404-04df0517c6cc","orderNumber":"TDC-0103"}

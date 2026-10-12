@@ -259,6 +259,7 @@ export async function initDb() {
 
   // Safe migrations
   await safeAlter("ALTER TABLE guild_config ADD COLUMN owner_role_id TEXT");
+  await safeAlter("ALTER TABLE guild_config ADD COLUMN head_manager_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN manager_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN trainer_role_id TEXT");
   await safeAlter("ALTER TABLE guild_config ADD COLUMN mechanic_role_id TEXT");
@@ -427,8 +428,8 @@ export async function getGuildConfig(guildId: string) {
                  owner_role_id, manager_role_id, trainer_role_id, mechanic_role_id,
                  timeclock_channel_id, loa_channel_id, raffle_channel_id,
                  leaderboard_channel_id, training_channel_id, needs_training_role_id,
-                 payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id,
-                 lifetime_earnings_channel_id, bank_account_channel_id
+                  payday_channel_id, trainer_crew_rate, manager_crew_rate, clocklog_channel_id,
+                  lifetime_earnings_channel_id, bank_account_channel_id, head_manager_role_id
           FROM guild_config WHERE guild_id = ?`,
     args: [guildId]
   });
@@ -456,6 +457,7 @@ export async function getGuildConfig(guildId: string) {
     clocklog_channel_id:           row[18] ? String(row[18]) : null,
     lifetime_earnings_channel_id:  row[19] ? String(row[19]) : null,
     bank_account_channel_id:       row[20] ? String(row[20]) : null,
+    head_manager_role_id:          row[21] ? String(row[21]) : null,
   };
 }
 
@@ -485,7 +487,7 @@ export async function setGuildCrewRate(
 
 export async function setGuildRoleMapping(
   guildId: string,
-  level: "owner" | "manager" | "trainer" | "mechanic" | "needs_training",
+  level: "owner" | "head_manager" | "manager" | "trainer" | "mechanic" | "needs_training",
   roleIds: string[]
 ): Promise<void> {
   const field = `${level}_role_id`;

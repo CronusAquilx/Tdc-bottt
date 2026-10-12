@@ -16,6 +16,8 @@ import { getCommissionData, mainDraftButtonRows } from "./draftbuttons.js";
 import { logEvent } from "../lib/eventLog.js";
 import { scheduleNextBankReminder } from "./bankaccount.js";
 import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
+import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -23,6 +25,15 @@ function parseUtc(s: string): number {
   if (!s) return 0;
   const norm = s.includes("T") || s.endsWith("Z") ? s : s.replace(" ", "T") + "Z";
   return new Date(norm).getTime();
+}
+
+async function effectiveCommissionRate(
+  guild: import("discord.js").Guild | null,
+  mechanicId: string,
+  legacyRate: number,
+): Promise<number> {
+  if (!(await isUpdateEnabled())) return legacyRate;
+  return payrollRateForRole(await resolveTdcRole(guild ?? undefined, mechanicId)).commissionRate;
 }
 
 /** After any clock-out, edit the idle-warning message to remove its buttons
@@ -855,25 +866,26 @@ export async function handleButton(interaction: ButtonInteraction) {
     if (!profile) { await interaction.editReply({ content: "❌ Mechanic not found." }); return; }
     const SINCE_RESET = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET}`,
+      sql: `SELECT total, parts_cost, labour, COALESCE(is_own_car, 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET}`,
       args: [mechId]
     });
     if (!r.rows.length) {
       await interaction.editReply({ content: `❌ No completed unpaid orders for **${profile.display_name}** this pay period.` });
       return;
     }
-    const totalLabour  = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const totalLabour  = r.rows.reduce((s, row) => s + (Number(row[3] ?? 0) === 1 ? 0 : Number(row[2] ?? 0)), 0);
     const totalRevenue = r.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
+    const commissionRate = await effectiveCommissionRate(interaction.guild, mechId, profile.commission_rate);
     // Snapshot-aware commission — matches /setpay, /payall, and draft projections
     const commAdj       = profile.commission_adjustment ?? 0;
     const snapshot      = profile.commission_labour_snapshot ?? 0;
     const labourAfter   = Math.max(0, totalLabour - snapshot);
     const commission    = commAdj > 0
-      ? commAdj + labourAfter * profile.commission_rate
-      : totalLabour * profile.commission_rate;
+      ? commAdj + labourAfter * commissionRate
+      : totalLabour * commissionRate;
     const rateLabel = commAdj > 0
       ? `set ${Math.round(commAdj).toLocaleString()} + new orders`
-      : `${(profile.commission_rate * 100).toFixed(0)}%`;
+      : `${(commissionRate * 100).toFixed(0)}%`;
     const confirmEmbed = new EmbedBuilder()
       .setTitle(`💸  Confirm Payout  ·  ${profile.display_name}`)
       .setColor(COLORS.primary)
@@ -902,18 +914,19 @@ export async function handleButton(interaction: ButtonInteraction) {
     const ws = weekStart();
     const SINCE_RESET_OP = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
+      sql: `SELECT total, parts_cost, labour, COALESCE(is_own_car, 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
       args: [id]
     });
     if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
-    const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const totalLabour = r.rows.reduce((s, row) => s + (Number(row[3] ?? 0) === 1 ? 0 : Number(row[2] ?? 0)), 0);
+    const commissionRate = await effectiveCommissionRate(interaction.guild, id, profile.commission_rate);
     // Snapshot-aware commission
     const commAdj_op    = profile.commission_adjustment ?? 0;
     const snapshot_op   = profile.commission_labour_snapshot ?? 0;
     const labourAfter_op = Math.max(0, totalLabour - snapshot_op);
     const commission = commAdj_op > 0
-      ? commAdj_op + labourAfter_op * profile.commission_rate
-      : totalLabour * profile.commission_rate;
+      ? commAdj_op + labourAfter_op * commissionRate
+      : totalLabour * commissionRate;
     const payoutId = randomUUID();
     const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
     await db.execute({
@@ -934,7 +947,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       created_at: String(payRow[9] ?? "")
     };
     const approver = await getProfile(interaction.user.id);
-    const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Manager", weekEnd, profile.commission_rate);
+    const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Manager", weekEnd, commissionRate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:archivepaid:${id}:${ws}`).setLabel("🗃️ Archive Paid Orders").setStyle(ButtonStyle.Secondary)
     );
@@ -1059,18 +1072,19 @@ export async function handleButton(interaction: ButtonInteraction) {
     const ws = weekStart();
     const SINCE_RESET_PC = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
     const r = await db.execute({
-      sql: `SELECT total, parts_cost, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
+      sql: `SELECT total, parts_cost, labour, COALESCE(is_own_car, 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
       args: [id]
     });
     if (!r.rows.length) { await interaction.followUp({ content: "❌ No completed orders.", flags: MessageFlags.Ephemeral }); return; }
-    const totalLabour = r.rows.reduce((s, row) => s + Number(row[2] ?? 0), 0);
+    const totalLabour = r.rows.reduce((s, row) => s + (Number(row[3] ?? 0) === 1 ? 0 : Number(row[2] ?? 0)), 0);
+    const commissionRate = await effectiveCommissionRate(interaction.guild, id, profile.commission_rate);
     // Snapshot-aware commission — matches /setpay + /payall formula
     const commAdj_pc    = profile.commission_adjustment ?? 0;
     const snapshot_pc   = profile.commission_labour_snapshot ?? 0;
     const labourAfter_pc = Math.max(0, totalLabour - snapshot_pc);
     const commission = commAdj_pc > 0
-      ? commAdj_pc + labourAfter_pc * profile.commission_rate
-      : totalLabour * profile.commission_rate;
+      ? commAdj_pc + labourAfter_pc * commissionRate
+      : totalLabour * commissionRate;
     const payoutId = randomUUID();
     const weekEnd = new Date(new Date(ws).getTime() + 6 * 86400000).toISOString().split("T")[0];
     await db.execute({
@@ -1091,7 +1105,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       created_at: String(payRow[9] ?? "")
     };
     const approver = await getProfile(interaction.user.id);
-    const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Owner", weekEnd, profile.commission_rate);
+    const embed = buildPayoutEmbed(payout, profile.display_name, approver?.display_name ?? "Owner", weekEnd, commissionRate);
     const archiveRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`order:archivepaid:${id}:${ws}`).setLabel("🗃️ Archive Paid Orders").setStyle(ButtonStyle.Secondary)
     );
@@ -1411,21 +1425,22 @@ export async function handleButton(interaction: ButtonInteraction) {
     const today = new Date().toISOString().split("T")[0];
     const yearStart = `${new Date().getFullYear()}-01-01`;
     const SINCE_RESET_VD = `datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`;
-    const weekR   = await db.execute({ sql: `SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET_VD}`, args: [id] });
+    const weekR   = await db.execute({ sql: `SELECT total, labour, COALESCE(is_own_car, 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND ${SINCE_RESET_VD}`, args: [id] });
     const todayR  = await db.execute({ sql: "SELECT total FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) = ?",              args: [id, today] });
-    const ytdR    = await db.execute({ sql: "SELECT total, labour FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, yearStart] });
+    const ytdR    = await db.execute({ sql: "SELECT total, labour, COALESCE(is_own_car, 0) FROM orders WHERE mechanic_id = ? AND status IN ('complete','approved','paid') AND DATE(created_at) >= ?",    args: [id, yearStart] });
     const weekRev   = weekR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const weekLabour = weekR.rows.reduce((s, row) => s + Number(row[1] ?? 0), 0);
+    const weekLabour = weekR.rows.reduce((s, row) => s + (Number(row[2] ?? 0) === 1 ? 0 : Number(row[1] ?? 0)), 0);
     const todayRev  = todayR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
     const ytdRev    = ytdR.rows.reduce((s, row) => s + Number(row[0] ?? 0), 0);
-    const ytdCommission = ytdR.rows.reduce((s, row) => s + Number(row[1] ?? 0) * profile.commission_rate, 0);
+    const commissionRate = await effectiveCommissionRate(interaction.guild, id, profile.commission_rate);
+    const ytdCommission = ytdR.rows.reduce((s, row) => s + (Number(row[2] ?? 0) === 1 ? 0 : Number(row[1] ?? 0) * commissionRate), 0);
     // Snapshot-aware week commission — matches /setpay + draft projections
     const commAdj_vd    = profile.commission_adjustment ?? 0;
     const snapshot_vd   = profile.commission_labour_snapshot ?? 0;
     const labourAfter_vd = Math.max(0, weekLabour - snapshot_vd);
     const weekCommission = commAdj_vd > 0
-      ? commAdj_vd + labourAfter_vd * profile.commission_rate
-      : weekLabour * profile.commission_rate;
+      ? commAdj_vd + labourAfter_vd * commissionRate
+      : weekLabour * commissionRate;
     const embed = buildDashboardEmbed(profile.display_name, profile.status, todayR.rows.length, todayRev, weekR.rows.length, weekRev, profile.hours_worked_this_week, weekCommission, ytdR.rows.length, ytdRev, ytdCommission);
     await interaction.editReply({ embeds: [embed] });
     return;

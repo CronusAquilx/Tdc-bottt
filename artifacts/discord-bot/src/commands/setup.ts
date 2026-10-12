@@ -45,7 +45,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
     // Only add role overwrites for IDs that are actually configured & valid snowflakes
     const validId = (id: any) => typeof id === "string" && /^\d{17,20}$/.test(id);
-    for (const rid of [config?.owner_role_id, config?.manager_role_id, config?.trainer_role_id]) {
+    for (const rid of [config?.owner_role_id, config?.head_manager_role_id, config?.manager_role_id, config?.trainer_role_id]) {
       if (!validId(rid)) continue;
       // Verify the role actually exists in this guild before adding
       try {
@@ -92,6 +92,7 @@ function buildStatusEmbed(config: any) {
       },
       { name: "🎭 Roles", value:
           `👑 Owner: ${ro(config?.owner_role_id)}\n` +
+          `👑 Head Manager: ${ro(config?.head_manager_role_id)}\n` +
           `🔧 Manager: ${ro(config?.manager_role_id)}\n` +
           `📚 Trainer: ${ro(config?.trainer_role_id)}\n` +
           `🔩 Mechanic: ${ro(config?.mechanic_role_id)}\n` +

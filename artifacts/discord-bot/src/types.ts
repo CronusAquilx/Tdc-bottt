@@ -91,6 +91,7 @@ export interface GuildConfig {
   log_channel_id: string | null;
   archive_channel_id: string | null;
   owner_role_id: string | null;
+  head_manager_role_id: string | null;
   manager_role_id: string | null;
   trainer_role_id: string | null;
   mechanic_role_id: string | null;

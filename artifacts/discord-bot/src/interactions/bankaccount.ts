@@ -434,6 +434,7 @@ export async function handleBankSelect(interaction: AnySelectMenuInteraction): P
 async function managementMentions(guildId: string, config: any): Promise<{ content: string; roles: string[] }> {
   const roleIds = [
     ...splitRoleIds(config?.owner_role_id),
+    ...splitRoleIds(config?.head_manager_role_id),
     ...splitRoleIds(config?.manager_role_id),
   ];
   if (roleIds.length) {

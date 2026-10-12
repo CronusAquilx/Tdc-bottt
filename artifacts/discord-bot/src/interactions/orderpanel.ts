@@ -10,6 +10,13 @@ const PANEL_TITLE = "🏁  TOKYO DRIFT CUSTOMS";
 
 function buildPanelEmbed(displayName: string, commissionRate: number, roleLevel: string, updateEnabled: boolean): EmbedBuilder {
   const payPolicy = payrollRateForRole(roleLevel);
+  const roleEmoji = payPolicy.displayRole === "Head Manager" ? "👑"
+    : payPolicy.displayRole === "Manager" ? "🧰"
+    : payPolicy.displayRole === "Trainer" ? "🎓"
+    : "🔧";
+  const crewCut = payPolicy.crewCutRate > 0
+    ? ` + **${(payPolicy.crewCutRate * 100).toFixed(0)}% crew cut**`
+    : "";
   return new EmbedBuilder()
     .setTitle(PANEL_TITLE)
     .setColor(0xe5342b)
@@ -17,7 +24,7 @@ function buildPanelEmbed(displayName: string, commissionRate: number, roleLevel:
       `**Welcome, ${displayName}.**\n\n` +
       "This is your personal sales channel. Start a new order below.\n\n" +
       (updateEnabled
-        ? `> 💵 **${payPolicy.displayRole}**: **${(payPolicy.commissionRate * 100).toFixed(0)}% of labour** · **${payPolicy.hourlyRate.toLocaleString("en-US")} per active hour**\n\n`
+        ? `> ${roleEmoji} **${payPolicy.displayRole}**: **$${payPolicy.hourlyRate.toLocaleString("en-US")}/hr + ${(payPolicy.commissionRate * 100).toFixed(0)}% commission${crewCut}**\n\n`
         : `> 💵 Your commission rate: **${(commissionRate * 100).toFixed(0)}% of labour**\n\n`) +
       "> ⏰ **Clock in and out using the dedicated clock panel channel.**"
     )
@@ -58,7 +65,7 @@ export async function postOrderPanel(
     const member = await channel.guild.members.fetch(mechanicId).catch(() => null);
     const memberRoles = member?.roles.cache;
     if (memberRoles) {
-      if (splitRoleIds(config?.owner_role_id).some(id => memberRoles.has(id))) roleLevel = "owner";
+      if ([...splitRoleIds(config?.owner_role_id), ...splitRoleIds(config?.head_manager_role_id)].some(id => memberRoles.has(id))) roleLevel = "owner";
       else if (splitRoleIds(config?.manager_role_id).some(id => memberRoles.has(id))) roleLevel = "manager";
       else if (splitRoleIds(config?.trainer_role_id).some(id => memberRoles.has(id))) roleLevel = "trainer";
     }

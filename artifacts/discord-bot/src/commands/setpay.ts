@@ -99,7 +99,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const snapR = await db.execute({
       sql: `SELECT COALESCE(SUM(labour), 0)
             FROM orders
-            WHERE mechanic_id = ? AND ${DONE_STATUSES} AND ${SINCE_RESET_SQL}`,
+            WHERE mechanic_id = ? AND ${DONE_STATUSES} AND COALESCE(is_own_car, 0) = 0 AND ${SINCE_RESET_SQL}`,
       args: [target.id]
     });
     const labourSnapshot = Number(snapR.rows[0]?.[0] ?? 0);
@@ -113,6 +113,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
             FROM orders
             WHERE ${DONE_STATUSES}
               AND ${SINCE_RESET_SQL}
+              AND COALESCE(is_own_car, 0) = 0
               AND mechanic_id != ?
               AND role_level IN ('mechanic', 'trainer')`,
       args: [target.id]
