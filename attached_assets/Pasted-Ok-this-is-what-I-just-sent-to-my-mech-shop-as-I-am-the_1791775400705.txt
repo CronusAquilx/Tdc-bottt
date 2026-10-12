@@ -1,0 +1,30 @@
+Ok this is what I just sent to my mech shop as I am the head manager <@&1503887658894491773>
+
+📢 MECHANIC PAY & INCENTIVE UPDATE
+
+This week will remain completely normal. The new system will NOT be implemented until next week. We’ll use this week as normal, then the new system will officially start next week.
+
+🏆 DONOR CAR INCENTIVE
+
+* The mechanic with the most sales/labor for the week can win a Donor Car.
+* You must make the shop at least $500,000 to qualify.
+* This is to reward the mechanic who is putting in the most work and bringing in the most money for the shop.
+
+💰 NEW PAY SYSTEM — STARTING NEXT WEEK
+
+We’re switching from commission-only to hourly + commission:
+
+🔧 Mechanic: $15k/hr + 15% commission
+🎓 Trainer: $17.5k/hr + 20% commission
+🧰 Manager: $20k/hr + 50% commission + 10% crew cut
+👑 Head Manager: $25k/hr + 50% commission + 30% crew cut
+
+⏰ 5 HOUR WEEKLY MINIMUM
+
+* Everyone will have a 5-hour minimum per week.
+* The 5 hours must be actively worked/on duty — AFK time will not count.
+* Pay will be sent out every Monday for the previous week.
+
+The goal is to give mechanics a reason to stay active and bring in customers while also making sure you’re getting paid for the time you actually put into the shop, even when it’s slow.
+
+Again, nothing changes this week. The new system starts NEXT WEEK. The rates and percentages can still be adjusted if needed before implementation. **REACT TO THIS MESSAGE IF YOU UNDERSTAND** so implement the stuff that is listed make sure it's tracking hours accurately make sure it always checking that timer and make it ping once every 30 minutes without an order make sure it's saving between restarts aswell and also when make an order if it's your own car where the buttons are on the new order it should be new order, my own car , and pay all when someone selects my own car it shouldn't give them commission from that car and it should charge them the same as it would for a customer also for the bank logging if someone logs it earlier in the day don't make it ping or send an announcement to log make sure the bot remembers after restarts and stuff and also sometimes we don't pay every moday or people bill the shop later so add when logging the bot add a button of the people who have been paid and it should know like we select mechanics that are paid and also add a /setbanktotal and it should say we are down or up and a /restartbank make sure the hours get added up for pay based on hour much they work and stuff 
