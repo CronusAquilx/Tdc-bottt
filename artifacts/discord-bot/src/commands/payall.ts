@@ -7,7 +7,7 @@ import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 import { weekStart } from "../lib/utils.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
-import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
+import { payrollRateForRole, resolveTdcRole, WEEKLY_HOURS_GOAL } from "../lib/payrollPolicy.js";
 import { latestCheckedHours } from "../lib/weeklyStrikes.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
@@ -787,7 +787,7 @@ async function buildUpdatedPayallSummary(ws: string, guild?: Guild): Promise<Emb
         (!donorWinner || member.labour > donorWinner.labour)) donorWinner = member;
     const strikeNote = member.strikePayCutPending ? " · ⚠️ 50% strike cut" : "";
     const hoursNote = `${member.hours.toFixed(2)}h`;
-    const minimumNote = member.hours < 3.5 ? " · ⚠️ strike check" : member.hours < 5 ? " · below 5h goal" : "";
+    const minimumNote = member.hours < WEEKLY_HOURS_GOAL ? " · ⚠️ under 5h minimum; strike check" : "";
     lines.push(
       `**${member.name}** · ${member.orders} orders · ${hoursNote}${minimumNote} → ` +
       `${money(Math.round(payable))} *(commission ${money(Math.round(member.commission))} + hourly ${money(Math.round(member.hourlyPay))}` +

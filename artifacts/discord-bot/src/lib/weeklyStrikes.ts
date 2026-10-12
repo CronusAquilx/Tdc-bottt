@@ -1,7 +1,7 @@
 import { Client, Guild, TextChannel } from "discord.js";
 import { db, getGuildConfig, splitRoleIds } from "../db.js";
 import { isUpdateEnabled } from "./featureFlags.js";
-import { LOW_HOURS_STRIKE_THRESHOLD, WEEKLY_HOURS_GOAL } from "./payrollPolicy.js";
+import { LOW_HOURS_STRIKE_THRESHOLD } from "./payrollPolicy.js";
 import { calculateCreditedShiftMinutes } from "./timeclock.js";
 
 const TIME_ZONE = process.env.TDC_TIMEZONE?.trim() || "America/Chicago";
@@ -141,7 +141,7 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
         await sendStrikeMessage(
           guild,
           salesChannelId,
-          `⚠️ <@${mechanicId}> — **Strike 1 of 3**: you worked ${hours.toFixed(2)} active hours from Monday to payday, below the 3h 30m minimum. You are on a 24-hour hold from starting cars. Reach 5 hours next pay period.`,
+          `⚠️ <@${mechanicId}> — **Strike 1 of 3**: you worked ${hours.toFixed(2)} active hours from Monday to payday, below the 5-hour minimum. You are on a 24-hour hold from starting cars. Reach 5 hours next pay period.`,
         );
         checkMessages.push(`${name}: strike 1, 24-hour order hold`);
       } else if (strikeNumber === 2) {
@@ -153,7 +153,7 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
         await sendStrikeMessage(
           guild,
           salesChannelId,
-          `⚠️ <@${mechanicId}> — **Strike 2 of 3**: you again worked ${hours.toFixed(2)} active hours, below 3h 30m. Your next processed paycheck will be reduced by 50%. No additional customer-debt deduction applies.`,
+          `⚠️ <@${mechanicId}> — **Strike 2 of 3**: you again worked ${hours.toFixed(2)} active hours, below the 5-hour minimum. Your next processed paycheck will be reduced by 50%. No additional customer-debt deduction applies.`,
         );
         checkMessages.push(`${name}: strike 2, next paycheck halved`);
       } else {
@@ -171,16 +171,10 @@ export async function evaluateWeeklyStrikes(guild: Guild, periodStart: string, p
         await sendStrikeMessage(
           guild,
           salesChannelId,
-          `⚠️ <@${mechanicId}> — **Strike 3 of 3**: you worked ${hours.toFixed(2)} active hours, below 3h 30m again. Your shop profile is now terminated and you can no longer start orders.`,
+          `⚠️ <@${mechanicId}> — **Strike 3 of 3**: you worked ${hours.toFixed(2)} active hours, below the 5-hour minimum again. Your shop profile is now terminated and you can no longer start orders.`,
         );
         checkMessages.push(`${name}: strike 3, terminated`);
       }
-    } else if (hours < WEEKLY_HOURS_GOAL) {
-      await sendStrikeMessage(
-        guild,
-        salesChannelId,
-        `⏱️ <@${mechanicId}> — you worked ${hours.toFixed(2)} active hours this pay period. You avoided a strike by reaching 3h 30m, but the weekly goal is 5 hours.`,
-      );
     }
   }
 

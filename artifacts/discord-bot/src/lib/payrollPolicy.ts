@@ -36,5 +36,5 @@ export async function resolveTdcRole(guild: Guild | undefined, discordId: string
   return assigned === "owner" || assigned === "manager" || assigned === "trainer" ? assigned : "mechanic";
 }
 
-export const LOW_HOURS_STRIKE_THRESHOLD = 3.5;
 export const WEEKLY_HOURS_GOAL = 5;
+export const LOW_HOURS_STRIKE_THRESHOLD = WEEKLY_HOURS_GOAL;
