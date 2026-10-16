@@ -92,3 +92,29 @@ function isDeadInteraction(err: unknown): boolean {
 export async function safeDeferUpdate(interaction: any): Promise<void> {
   await withRetry(() => interaction.deferUpdate(), { tries: 2, baseMs: 200 });
 }
+
+/**
+ * Answer a component interaction in ONE Discord round trip when it hasn't been
+ * acknowledged yet (interaction.update), or edit the existing reply if it has.
+ * Skipping the separate "defer" step makes order buttons feel much quicker.
+ */
+export async function safeUpdate(interaction: any, payload: any): Promise<void> {
+  if (interaction.deferred || interaction.replied) return safeEditReply(interaction, payload);
+  try {
+    await withRetry(() => interaction.update(payload), { tries: 2, baseMs: 200 });
+  } catch (err) {
+    if (isDeadInteraction(err)) return;
+    logError("interaction-update", err, { guildId: interaction.guildId, userId: interaction.user?.id, command: interaction.customId });
+  }
+}
+
+/** Small private message to the clicker, whether or not the interaction was acknowledged yet. */
+export async function ephemeralNotice(interaction: any, content: string): Promise<void> {
+  const payload = { content, flags: 64 };
+  try {
+    if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+    else await interaction.reply(payload);
+  } catch (err) {
+    if (!isDeadInteraction(err)) logError("ephemeral-notice", err, { userId: interaction.user?.id, command: interaction.customId });
+  }
+}

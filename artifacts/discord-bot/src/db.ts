@@ -103,7 +103,12 @@ export async function initDb() {
   // Enable WAL mode + full synchronous durability so committed pay/order data
   // is flushed to the persistent disk before SQLite reports success.
   await db.execute("PRAGMA journal_mode=WAL");
-  await db.execute("PRAGMA synchronous=FULL");
+  // NORMAL is the recommended pairing with WAL: a bot crash/restart never loses a
+  // committed write; only a whole-machine power loss could drop the last moments.
+  // FULL fsyncs on every write, which is very slow on a network disk and freezes
+  // the bot (libSQL runs on the main thread). Set TDC_DB_SYNC=FULL to go back.
+  const syncMode = (process.env.TDC_DB_SYNC ?? "NORMAL").toUpperCase() === "FULL" ? "FULL" : "NORMAL";
+  await db.execute(`PRAGMA synchronous=${syncMode}`);
   await db.execute("PRAGMA busy_timeout=5000");
 
   await exec(`
@@ -354,6 +359,7 @@ export async function initDb() {
     "CREATE INDEX IF NOT EXISTS idx_error_ts ON error_log(ts)",
     "CREATE INDEX IF NOT EXISTS idx_orders_mechanic_status ON orders(mechanic_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_orders_guild_status ON orders(guild_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_status_completed ON orders(status, completed_at)",
     "CREATE INDEX IF NOT EXISTS idx_timeclock_mechanic_open ON timeclock(mechanic_id, clock_out_time)",
     "CREATE INDEX IF NOT EXISTS idx_payouts_mechanic ON payouts(mechanic_id, created_at)",
   ]) {
@@ -414,7 +420,7 @@ export async function initDb() {
   await saveDatabaseSnapshot();
   setInterval(() => {
     saveDatabaseSnapshot().catch(err => console.error("[TDC] ⚠️ Scheduled database save failed:", err));
-  }, 60 * 1000);
+  }, 5 * 60 * 1000); // every 5 min (skipped when unchanged); important writes still snapshot immediately
 
   // Trim old log rows once at startup and then daily.
   const { pruneLogs } = await import("./lib/eventLog.js");
@@ -450,7 +456,12 @@ export function invalidateSettingCache(key?: string) {
  * not just the periodic checkpoint.
  */
 export async function checkpointDatabase(): Promise<void> {
-  try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
+  try {
+    // Nothing in the write-ahead log → nothing to checkpoint (and no waiting on readers).
+    const wal = `${DB_PATH}-wal`;
+    if (fs.existsSync(wal) && fs.statSync(wal).size === 0) return;
+    await db.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+  } catch { /* non-fatal */ }
 }
 
 let snapshotCount = 0;
@@ -479,24 +490,56 @@ function saveDailyBackup(): void {
  * The previous snapshot is retained so a failed copy never destroys the last
  * known-good backup.
  */
-export async function saveDatabaseSnapshot(): Promise<void> {
-  await checkpointDatabase();
+let snapshotInFlight: Promise<void> | null = null;
+let lastSnapshotSignature = "";
+
+function dbSignature(): string {
   try {
-    if (fs.existsSync(DB_BACKUP_PATH)) {
-      fs.copyFileSync(DB_BACKUP_PATH, DB_PREVIOUS_BACKUP_PATH);
-    }
-    const tempPath = `${DB_BACKUP_PATH}.tmp`;
-    fs.copyFileSync(DB_PATH, tempPath);
-    fs.renameSync(tempPath, DB_BACKUP_PATH);
-    // Snapshots run every minute — only log one in ten so the console stays readable.
-    snapshotCount++;
-    if (snapshotCount % 10 === 1) {
-      console.log(`[TDC] 💾 Database snapshot saved (${new Date().toISOString()}, #${snapshotCount})`);
-    }
-    saveDailyBackup();
-  } catch (err) {
-    console.error("[TDC] ⚠️ Database snapshot copy failed:", err);
+    const main = fs.statSync(DB_PATH);
+    const wal = fs.existsSync(`${DB_PATH}-wal`) ? fs.statSync(`${DB_PATH}-wal`) : null;
+    return `${main.size}:${main.mtimeMs}:${wal ? `${wal.size}:${wal.mtimeMs}` : "0"}`;
+  } catch {
+    return "";
   }
+}
+
+/**
+ * Persist the committed SQLite state into a rotating recovery snapshot.
+ * The previous snapshot is retained so a failed copy never destroys the last
+ * known-good backup.
+ *
+ * Runs off the main thread (async copy), merges overlapping calls into one,
+ * and skips the copy entirely when nothing has changed since the last one —
+ * so button clicks are never stuck behind a database file copy.
+ */
+export function saveDatabaseSnapshot(): Promise<void> {
+  if (snapshotInFlight) return snapshotInFlight;
+  snapshotInFlight = (async () => {
+    try {
+      await checkpointDatabase();
+      const signature = dbSignature();
+      if (signature && signature === lastSnapshotSignature && fs.existsSync(DB_BACKUP_PATH)) return;
+
+      const tempPath = `${DB_BACKUP_PATH}.tmp`;
+      await fs.promises.copyFile(DB_PATH, tempPath);
+      if (fs.existsSync(DB_BACKUP_PATH)) {
+        await fs.promises.rename(DB_BACKUP_PATH, DB_PREVIOUS_BACKUP_PATH); // rename, not copy: no second full copy
+      }
+      await fs.promises.rename(tempPath, DB_BACKUP_PATH);
+      lastSnapshotSignature = signature;
+      // Snapshots run every minute — only log one in ten so the console stays readable.
+      snapshotCount++;
+      if (snapshotCount % 10 === 1) {
+        console.log(`[TDC] 💾 Database snapshot saved (${new Date().toISOString()}, #${snapshotCount})`);
+      }
+      saveDailyBackup();
+    } catch (err) {
+      console.error("[TDC] ⚠️ Database snapshot copy failed:", err);
+    } finally {
+      snapshotInFlight = null;
+    }
+  })();
+  return snapshotInFlight;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
@@ -504,7 +547,26 @@ export async function setSetting(key: string, value: string): Promise<void> {
   invalidateSettingCache(key);
 }
 
-export async function getGuildConfig(guildId: string) {
+type GuildConfigRow = NonNullable<Awaited<ReturnType<typeof loadGuildConfig>>>;
+const _guildConfigCache = new Map<string, { value: GuildConfigRow | null; ts: number }>();
+const GUILD_CONFIG_TTL_MS = 15_000;
+
+/** Forget cached server config (call after any write to guild_config). */
+export function invalidateGuildConfigCache(guildId?: string) {
+  if (guildId) _guildConfigCache.delete(guildId);
+  else _guildConfigCache.clear();
+}
+
+/** Server config is read on almost every click, so it is cached briefly. */
+export async function getGuildConfig(guildId: string): Promise<GuildConfigRow | null> {
+  const hit = _guildConfigCache.get(guildId);
+  if (hit && Date.now() - hit.ts < GUILD_CONFIG_TTL_MS) return hit.value;
+  const value = await loadGuildConfig(guildId);
+  _guildConfigCache.set(guildId, { value, ts: Date.now() });
+  return value;
+}
+
+async function loadGuildConfig(guildId: string) {
   const r = await db.execute({
     sql: `SELECT guild_id,
                  orders_channel_id, jobs_channel_id, log_channel_id, archive_channel_id,
@@ -554,6 +616,7 @@ export async function setGuildConfig(
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
     args: [guildId, channelId]
   });
+  invalidateGuildConfigCache(guildId);
 }
 
 export async function setGuildCrewRate(
@@ -566,6 +629,7 @@ export async function setGuildCrewRate(
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
     args: [guildId, rate]
   });
+  invalidateGuildConfigCache(guildId);
 }
 
 export async function setGuildRoleMapping(
@@ -580,6 +644,7 @@ export async function setGuildRoleMapping(
           ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`,
     args: [guildId, value]
   });
+  invalidateGuildConfigCache(guildId);
 }
 
 /** Split a comma-separated role ID string into an array of IDs */

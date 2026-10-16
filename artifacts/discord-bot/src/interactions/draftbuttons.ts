@@ -8,7 +8,8 @@ import { db, getProfile, getSetting, rowToOrder, getGuildConfig, nextOrderNumber
 import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
-import { logEvent } from "../lib/eventLog.js";
+import { logEvent, logError } from "../lib/eventLog.js";
+import { safeUpdate, ephemeralNotice } from "../lib/resilience.js";
 import { buildCompletedOrderRow } from "./orderpanel.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole } from "../lib/payrollPolicy.js";
@@ -256,9 +257,9 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
   // ── Package apply helper ───────────────────────────────────────────────────
   async function applyPackage(pkgItems: any[], label: string, breakdown: string) {
-    await interaction.deferUpdate();
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return;
+    if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
+    const existing = rowToOrder(r.rows[0]);
     // Replace entire order with the package items
     const newPartsCost = pkgItems.reduce((s: number, i: any) => s + (i.cost ?? 0), 0);
     const newLabour    = pkgItems.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
@@ -267,11 +268,8 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
       args: [JSON.stringify(pkgItems), newPartsCost, newLabour, newTotal, orderId]
     });
-    const [catalogStr, ur] = await Promise.all([
-      getSetting("parts_catalog"),
-      db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] })
-    ]);
-    const updated = rowToOrder(ur.rows[0]);
+    const catalogStr = await getSetting("parts_catalog");
+    const updated = { ...existing, items: pkgItems, parts_cost: newPartsCost, labour: newLabour, total: newTotal };
     const guildId = interaction.guildId ?? "";
     const commData = await getCommissionData(updated.mechanic_id, guildId, updated.role_level);
     const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
@@ -291,7 +289,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
           ...mainDraftButtonRows(orderId)
         ]
       : mainDraftButtonRows(orderId);
-    await interaction.editReply({
+    await safeUpdate(interaction, {
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components
     });
@@ -622,30 +620,45 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
 
     const newOrderRow = await buildCompletedOrderRow(mechanicId);
 
-    let postedTo = "";
-    if (interaction.guild && profile?.sales_channel_id) {
-      try {
-        const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
-        if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
-          postedTo = profile.sales_channel_id;
-          await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
-        }
-      } catch { /* ignore */ }
-    }
+    // Reply to the mechanic FIRST — the channel posts below can be slow
+    // (Discord rate limits), so they run after the user already sees "complete".
+    const postedTo = profile?.sales_channel_id ?? "";
+    await interaction.editReply({
+      content: postedTo
+        ? `✅ **${completed.order_number}** complete! Posting to <#${postedTo}>`
+        : `✅ **${completed.order_number}** complete!\n*Set up a sales channel to auto-post orders.*`,
+      embeds: [embed],
+      components: []
+    });
 
-    // Also post a copy to the guild's orders log channel (orders_channel_id or log_channel_id)
-    if (interaction.guild) {
-      try {
-        const gConfig = await getGuildConfig(guildId);
-        const logChanId = gConfig?.orders_channel_id ?? gConfig?.log_channel_id;
-        if (logChanId && logChanId !== profile?.sales_channel_id) {
-          const logCh = await interaction.guild.channels.fetch(logChanId).catch(() => null);
-          if (logCh?.isTextBased()) {
-            await (logCh as any).send({ embeds: [embed] });
+    const guild = interaction.guild;
+    if (guild) {
+      const postToSales = async () => {
+        if (!profile?.sales_channel_id) return;
+        try {
+          const ch = await guild.channels.fetch(profile.sales_channel_id);
+          if (ch?.isTextBased()) {
+            const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+            await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
+          } else {
+            throw new Error("sales channel is not a text channel");
           }
+        } catch (err) {
+          logError("order-post-sales", err, { guildId, userId: mechanicId, command: "order:submit" });
+          await interaction.followUp({ content: `⚠️ **${completed.order_number}** was saved, but I couldn't post it to your sales channel.`, flags: MessageFlags.Ephemeral }).catch(() => {});
         }
-      } catch { /* ignore */ }
+      };
+      const postToLog = async () => {
+        try {
+          const gConfig = await getGuildConfig(guildId);
+          const logChanId = gConfig?.orders_channel_id ?? gConfig?.log_channel_id;
+          if (logChanId && logChanId !== profile?.sales_channel_id) {
+            const logCh = await guild.channels.fetch(logChanId).catch(() => null);
+            if (logCh?.isTextBased()) await (logCh as any).send({ embeds: [embed] });
+          }
+        } catch { /* ignore */ }
+      };
+      await Promise.all([postToSales(), postToLog()]);
     }
 
     // Log the completion
@@ -679,13 +692,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       }).catch(() => {});
     }
 
-    await interaction.editReply({
-      content: postedTo
-        ? `✅ **${completed.order_number}** complete! Posted to <#${postedTo}>`
-        : `✅ **${completed.order_number}** complete!\n*Set up a sales channel to auto-post orders.*`,
-      embeds: [embed],
-      components: []
-    });
     return true;
   }
 

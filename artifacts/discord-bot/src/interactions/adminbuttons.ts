@@ -6,7 +6,7 @@ import {
   RoleSelectMenuBuilder, UserSelectMenuBuilder, ChannelSelectMenuBuilder,
   TextChannel
 , MessageFlags} from "discord.js";
-import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
+import { db, getProfile, getGuildConfig, setGuildConfig, splitRoleIds, saveDatabaseSnapshot, invalidateGuildConfigCache } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildJobEmbed, COLORS } from "../lib/embeds.js";
 import { buildFullCrewSyncEmbed, syncFullCrew, buildCrewHealthEmbed, runCrewHealthCheck } from "../commands/crew.js";
@@ -369,6 +369,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
           args: [guild.id, ...deletedIds]
         });
       }
+      invalidateGuildConfigCache(guild.id);
       await db.execute({ sql: `UPDATE profiles SET sales_channel_id = NULL WHERE sales_channel_id IN (${placeholders})`, args: deletedIds });
       await db.execute({ sql: `UPDATE timeclock SET clock_channel_id = NULL, clock_message_id = NULL WHERE clock_channel_id IN (${placeholders})`, args: deletedIds });
       await db.execute("PRAGMA wal_checkpoint(TRUNCATE)");

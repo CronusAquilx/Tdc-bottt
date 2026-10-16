@@ -1,5 +1,5 @@
-import http from "http";
 import { handleWebApi } from "./lib/webApi.js";
+import http from "http";
 import {
   Client,
   GatewayIntentBits,
@@ -325,7 +325,28 @@ function startGatewayWatchdog() {
   console.log("[TDC] 🩺 Discord gateway watchdog started (60s checks, 5m recovery window)");
 }
 
+// ── Performance watch ─────────────────────────────────────────────────────────
+// Tells us WHERE slowness comes from. "event loop lag" = the bot itself was
+// frozen; "arrived late" = Discord/network delay before the bot even saw the
+// click; "handler took" = our own work (database, Discord API calls) was slow.
+function startPerformanceWatch() {
+  let last = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const lag = now - last - 1000;
+    last = now;
+    if (lag > 500) console.warn(`[TDC] 🐌 Event loop lag: bot was frozen for ~${lag}ms`);
+  }, 1000);
+}
+startPerformanceWatch();
+
 client.on(Events.InteractionCreate, async (interaction) => {
+  const startedAt = Date.now();
+  const arrivedLate = startedAt - interaction.createdTimestamp;
+  const label = interaction.isChatInputCommand()
+    ? `/${interaction.commandName}`
+    : (interaction as any).customId ?? String(interaction.type);
+  if (arrivedLate > 1500) console.warn(`[TDC] 🐌 ${label} arrived ${arrivedLate}ms after the click (network/host delay before the bot saw it)`);
   try {
     if (interaction.isChatInputCommand()) {
       const cmd = commands.get(interaction.commandName);
@@ -387,6 +408,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
       }
     } catch { /* ignore */ }
+  } finally {
+    const took = Date.now() - startedAt;
+    if (took > 1500) console.warn(`[TDC] 🐌 ${label} handler took ${took}ms`);
   }
 });
 

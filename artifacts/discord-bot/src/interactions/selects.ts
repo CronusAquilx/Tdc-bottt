@@ -12,7 +12,7 @@ import { mainDraftButtonRows, categoryViewButtonRow, getCommissionData } from ".
 import { ensureMechanicSalesChannel } from "../lib/saleschannel.js";
 import { handleBankSelect } from "./bankaccount.js";
 import { logEvent } from "../lib/eventLog.js";
-import { withRetry, withOrderLock, safeEditReply, safeDeferUpdate } from "../lib/resilience.js";
+import { withOrderLock, safeUpdate, ephemeralNotice } from "../lib/resilience.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -802,11 +802,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Remove item from order ─────────────────────────────────────────────────
   if (ns === "order" && action === "removeitem") {
-    await safeDeferUpdate(interaction);
     await withOrderLock(extra, async () => {
     const orderId = extra;
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return;
+    if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
     const currentItems: any[] = order.items ?? [];
 
@@ -826,8 +825,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(remaining), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const updatedR = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    const updated = rowToOrder(updatedR.rows[0]);
+    const updated = { ...order, items: remaining, parts_cost: newPartsCost, labour: newLabour, total: newTotal };
     const guildId = interaction.guildId ?? "";
     const commData = await getCommissionData(updated.mechanic_id, guildId, updated.role_level);
     const crewCutInfo = ["trainer","manager","owner"].includes(updated.role_level)
@@ -842,7 +840,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    await safeEditReply(interaction, {
+    await safeUpdate(interaction, {
       content: `✅ Removed ${indicesToRemove.size} item(s) from the order.`,
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
@@ -856,17 +854,16 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Select category → show items ───────────────────────────────────────────
   if (ns === "order" && action === "selectcategory") {
-    await safeDeferUpdate(interaction);
     await withOrderLock(extra, async () => {
     const category = interaction.values[0];
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
     const items: { label: string; category: string; price: number; cost: number; labour: number }[] = catalog.items ?? [];
     const catItems = items.filter(i => i.category === category);
-    if (!catItems.length) { await interaction.followUp({ content: `No items in **${category}**.`, flags: MessageFlags.Ephemeral }); return; }
+    if (!catItems.length) { await ephemeralNotice(interaction, `No items in **${category}**.`); return; }
 
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
-    if (!r.rows[0]) return;
+    if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
     const guildId2 = interaction.guildId ?? "";
     const commData2 = await getCommissionData(order.mechanic_id, guildId2, order.role_level);
@@ -893,7 +890,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const embed = buildDraftEmbed(order, commData2.weekCommission, commData2.rate, crewCutInfo2);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
 
-    await safeEditReply(interaction, {
+    await safeUpdate(interaction, {
       embeds: [embed],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(itemSelect),
@@ -906,7 +903,6 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Select specific items ──────────────────────────────────────────────────
   if (ns === "order" && action === "selectitem") {
-    await safeDeferUpdate(interaction);
     await withOrderLock(extra.split(":")[0], async () => {
     const orderId = extra.split(":")[0];
     const category = extra.split(":").slice(1).join(":");
@@ -914,7 +910,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catalog = JSON.parse(catalogStr ?? "{}");
     const allItems: { label: string; category: string; price: number; cost: number; labour: number }[] = catalog.items ?? [];
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    if (!r.rows[0]) return;
+    if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
     const currentItems: any[] = order.items ?? [];
 
@@ -929,7 +925,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     }).filter(Boolean);
 
     if (!newItems.length) {
-      await interaction.followUp({ content: "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.", flags: MessageFlags.Ephemeral });
+      await ephemeralNotice(interaction, "⚠️ All selected items are already on this order. Use **🗑️ Remove** to remove them first.");
       return;
     }
 
@@ -946,8 +942,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       args: [JSON.stringify(merged), newPartsCost, newLabour, newTotal, orderId]
     });
 
-    const updatedR2 = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
-    const updated = rowToOrder(updatedR2.rows[0]);
+    const updated = { ...order, items: merged, parts_cost: newPartsCost, labour: newLabour, total: newTotal };
     const guildId3 = interaction.guildId ?? "";
     const commData3 = await getCommissionData(updated.mechanic_id, guildId3, updated.role_level);
     const crewCutInfo3 = ["trainer","manager","owner"].includes(updated.role_level)
@@ -961,7 +956,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const addedNames = (newItems as any[]).map(i => i.label).join(", ");
-    await safeEditReply(interaction, {
+    await safeUpdate(interaction, {
       content: `✅ Added: **${addedNames}**`,
       embeds: [buildDraftEmbed(updated, commData3.weekCommission, commData3.rate, crewCutInfo3)],
       components: [
