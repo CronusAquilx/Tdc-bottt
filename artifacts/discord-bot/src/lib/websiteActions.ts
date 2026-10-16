@@ -7,14 +7,23 @@ import { buildOrderEmbed, money } from "./embeds.js";
 import { logEvent } from "./eventLog.js";
 import { weekStart } from "./utils.js";
 
+/** Picks the Discord server the crew is configured in (the bot may be in several). */
+export async function crewGuild(client: Client) {
+  for (const guild of client.guilds.cache.values()) {
+    if (await getGuildConfig(guild.id)) return guild;
+  }
+  return client.guilds.cache.first();
+}
+
 export async function websiteIdentity(client: Client, id: string) {
-  const guild = client.guilds.cache.first();
+  const guild = await crewGuild(client);
   const profile = await getProfile(id);
   const active = await db.execute({ sql: "SELECT terminated_at FROM profiles WHERE discord_id=?", args: [id] });
   if (!guild || !profile || !active.rows[0] || active.rows[0][0]) throw new Error("Active crew member not found");
   const config = await getGuildConfig(guild.id);
-  const member = await guild.members.fetch({ user: id, force: true }).catch(() => null);
-  if (!member || !config) throw new Error("Discord membership could not be verified");
+  const member = await guild.members.fetch({ user: id, force: true }).catch((error) => { console.error("[website] member fetch failed", guild.id, id, error?.message ?? error); return null; });
+  if (!config) throw new Error(`Bot setup is missing for Discord server ${guild.name}`);
+  if (!member) throw new Error(`Discord membership could not be verified in ${guild.name}`);
   const mappings = [
     { role: "owner", ids: [...splitRoleIds(config.owner_role_id), ...splitRoleIds(config.head_manager_role_id)] },
     { role: "manager", ids: splitRoleIds(config.manager_role_id) },
@@ -34,7 +43,7 @@ export async function websiteManagement(client: Client, body: any) {
 
 export async function websiteComplete(client: Client, body: any) {
   const actor = await websiteIdentity(client, String(body.actor_id ?? ""));
-  const guild = client.guilds.cache.first();
+  const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const id = String(body.order_id ?? "");
   const rows = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [id] });
@@ -72,7 +81,7 @@ export async function websiteComplete(client: Client, body: any) {
 
 export async function websitePayroll(client: Client, body: any) {
   const actor = await websiteManagement(client, body);
-  const guild = client.guilds.cache.first();
+  const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const requestId = String(body.request_id ?? "");
   if (!/^[a-f0-9-]{36}$/i.test(requestId)) throw new Error("Invalid payroll request");
@@ -107,7 +116,7 @@ export async function websiteRemove(client: Client, body: any) {
   const actor = await websiteManagement(client, body);
   const target = await websiteIdentity(client, String(body.discord_id ?? ""));
   if (target.discord_id === actor.discord_id || target.role === "owner" || (target.role === "manager" && actor.role !== "owner")) throw new Error("You cannot remove this crew member");
-  const guild = client.guilds.cache.first();
+  const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const config = await getGuildConfig(guild.id);
   const member = await guild.members.fetch(target.discord_id);
@@ -139,7 +148,7 @@ export async function websiteAnnounce(client: Client, body: any) {
 
 export async function websiteBank(client: Client, actorId: string, limit: number) {
   await websiteManagement(client, { actor_id: actorId });
-  const guild = client.guilds.cache.first();
+  const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const result = await db.execute({ sql: "SELECT b.*, p.display_name AS logged_by_name FROM bank_account_logs b LEFT JOIN profiles p ON p.discord_id=b.logged_by WHERE b.guild_id=? ORDER BY datetime(b.logged_at) DESC LIMIT ?", args: [guild.id, limit] });
   return result.rows.map(row => Object.fromEntries(result.columns.map((key, index) => [key, typeof row[index] === "bigint" ? Number(row[index]) : row[index]])));
