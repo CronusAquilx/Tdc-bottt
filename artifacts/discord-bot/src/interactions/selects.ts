@@ -13,6 +13,7 @@ import { ensureMechanicSalesChannel } from "../lib/saleschannel.js";
 import { handleBankSelect } from "./bankaccount.js";
 import { logEvent } from "../lib/eventLog.js";
 import { withOrderLock, safeUpdate, ephemeralNotice } from "../lib/resilience.js";
+import { resolveDraftId } from "../lib/draftRecovery.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -802,8 +803,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Remove item from order ─────────────────────────────────────────────────
   if (ns === "order" && action === "removeitem") {
-    await withOrderLock(extra, async () => {
-    const orderId = extra;
+    const orderId = await resolveDraftId(interaction, extra);
+    await withOrderLock(orderId, async () => {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
@@ -854,7 +855,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Select category → show items ───────────────────────────────────────────
   if (ns === "order" && action === "selectcategory") {
-    await withOrderLock(extra, async () => {
+    const orderId = await resolveDraftId(interaction, extra);
+    await withOrderLock(orderId, async () => {
     const category = interaction.values[0];
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -862,7 +864,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const catItems = items.filter(i => i.category === category);
     if (!catItems.length) { await ephemeralNotice(interaction, `No items in **${category}**.`); return; }
 
-    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [extra] });
+    const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
     const guildId2 = interaction.guildId ?? "";
@@ -875,7 +877,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const existingLabels = new Set((order.items ?? []).map((i: any) => `${i.category}::${i.label}`));
 
     const itemSelect = new StringSelectMenuBuilder()
-      .setCustomId(`order:selectitem:${extra}:${category}`)
+      .setCustomId(`order:selectitem:${orderId}:${category}`)
       .setPlaceholder(`Select from ${category}...`)
       .setMinValues(1)
       .setMaxValues(Math.min(catItems.length, 10))
@@ -894,7 +896,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       embeds: [embed],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(itemSelect),
-        categoryViewButtonRow(extra)
+        categoryViewButtonRow(orderId)
       ]
     });
     });
@@ -903,8 +905,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Select specific items ──────────────────────────────────────────────────
   if (ns === "order" && action === "selectitem") {
-    await withOrderLock(extra.split(":")[0], async () => {
-    const orderId = extra.split(":")[0];
+    const orderId = await resolveDraftId(interaction, extra.split(":")[0]);
+    await withOrderLock(orderId, async () => {
     const category = extra.split(":").slice(1).join(":");
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");

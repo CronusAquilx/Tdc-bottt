@@ -10,6 +10,7 @@ import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, mone
 import { randomUUID } from "../lib/utils.js";
 import { logEvent, logError } from "../lib/eventLog.js";
 import { safeUpdate, ephemeralNotice } from "../lib/resilience.js";
+import { resolveDraftId } from "../lib/draftRecovery.js";
 import { buildCompletedOrderRow } from "./orderpanel.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole } from "../lib/payrollPolicy.js";
@@ -121,7 +122,7 @@ export { mainDraftButtonRows, categoryViewButtonRow };
 
 export async function handleDraftButton(interaction: ButtonInteraction): Promise<boolean> {
   const [ns, action, ...rest] = interaction.customId.split(":");
-  const orderId = rest.join(":");
+  let orderId = rest.join(":");
 
   // ── "Create New Order" button from pinned panel ────────────────────────────
   // Show customer name modal FIRST — showModal must be the very first response (no defer before it)
@@ -186,6 +187,12 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   }
 
   if (ns !== "order") return false;
+
+  // If this panel's draft is gone (restart, reset, stale panel, ...) resume the
+  // user's open draft or start a fresh one instead of dead-ending on every click.
+  if (action !== "cancel" && action !== "newpanel" && action !== "owncar") {
+    orderId = await resolveDraftId(interaction, orderId);
+  }
 
   // ── Back to categories ──────────────────────────────────────────────────────
   if (action === "backtocats") {
