@@ -317,6 +317,58 @@ export async function initDb() {
     "CREATE INDEX IF NOT EXISTS idx_timeclock_confirmations_shift_time ON timeclock_confirmations(timeclock_id, confirmed_at)",
   );
 
+  // ── Audit + error logging tables ───────────────────────────────────────────
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      guild_id TEXT,
+      user_id TEXT,
+      user_name TEXT,
+      order_id TEXT,
+      order_number TEXT,
+      amount REAL,
+      detail TEXT
+    )
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS error_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      message TEXT NOT NULL,
+      code TEXT,
+      stack TEXT,
+      guild_id TEXT,
+      user_id TEXT,
+      command TEXT
+    )
+  `);
+
+  // ── Indexes for the hot queries (orders / timeclock / logs) ────────────────
+  for (const stmt of [
+    "CREATE INDEX IF NOT EXISTS idx_audit_kind_ts ON audit_log(kind, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_guild_ts ON audit_log(guild_id, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_error_ts ON error_log(ts)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_mechanic_status ON orders(mechanic_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_orders_guild_status ON orders(guild_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_timeclock_mechanic_open ON timeclock(mechanic_id, clock_out_time)",
+    "CREATE INDEX IF NOT EXISTS idx_payouts_mechanic ON payouts(mechanic_id, created_at)",
+  ]) {
+    try { await db.execute(stmt); } catch (err) { console.error("[TDC] ⚠️ Index creation failed:", stmt, err); }
+  }
+
+  // Detect on-disk corruption early and say so loudly (does not auto-restore).
+  try {
+    const check = await db.execute("PRAGMA quick_check");
+    const verdict = String(check.rows[0]?.[0] ?? "unknown");
+    if (verdict !== "ok") console.error(`[TDC] ❌ Database quick_check FAILED: ${verdict}. Backups: ${DB_BACKUP_PATH}`);
+  } catch (err) {
+    console.error("[TDC] ⚠️ Database quick_check could not run:", err);
+  }
+
   // Close only genuinely stale sessions at startup. Active sessions under eight
   // hours remain open across deploys/restarts, and staged payroll applies the
   // same idle cap as a normal clock-out.
@@ -364,6 +416,11 @@ export async function initDb() {
     saveDatabaseSnapshot().catch(err => console.error("[TDC] ⚠️ Scheduled database save failed:", err));
   }, 60 * 1000);
 
+  // Trim old log rows once at startup and then daily.
+  const { pruneLogs } = await import("./lib/eventLog.js");
+  await pruneLogs();
+  setInterval(() => { pruneLogs().catch(() => {}); }, 24 * 60 * 60 * 1000);
+
   console.log("[TDC] Database initialized.");
 }
 
@@ -396,6 +453,27 @@ export async function checkpointDatabase(): Promise<void> {
   try { await db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* non-fatal */ }
 }
 
+let snapshotCount = 0;
+
+/** Keep one dated copy per day for 7 days, so a bad write noticed late is still recoverable. */
+function saveDailyBackup(): void {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    const dailyPath = path.join(DATA_DIR, `tdc.db.daily-${day}`);
+    if (!fs.existsSync(dailyPath)) {
+      fs.copyFileSync(DB_BACKUP_PATH, dailyPath);
+      console.log(`[TDC] 🗓️ Daily database backup created: ${path.basename(dailyPath)}`);
+      const old = fs.readdirSync(DATA_DIR)
+        .filter(f => f.startsWith("tdc.db.daily-"))
+        .sort()
+        .slice(0, -7);
+      for (const f of old) fs.unlinkSync(path.join(DATA_DIR, f));
+    }
+  } catch (err) {
+    console.error("[TDC] ⚠️ Daily backup failed:", err);
+  }
+}
+
 /**
  * Persist the committed SQLite state into a rotating recovery snapshot.
  * The previous snapshot is retained so a failed copy never destroys the last
@@ -410,7 +488,12 @@ export async function saveDatabaseSnapshot(): Promise<void> {
     const tempPath = `${DB_BACKUP_PATH}.tmp`;
     fs.copyFileSync(DB_PATH, tempPath);
     fs.renameSync(tempPath, DB_BACKUP_PATH);
-    console.log(`[TDC] 💾 Database snapshot saved (${new Date().toISOString()})`);
+    // Snapshots run every minute — only log one in ten so the console stays readable.
+    snapshotCount++;
+    if (snapshotCount % 10 === 1) {
+      console.log(`[TDC] 💾 Database snapshot saved (${new Date().toISOString()}, #${snapshotCount})`);
+    }
+    saveDailyBackup();
   } catch (err) {
     console.error("[TDC] ⚠️ Database snapshot copy failed:", err);
   }

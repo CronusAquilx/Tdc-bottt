@@ -32,7 +32,7 @@ function buildPanelEmbed(displayName: string, commissionRate: number, roleLevel:
     .setTimestamp();
 }
 
-function buildPanelRow(mechanicId: string, updateEnabled: boolean): ActionRowBuilder<ButtonBuilder> {
+function buildPanelRow(mechanicId: string, updateEnabled: boolean, payLabel = "💸  Pay All My Orders"): ActionRowBuilder<ButtonBuilder> {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId("order:newpanel")
@@ -46,18 +46,27 @@ function buildPanelRow(mechanicId: string, updateEnabled: boolean): ActionRowBui
     ] : []),
     new ButtonBuilder()
       .setCustomId(`orderpay:start:${mechanicId}`)
-      .setLabel("💸  Pay All My Orders")
+      .setLabel(payLabel)
       .setStyle(ButtonStyle.Primary),
   );
   return row;
 }
 
-export async function postOrderPanel(
+/**
+ * Buttons shown under every completed-order post in a sales channel:
+ * New Order · My Own Car (when the update is live) · Pay.
+ * Kept in one place so every completion path stays identical.
+ */
+export async function buildCompletedOrderRow(mechanicId: string): Promise<ActionRowBuilder<ButtonBuilder>> {
+  return buildPanelRow(mechanicId, await isUpdateEnabled(), "💸  Pay");
+}
+
+async function buildPanel(
   channel: TextChannel,
   mechanicId: string,
   displayName: string,
-  commissionRate: number
-): Promise<{ message: any; pinned: boolean; updated: boolean }> {
+  commissionRate: number,
+) {
   const updateEnabled = await isUpdateEnabled();
   let roleLevel = await getUserRole(mechanicId) ?? "mechanic";
   if (updateEnabled && channel.guild) {
@@ -70,8 +79,19 @@ export async function postOrderPanel(
       else if (splitRoleIds(config?.trainer_role_id).some(id => memberRoles.has(id))) roleLevel = "trainer";
     }
   }
-  const embed = buildPanelEmbed(displayName, commissionRate, roleLevel, updateEnabled);
-  const row = buildPanelRow(mechanicId, updateEnabled);
+  return {
+    embed: buildPanelEmbed(displayName, commissionRate, roleLevel, updateEnabled),
+    row: buildPanelRow(mechanicId, updateEnabled),
+  };
+}
+
+export async function postOrderPanel(
+  channel: TextChannel,
+  mechanicId: string,
+  displayName: string,
+  commissionRate: number
+): Promise<{ message: any; pinned: boolean; updated: boolean }> {
+  const { embed, row } = await buildPanel(channel, mechanicId, displayName, commissionRate);
 
   // Try to find and edit an existing pinned panel from the bot so we update
   // the commission rate in place instead of posting a duplicate.
@@ -95,4 +115,52 @@ export async function postOrderPanel(
     pinned = true;
   } catch { /* no ManageMessages permission */ }
   return { message: msg, pinned, updated: false };
+}
+
+function isSalesPanelMessage(m: any, botId: string | undefined): boolean {
+  if (!botId || m.author?.id !== botId) return false;
+  const embed = m.embeds?.[0];
+  return embed?.title === PANEL_TITLE && String(embed.description ?? "").startsWith("**Welcome,");
+}
+
+/**
+ * Always post a FRESH sales panel as the newest message in the channel, even
+ * if one already exists. Any older copies of the bot's panel are deleted first
+ * so there is never more than one, and the new one is pinned.
+ */
+export async function resendOrderPanel(
+  channel: TextChannel,
+  mechanicId: string,
+  displayName: string,
+  commissionRate: number
+): Promise<{ message: any; pinned: boolean; removed: number }> {
+  const { embed, row } = await buildPanel(channel, mechanicId, displayName, commissionRate);
+  const botId = channel.client.user?.id;
+
+  // Post the new panel first so the channel is never left without one.
+  const msg = await channel.send({ embeds: [embed], components: [row] });
+  let pinned = false;
+  try {
+    await msg.pin();
+    pinned = true;
+  } catch { /* no ManageMessages permission */ }
+
+  // Then clear out the older panel copies (pinned and recent).
+  let removed = 0;
+  const old = new Map<string, any>();
+  try {
+    for (const m of (await channel.messages.fetchPinned()).values()) {
+      if (m.id !== msg.id && isSalesPanelMessage(m, botId)) old.set(m.id, m);
+    }
+  } catch { /* ignore */ }
+  try {
+    for (const m of (await channel.messages.fetch({ limit: 50 })).values()) {
+      if (m.id !== msg.id && isSalesPanelMessage(m, botId)) old.set(m.id, m);
+    }
+  } catch { /* ignore */ }
+  for (const m of old.values()) {
+    try { await m.delete(); removed++; } catch { /* already gone or no permission */ }
+  }
+
+  return { message: msg, pinned, removed };
 }

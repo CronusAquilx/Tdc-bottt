@@ -4,6 +4,7 @@ import { buildClockOutEmbed } from "./embeds.js";
 import { warnedMechanics } from "./warnState.js";
 import { isUpdateEnabled } from "./featureFlags.js";
 import { calculateCreditedShiftMinutes } from "./timeclock.js";
+import { logEvent } from "./eventLog.js";
 
 const AUTO_OUT_AFTER_WARN_MINS = 15;
 
@@ -225,6 +226,7 @@ export async function autoClockOut(
     sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
     args: [mins / 60, mechanicId]
   });
+  logEvent({ kind: "auto_clock_out", guildId: guild?.id, userId: mechanicId, detail: `${Math.round(mins)} min credited (idle auto clock-out)` });
 
   const profile = await getProfile(mechanicId);
   const name    = profile?.display_name ?? mechanicId;

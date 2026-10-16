@@ -70,7 +70,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         "`/crew remove` — Remove a crew member",
         "`/crew list` — Full crew roster with stats",
         "`/crew sync mode:full` — Import mechanic-role members and link matching sales channels",
-        "`/setpay manager-rate` — Change one manager's crew-cut percentage"
+        "`/setpay manager-rate` — Change one manager's crew-cut percentage",
+        "`/refreshallpanels` — Resend a fresh sales panel to every sales channel (replaces the old one)",
+        "`/auditlog` — Recent activity (orders, LOA, crew changes, new week) and errors"
       ].join("\n")
     });
   }

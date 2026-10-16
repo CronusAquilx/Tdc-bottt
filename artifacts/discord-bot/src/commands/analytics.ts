@@ -20,7 +20,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (!(await requireRole(interaction, "manager"))) return;
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply();
 
   const period = interaction.options.getString("period") ?? "week";
   const targetUser = interaction.options.getUser("mechanic");

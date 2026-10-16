@@ -5,7 +5,7 @@ import {
   TextChannel,
 } from "discord.js";
 import { db, getGuildConfig, getProfile, splitRoleIds, saveDatabaseSnapshot } from "../db.js";
-import { postOrderPanel } from "../interactions/orderpanel.js";
+import { postOrderPanel, resendOrderPanel } from "../interactions/orderpanel.js";
 
 export interface SalesChannelSetupResult {
   channel: TextChannel;
@@ -158,4 +158,40 @@ export async function ensureMechanicSalesChannel(
   }
 
   return { channel, created, panelPosted, panelPinned };
+}
+
+export interface RefreshAllPanelsResult {
+  refreshed: number;
+  failed: string[];   // display names that could not be refreshed, with the reason
+  total: number;
+}
+
+/**
+ * Send a fresh sales panel to EVERY mechanic sales channel, replacing any
+ * panel already there (the new one is the newest message and gets pinned).
+ */
+export async function refreshAllSalesPanels(guild: Guild): Promise<RefreshAllPanelsResult> {
+  const rows = await db.execute(
+    "SELECT discord_id FROM profiles WHERE sales_channel_id IS NOT NULL AND sales_channel_id != ''"
+  );
+  const result: RefreshAllPanelsResult = { refreshed: 0, failed: [], total: rows.rows.length };
+
+  for (const row of rows.rows) {
+    const mechanicId = String(row[0] ?? "");
+    const profile = await getProfile(mechanicId);
+    if (!profile?.sales_channel_id) continue;
+    try {
+      const channel = await guild.channels.fetch(profile.sales_channel_id).catch(() => null);
+      if (!channel || channel.type !== ChannelType.GuildText) {
+        result.failed.push(`${profile.display_name} (channel missing)`);
+        continue;
+      }
+      await resendOrderPanel(channel as TextChannel, mechanicId, profile.display_name, profile.commission_rate);
+      result.refreshed++;
+    } catch (err: any) {
+      result.failed.push(`${profile.display_name} (${String(err?.message ?? "error").slice(0, 60)})`);
+    }
+    await new Promise(res => setTimeout(res, 350)); // stay well inside Discord rate limits
+  }
+  return result;
 }

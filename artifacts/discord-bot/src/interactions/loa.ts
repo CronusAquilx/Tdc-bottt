@@ -8,6 +8,7 @@ import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { buildLoaEmbed, COLORS } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
+import { logEvent } from "../lib/eventLog.js";
 
 function rowToLoa(row: unknown) {
   const c = (i: number) => {
@@ -103,6 +104,11 @@ export async function handleLoaModal(interaction: ModalSubmitInteraction): Promi
     args: [loaId, interaction.user.id, guild.id, reason, startDate, returnDate, notes ?? null]
   });
 
+  logEvent({
+    kind: "loa_submitted", guildId: guild.id, userId: interaction.user.id, userName: mechanicName,
+    detail: `${startDate} → ${returnDate} · ${reason.slice(0, 120)}`,
+  });
+
   const embed = buildLoaEmbed({ mechanic_name: mechanicName, reason, start_date: startDate, return_date: returnDate, notes, status: "pending" });
 
   const reviewRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -155,6 +161,11 @@ export async function handleLoaButton(interaction: ButtonInteraction): Promise<b
     const mechanic = await getProfile(loa.mechanic_id);
     const mechanicName = mechanic?.display_name ?? "Unknown";
     const reviewer = await getProfile(interaction.user.id);
+    logEvent({
+      kind: status === "approved" ? "loa_approved" : "loa_denied",
+      guildId: interaction.guild?.id, userId: loa.mechanic_id, userName: mechanicName,
+      detail: `${loa.start_date} → ${loa.return_date} · reviewed by ${reviewer?.display_name ?? interaction.user.username}`,
+    });
 
     const embed = buildLoaEmbed({
       mechanic_name: mechanicName,

@@ -173,6 +173,9 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     // If already clocked in — that's fine, proceed to new order
     const effectiveTcId = inserted.rowsAffected ? tcId : null;
+    if (inserted.rowsAffected) {
+      logEvent({ kind: "clock_in", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username, detail: "clocked in via New Order prompt" });
+    }
 
     if (effectiveTcId) {
       // Post clock-in embed to clock LOGS channel
@@ -441,6 +444,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
+    logEvent({ kind: "clock_out", guildId: interaction.guild?.id, userId: entry.mechanic_id, userName: interaction.user.username, detail: `${Math.round(mins)} min credited` });
     // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
@@ -501,6 +505,9 @@ export async function handleButton(interaction: ButtonInteraction) {
             WHERE NOT EXISTS (SELECT 1 FROM timeclock WHERE mechanic_id = ? AND clock_out_time IS NULL)`,
       args: [tcId, interaction.user.id, interaction.guild?.id ?? "", interaction.user.id]
     });
+    if (inserted.rowsAffected) {
+      logEvent({ kind: "clock_in", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username, detail: "clocked in via panel" });
+    }
 
     if (!inserted.rowsAffected) {
       // Already clocked in — show clock-out button so they can immediately clock out
@@ -576,6 +583,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?",
       args: [mins / 60, entry.mechanic_id]
     });
+    logEvent({ kind: "clock_out", guildId: interaction.guild?.id, userId: entry.mechanic_id, userName: interaction.user.username, detail: `${Math.round(mins)} min credited` });
     // Clear any in-memory warn/stay state for this shift and remove warning buttons
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);
@@ -713,6 +721,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       }
     } catch { /* ignore */ }
 
+    logEvent({
+      kind: "new_week", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username,
+      detail: `NEW WEEK message sent to ${sent} sales channel(s)${failed ? `, ${failed} skipped` : ""} (/newweek)`,
+    });
     const embed = new EmbedBuilder()
       .setTitle("📅  NEW WEEK Message Sent")
       .setColor(COLORS.approved)
@@ -937,6 +949,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_OP}`,
       args: [id]
     });
+    logEvent({ kind: "order_paid", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username, amount: commission, detail: `paid mechanic ${id} (${r.rows.length} orders)` });
     await saveDatabaseSnapshot();
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
@@ -1095,6 +1108,7 @@ export async function handleButton(interaction: ButtonInteraction) {
       sql: `UPDATE orders SET status = 'paid', completed_at = COALESCE(completed_at, datetime('now')) WHERE mechanic_id = ? AND status IN ('complete','approved') AND ${SINCE_RESET_PC}`,
       args: [id]
     });
+    logEvent({ kind: "order_paid", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username, amount: commission, detail: `paid mechanic ${id} (${r.rows.length} orders)` });
     await saveDatabaseSnapshot();
     const payR = await db.execute({ sql: "SELECT * FROM payouts WHERE id = ?", args: [payoutId] });
     const payRow = payR.rows[0] as unknown as Record<number, unknown>;
@@ -1361,6 +1375,10 @@ export async function handleButton(interaction: ButtonInteraction) {
       refreshPayLogPanel(interaction.guild).catch(() => {});
     }
 
+    logEvent({
+      kind: "new_week", guildId, userId: interaction.user.id, userName: interaction.user.username,
+      detail: `week reset: ${Number(archived.rowsAffected ?? 0)} order(s) archived, message sent to ${sent} channel(s)${failed ? `, ${failed} skipped` : ""}`,
+    });
     const embed = new EmbedBuilder()
       .setTitle("🗓️  NEW WEEK STARTED")
       .setColor(COLORS.approved)

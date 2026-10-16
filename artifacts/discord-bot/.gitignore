@@ -1,0 +1,9 @@
+# Live database + logs: never commit these (crew pay data, order history).
+# On Render the persistent disk keeps them; on Replit the workspace keeps them.
+data/*.db
+data/*.db.*
+data/*.db-wal
+data/*.db-shm
+data/events.jsonl*
+dist
+node_modules

@@ -1,5 +1,5 @@
 services:
-  - type: worker
+  - type: web
     name: tdc-discord-bot
     runtime: node
     rootDir: .
@@ -10,10 +10,11 @@ services:
         sync: false
       - key: TDC_DATA_DIR
         value: /opt/render/project/src/artifacts/discord-bot/data
-      - key: BOT_HTTP_PORT
-        value: "10000"
+      - key: WEB_API_SECRET
+        sync: false
       - key: NODE_ENV
         value: production
+    healthCheckPath: /healthz
     autoDeploy: true
     disk:
       name: tdc-discord-data

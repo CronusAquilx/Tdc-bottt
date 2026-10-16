@@ -5,6 +5,7 @@ import {
   MessageFlags
 } from "discord.js";
 import { db, getProfile, getUserRole, getGuildConfig, saveDatabaseSnapshot } from "../db.js";
+import { logEvent } from "../lib/eventLog.js";
 import { requireRole } from "../lib/roles.js";
 import { COLORS, money } from "../lib/embeds.js";
 
@@ -139,6 +140,14 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     args
   });
   await saveDatabaseSnapshot();
+  logEvent({
+    kind: "pay_adjusted",
+    guildId: interaction.guildId ?? undefined,
+    userId: interaction.user.id,
+    userName: interaction.user.username,
+    amount: commission ?? undefined,
+    detail: `target ${target.id}${commission !== null ? ` commission ${profile.commission_adjustment ?? 0}→${commission}` : ""}${managerCut !== null ? ` managerCut ${profile.manager_cut_adjustment ?? 0}→${managerCut}` : ""}${commissionRate !== null ? ` rate→${commissionRate}` : ""}`,
+  });
 
   const fields: { name: string; value: string; inline: boolean }[] = [
     { name: "Crew Member", value: `<@${target.id}> — ${profile.display_name}`, inline: false }

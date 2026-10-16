@@ -1,4 +1,5 @@
 import http from "http";
+import { handleWebApi } from "./lib/webApi.js";
 import {
   Client,
   GatewayIntentBits,
@@ -10,7 +11,7 @@ import {
   ChatInputCommandInteraction,
   Status
 } from "discord.js";
-import { initDb } from "./db.js";
+import { initDb, saveDatabaseSnapshot } from "./db.js";
 import { data as orderData,       execute as orderExecute       } from "./commands/order.js";
 import { data as crewData,        execute as crewExecute        } from "./commands/crew.js";
 import { data as timeclockData,      execute as timeclockExecute      } from "./commands/timeclock.js";
@@ -48,6 +49,10 @@ import { postLeaderboard }                       from "./commands/leaderboard.js
 import { startAutoClockOutMonitor }              from "./lib/autoClockOut.js";
 import { isUpdateEnabled } from "./lib/featureFlags.js";
 import { db } from "./db.js";
+import { logError } from "./lib/eventLog.js";
+import { initManagerAlerts } from "./lib/managerAlerts.js";
+import { data as auditLogData, execute as auditLogExecute } from "./commands/auditlog.js";
+import { data as refreshAllPanelsData, execute as refreshAllPanelsExecute } from "./commands/refreshallpanels.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -65,13 +70,22 @@ function restartProcess(reason: string) {
   restartTimer = setTimeout(() => process.exit(1), 1000);
 }
 
+// A single failed fire-and-forget call (e.g. a panel refresh hitting a deleted
+// channel) should be logged, not kill the bot mid-payroll. Only restart if
+// rejections are piling up, which points to a genuinely broken state.
+const recentRejections: number[] = [];
 process.on("unhandledRejection", (reason: unknown) => {
   console.error("[TDC] 💥 Unhandled promise rejection:", reason);
-  restartProcess("unhandled promise rejection");
+  try { logError("unhandledRejection", reason); } catch { /* ignore */ }
+  const now = Date.now();
+  recentRejections.push(now);
+  while (recentRejections.length && now - recentRejections[0] > 5 * 60_000) recentRejections.shift();
+  if (recentRejections.length >= 10) restartProcess("10+ unhandled promise rejections in 5 minutes");
 });
 
 process.on("uncaughtException", (err: Error) => {
   console.error("[TDC] 💥 Uncaught exception:", err);
+  try { logError("uncaughtException", err); } catch { /* ignore */ }
   restartProcess("uncaught exception");
 });
 
@@ -86,10 +100,19 @@ const clientId = Buffer.from(tokenParts[0], "base64").toString("utf-8");
 
 // ── Health server ──────────────────────────────────────────────────────────────
 const HTTP_PORT = parseInt(process.env.PORT ?? process.env.BOT_HTTP_PORT ?? "3001", 10);
-const httpServer = http.createServer((req, res) => {
+const httpServer = http.createServer(async (req, res) => {
+  if (await handleWebApi(req, res, client).catch(() => false)) return;
   if (req.url === "/healthz" || req.url === "/") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", service: "Tokyo Drift Customs Bot", ts: new Date().toISOString() }));
+    // Always 200 so uptime pingers keep working; the body reports real gateway state.
+    res.end(JSON.stringify({
+      status: "ok",
+      service: "Tokyo Drift Customs Bot",
+      discordReady: client.isReady(),
+      pingMs: client.isReady() ? client.ws.ping : null,
+      uptimeSec: Math.round(process.uptime()),
+      ts: new Date().toISOString(),
+    }));
   } else {
     res.writeHead(404);
     res.end();
@@ -146,6 +169,8 @@ let commandDefs: CommandDefinition[] = [
   },
   { data: setBankTotalData, execute: setBankTotalExecute },
   { data: restartBankData, execute: restartBankExecute },
+  { data: auditLogData, execute: auditLogExecute },
+  { data: refreshAllPanelsData, execute: refreshAllPanelsExecute },
 ];
 
 const commands = new Collection<string, { execute: (i: ChatInputCommandInteraction) => Promise<void> }>();
@@ -156,6 +181,7 @@ for (const cmd of commandDefs) {
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`[TDC] 🏁 Logged in as ${c.user.tag}`);
+  initManagerAlerts(c);
   const guildId = process.env.DISCORD_GUILD_ID?.trim();
   const updateEnabled = await isUpdateEnabled();
   const stagedNames = new Set(["setbanktotal", "restartbank"]);
@@ -344,6 +370,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     console.error("[TDC] Interaction error:", err);
+    logError("interaction", err, {
+      guildId: interaction.guildId,
+      userId: interaction.user?.id,
+      command: interaction.isChatInputCommand()
+        ? `/${interaction.commandName}`
+        : (interaction as any).customId ?? interaction.type.toString(),
+    });
     try {
       const msg = { content: "⚠️ Something went wrong. Please try again.", flags: MessageFlags.Ephemeral };
       if (interaction.isRepliable()) {
@@ -377,11 +410,12 @@ function scheduleWeeklyLeaderboard(client: Client) {
             console.log(`[TDC] 🏆 Auto-posted weekly leaderboard for guild ${guildId}`);
           } catch (err: any) {
             if (err?.code === 10004) {
-              // Bot is no longer in this guild — remove stale config
-              console.warn(`[TDC] 🏆 Bot no longer in guild ${guildId} — removing stale config row.`);
-              await db.execute({ sql: "DELETE FROM guild_config WHERE guild_id = ?", args: [guildId] }).catch(() => {});
+              // Bot is not in this guild right now. Skip it but KEEP the config, so
+              // re-inviting the bot later does not wipe the channel/role setup.
+              console.warn(`[TDC] 🏆 Bot is not in guild ${guildId} — skipping leaderboard (config kept).`);
             } else {
               console.error(`[TDC] Leaderboard auto-post failed for guild ${guildId}:`, err);
+              logError("leaderboard", err, { guildId });
             }
           }
         }
@@ -400,6 +434,25 @@ function scheduleWeeklyLeaderboard(client: Client) {
 // Use /payall or the 📅 Pay All button in the admin panel to run payroll.
 // Use /newweek or the NEW WEEK button to send new-week messages.
 // No auto-schedules exist for these — everything is triggered by you.
+
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+// Render/Replit send SIGTERM on every deploy. Flush the database to disk and
+// take a final snapshot BEFORE exiting so a deploy can never cost recent data.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[TDC] 🛑 ${signal} received — saving database and shutting down...`);
+  const force = setTimeout(() => process.exit(0), 8000);
+  force.unref();
+  try { await saveDatabaseSnapshot(); } catch (err) { console.error("[TDC] Final snapshot failed:", err); }
+  try { await client.destroy(); } catch { /* ignore */ }
+  try { httpServer.close(); } catch { /* ignore */ }
+  console.log("[TDC] 👋 Shutdown complete.");
+  process.exit(0);
+}
+process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.on("SIGINT",  () => { void shutdown("SIGINT"); });
 
 initDb().then(() => {
   if (BOT_ACTIVE) {

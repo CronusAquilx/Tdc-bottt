@@ -188,11 +188,12 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
   // ── ALL OTHER HANDLERS (can defer/reply freely) ────────────────────────────
   if (!(await requireRole(interaction, "trainer"))) return true;
 
-  // ── Refresh admin panel ────────────────────────────────────────────────────
-  if (section === "setup" && action === "refresh") {
-    await interaction.deferUpdate();
-    // Just ack — main panel is now tab-based; no embed to update on the base msg
-    await interaction.followUp({ content: "✅ Panel refreshed.", flags: MessageFlags.Ephemeral });
+  // ── Refresh panels: resend a fresh sales panel to every sales channel ──────
+  if (section === "setup" && (action === "refresh" || action === "refreshpanels")) {
+    if (!(await requireRole(interaction, "manager"))) return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const { runRefreshAllPanels } = await import("../commands/refreshallpanels.js");
+    await runRefreshAllPanels(interaction);
     return true;
   }
 
@@ -452,6 +453,7 @@ export async function handleAdminButton(interaction: ButtonInteraction): Promise
       new ButtonBuilder().setCustomId("admin:setup:paylogs").setLabel("💸 Pay Logs").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:setup:lifetimeearnings").setLabel("🏆 Lifetime Earnings").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("admin:setup:bankaccount").setLabel("🏦 Bank Account").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("admin:setup:refreshpanels").setLabel("🔄 Refresh Panels").setStyle(ButtonStyle.Success),
     );
     await interaction.editReply({ embeds: [embed], components: [row1, row2, row3] });
     return true;

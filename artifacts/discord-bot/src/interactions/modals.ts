@@ -11,6 +11,7 @@ import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent } from "../lib/eventLog.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
+import { buildCompletedOrderRow } from "./orderpanel.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
@@ -208,10 +209,14 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
       getCommissionData(mechanicId, guildId, mechanicRoleLevel)
     ]);
 
-    await db.execute({
-      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
+    const claimed = await db.execute({
+      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ? AND status = 'draft'",
       args: [orderId]
     });
+    if (!claimed.rowsAffected) {
+      await interaction.editReply({ content: "ℹ️ This order was already completed." });
+      return;
+    }
 
     const ur       = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
@@ -223,10 +228,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", finalWeekCommission, prevCommData.rate, crewCutInfo);
 
-    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("order:newpanel").setLabel("📋  New Order").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`orderpay:start:${mechanicId}`).setLabel("💸  Pay").setStyle(ButtonStyle.Primary)
-    );
+    const newOrderRow = await buildCompletedOrderRow(mechanicId);
 
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {

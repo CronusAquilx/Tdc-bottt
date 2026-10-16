@@ -7,6 +7,7 @@ import { buildClockInEmbed, buildClockOutEmbed } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { warnedMechanics, stayedIn } from "../lib/warnState.js";
 import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
+import { logEvent } from "../lib/eventLog.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clock")
@@ -34,6 +35,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       args: [id, interaction.user.id, interaction.guild?.id ?? ""]
     });
     await db.execute({ sql: "UPDATE profiles SET status = 'online' WHERE discord_id = ?", args: [interaction.user.id] });
+    logEvent({ kind: "clock_in", guildId: interaction.guild?.id, userId: interaction.user.id, userName: interaction.user.username, detail: "clocked in via /clock" });
     const r = await db.execute({ sql: "SELECT * FROM timeclock WHERE id = ?", args: [id] });
     const entry = rowToTimeclock(r.rows[0]);
     const profile = await getProfile(interaction.user.id);
@@ -76,6 +78,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const mins = await calculateCreditedShiftMinutes(entry.id, entry.mechanic_id, entry.clock_in_time);
     await db.execute({ sql: "UPDATE timeclock SET clock_out_time = datetime('now'), duration_minutes = ?, notes = ?, status = 'approved', warned_at = NULL, stayed_in_at = NULL WHERE id = ?", args: [mins, notes ?? null, entry.id] });
     await db.execute({ sql: "UPDATE profiles SET hours_worked_this_week = hours_worked_this_week + ?, status = 'offline' WHERE discord_id = ?", args: [mins / 60, entry.mechanic_id] });
+    logEvent({ kind: "clock_out", guildId: interaction.guild?.id, userId: entry.mechanic_id, userName: interaction.user.username, detail: `${Math.round(mins)} min credited (/clock)` });
     // Clear any in-memory warn/stay state for this shift
     warnedMechanics.delete(entry.id);
     stayedIn.delete(entry.mechanic_id);

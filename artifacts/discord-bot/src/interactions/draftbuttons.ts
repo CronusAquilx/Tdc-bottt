@@ -9,6 +9,7 @@ import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent } from "../lib/eventLog.js";
+import { buildCompletedOrderRow } from "./orderpanel.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole } from "../lib/payrollPolicy.js";
 
@@ -588,10 +589,16 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       getCommissionData(mechanicId, guildId, mechanicRoleLevel)
     ]);
 
-    await db.execute({
-      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ?",
+    // Only a DRAFT can be completed. This makes a double-tap (or two people
+    // pressing Complete at once) harmless instead of posting the order twice.
+    const claimed = await db.execute({
+      sql: "UPDATE orders SET status = 'complete', completed_at = datetime('now') WHERE id = ? AND status = 'draft'",
       args: [orderId]
     });
+    if (!claimed.rowsAffected) {
+      await interaction.followUp({ content: "ℹ️ This order was already completed.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
 
     const ur = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     const completed = rowToOrder(ur.rows[0]);
@@ -613,16 +620,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       crewCutInfo
     );
 
-    const newOrderRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("order:newpanel")
-        .setLabel("📋  New Order")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`orderpay:start:${mechanicId}`)
-        .setLabel("💸  Pay")
-        .setStyle(ButtonStyle.Primary)
-    );
+    const newOrderRow = await buildCompletedOrderRow(mechanicId);
 
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {

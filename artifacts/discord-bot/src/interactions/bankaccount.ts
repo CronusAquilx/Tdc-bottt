@@ -456,7 +456,7 @@ export async function sendBankReminder(guild: import("discord.js").Guild): Promi
 
   const mentions = await managementMentions(guild.id, config);
   const message = await (channel as TextChannel).send({
-    content: `${mentions.content}\n🌙 Daily bank-account check — please log the current balance.`,
+    content: `${mentions.content}\n🌙 ${BANK_REMINDER_MARKER} — please log the current balance.`,
     embeds: [await buildBankPanelEmbed(guild.id)],
     components: (await isUpdateEnabled()) ? buildBankPaidComponents() : [bankButtonRow()],
     allowedMentions: { roles: mentions.roles, users: mentions.roles.length ? [] : undefined },
@@ -474,8 +474,63 @@ export async function scheduleNextBankReminder(guild: import("discord.js").Guild
   return true;
 }
 
+const BANK_REMINDER_MARKER = "Daily bank-account check";
+let bankTickRunning = false;
+let bankSchedulerStarted = false;
+
+/**
+ * Atomically claim today's reminder for a guild. Returns true for exactly one
+ * caller per day — the claim happens BEFORE anything is sent, so overlapping
+ * ticks, slow Discord calls or a restart mid-window can never produce a second
+ * ping. Returns the previous value so a failed send can release the claim.
+ */
+async function claimBankReminder(guildId: string, date: string): Promise<{ claimed: boolean; previous: string | null }> {
+  const key = `bank_daily_prompt:${guildId}`;
+  const prev = await db.execute({ sql: "SELECT value FROM app_settings WHERE key = ?", args: [key] });
+  const previous = prev.rows[0] ? String(prev.rows[0][0] ?? "") : null;
+  if (previous === date) return { claimed: false, previous };
+  const result = await db.execute({
+    sql: `INSERT INTO app_settings (key, value) VALUES (?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+          WHERE app_settings.value != excluded.value`,
+    args: [key, date],
+  });
+  return { claimed: Number(result.rowsAffected ?? 0) > 0, previous };
+}
+
+async function releaseBankClaim(guildId: string, previous: string | null): Promise<void> {
+  const key = `bank_daily_prompt:${guildId}`;
+  if (previous !== null) await setSetting(key, previous);
+  else await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [key] });
+}
+
+/** True if the bot already posted tonight's reminder (covers a lost database or a second running copy). */
+async function reminderAlreadyInChannel(guild: import("discord.js").Guild): Promise<boolean> {
+  try {
+    const config = await getGuildConfig(guild.id);
+    const channel = config?.bank_account_channel_id
+      ? await guild.channels.fetch(config.bank_account_channel_id).catch(() => null)
+      : null;
+    if (!channel?.isTextBased()) return false;
+    const recent = await (channel as TextChannel).messages.fetch({ limit: 15 });
+    const cutoff = Date.now() - 20 * 60 * 60 * 1000;
+    return [...recent.values()].some(m =>
+      m.author.id === guild.client.user?.id &&
+      m.createdTimestamp > cutoff &&
+      m.content.includes(BANK_REMINDER_MARKER)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function scheduleDailyBankPrompts(client: Client): void {
+  // Guard against this ever being started twice (each copy would ping).
+  if (bankSchedulerStarted) return;
+  bankSchedulerStarted = true;
+
   const tick = async () => {
+    if (bankTickRunning) return;           // previous tick still working — skip
     const now = new Date();
     const parts = new Intl.DateTimeFormat("en-US", {
       timeZone: BANK_TIME_ZONE,
@@ -487,22 +542,33 @@ export function scheduleDailyBankPrompts(client: Client): void {
     const minute = Number(parts.find(part => part.type === "minute")?.value ?? -1);
     if (hour !== 0 || minute >= 5) return;
 
-    const date = localDate(now);
-    const rows = await db.execute(
-      "SELECT guild_id FROM guild_config WHERE bank_account_channel_id IS NOT NULL"
-    );
-    for (const row of rows.rows) {
-      const guildId = String(row[0] ?? "");
-      if (!guildId) continue;
-      const settingKey = `bank_daily_prompt:${guildId}`;
-      const sentFor = await db.execute({ sql: "SELECT value FROM app_settings WHERE key = ?", args: [settingKey] });
-      if (String(sentFor.rows[0]?.[0] ?? "") === date) continue;
-      try {
-        const guild = await client.guilds.fetch(guildId);
-        if (await sendBankReminder(guild)) await setSetting(settingKey, date);
-      } catch (error) {
-        console.error(`[TDC] Bank-account daily reminder failed for guild ${guildId}:`, error);
+    bankTickRunning = true;
+    try {
+      const date = localDate(now);
+      const rows = await db.execute(
+        "SELECT guild_id FROM guild_config WHERE bank_account_channel_id IS NOT NULL"
+      );
+      for (const row of rows.rows) {
+        const guildId = String(row[0] ?? "");
+        if (!guildId) continue;
+
+        // Claim first, send second — only one pass can ever win per day.
+        const { claimed, previous } = await claimBankReminder(guildId, date);
+        if (!claimed) continue;
+
+        try {
+          const guild = await client.guilds.fetch(guildId);
+          if (await reminderAlreadyInChannel(guild)) continue;   // already pinged; keep the claim
+          const sent = await sendBankReminder(guild);
+          if (!sent) await releaseBankClaim(guildId, previous);
+        } catch (error) {
+          // Nothing was sent — release the claim so the next minute can retry.
+          await releaseBankClaim(guildId, previous).catch(() => {});
+          console.error(`[TDC] Bank-account daily reminder failed for guild ${guildId}:`, error);
+        }
       }
+    } finally {
+      bankTickRunning = false;
     }
   };
   setInterval(() => tick().catch(error => console.error("[TDC] Bank scheduler error:", error)), 60 * 1000);

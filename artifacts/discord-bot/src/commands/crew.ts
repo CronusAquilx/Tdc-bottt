@@ -4,6 +4,7 @@ import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
+import { logEvent } from "../lib/eventLog.js";
 
 export const data = new SlashCommandBuilder()
   .setName("crew")
@@ -483,6 +484,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       const caller = await getProfile(interaction.user.id);
       const updatedProfile = await getProfile(target.id);
       const rateStr = `${Math.round((updatedProfile?.commission_rate ?? 0.3) * 100)}%`;
+      logEvent({
+        kind: "crew_changed", guildId: interaction.guild?.id, userId: target.id, userName: displayName,
+        detail: `${isNew ? "added" : "updated"} as ${role} by ${caller?.display_name ?? interaction.user.username}`,
+      });
       const embed = new EmbedBuilder()
         .setTitle("✅ Crew Member Added")
         .setColor(COLORS.approved)
@@ -510,6 +515,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
     await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
     const caller = await getProfile(interaction.user.id);
+    logEvent({
+      kind: "crew_changed", guildId: interaction.guild?.id, userId: target.id, userName: profile.display_name,
+      detail: `removed from crew by ${caller?.display_name ?? interaction.user.username}`,
+    });
     const embed = new EmbedBuilder()
       .setTitle("🗑️ Crew Member Removed")
       .setColor(COLORS.rejected)
@@ -555,6 +564,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     const profile = await getProfile(target.id);
     if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
     await db.execute({ sql: "UPDATE profiles SET status = ? WHERE discord_id = ?", args: [status, target.id] });
+    logEvent({
+      kind: "crew_changed", guildId: interaction.guild?.id, userId: target.id, userName: profile.display_name,
+      detail: `status set to ${status} by ${interaction.user.username}`,
+    });
     await interaction.editReply({ content: `✅ **${profile.display_name}** status → ${statusEmoji(status)} **${status.replace("_", " ").toUpperCase()}**` });
     return;
   }

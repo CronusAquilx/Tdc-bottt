@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, REST, Routes, SlashCommandBuilder, TextChannel } from "discord.js";
+import { ChatInputCommandInteraction, REST, Routes, SlashCommandBuilder, TextChannel, MessageFlags } from "discord.js";
 import { db, getProfile, getGuildConfig } from "../db.js";
 import { requireRole } from "../lib/roles.js";
 import { enableUpdate } from "../lib/featureFlags.js";
@@ -14,15 +14,15 @@ export async function execute(
 ) {
   if (!(await requireRole(interaction, "owner"))) return;
   if (!interaction.guild) {
-    await interaction.reply({ content: "Run this command in the shop server.", ephemeral: true });
+    await interaction.reply({ content: "Run this command in the shop server.", flags: MessageFlags.Ephemeral });
     return;
   }
   const token = process.env.DISCORD_TOKEN;
   if (!token) {
-    await interaction.reply({ content: "The bot cannot publish slash commands because its Discord connection is not configured.", ephemeral: true });
+    await interaction.reply({ content: "The bot cannot publish slash commands because its Discord connection is not configured.", flags: MessageFlags.Ephemeral });
     return;
   }
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const rest = new REST().setToken(token);
   let registered: unknown[];
   try {

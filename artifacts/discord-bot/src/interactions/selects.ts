@@ -11,6 +11,8 @@ import { postOrderPanel } from "./orderpanel.js";
 import { mainDraftButtonRows, categoryViewButtonRow, getCommissionData } from "./draftbuttons.js";
 import { ensureMechanicSalesChannel } from "../lib/saleschannel.js";
 import { handleBankSelect } from "./bankaccount.js";
+import { logEvent } from "../lib/eventLog.js";
+import { withRetry, withOrderLock, safeEditReply, safeDeferUpdate } from "../lib/resilience.js";
 
 const FOOTER = "東京ドリフトカスタム  ·  Built Different. Driven Hard.";
 
@@ -157,6 +159,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
        // Persist crew membership before asking Discord to create any channels.
        // If the bot restarts during channel setup, the people are still saved.
        await saveDatabaseSnapshot();
+      logEvent({
+        kind: "crew_changed", guildId: guild.id, userId: interaction.user.id, userName: interaction.user.username,
+        detail: `bulk add via admin panel: ${added.length} new, ${alreadyMechanics.length} existing, ${failed.length} failed`,
+      });
 
       const lines = [
         `✅ **${added.length}** new mechanic${added.length === 1 ? "" : "s"} saved`,
@@ -208,6 +214,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [targetUserId] });
         await db.execute({ sql: "INSERT INTO user_roles (discord_id, role) VALUES (?, ?)", args: [targetUserId, roleTarget] });
        await saveDatabaseSnapshot();
+        logEvent({
+          kind: "crew_changed", guildId: interaction.guildId ?? undefined, userId: targetUserId, userName: displayName,
+          detail: `set as ${roleTarget} by ${interaction.user.username}`,
+        });
         const roleEmoji = roleTarget === "trainer" ? "📚" : "👔";
         const roleDesc  = roleTarget === "manager"
           ? `<@${targetUserId}> is now recognised as a **Manager** in the bot.\n\nThey can use manager commands and will earn a cut of the mechanic commission pool each pay period.`
@@ -252,6 +262,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       }
       await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingKey] });
       await checkpointDatabase();
+      logEvent({
+        kind: "crew_changed", guildId: interaction.guildId ?? undefined, userId: managerId, userName: managerProfile.display_name,
+        detail: `${assigned} mechanic(s) assigned to manager ${managerProfile.display_name} by ${interaction.user.username}`,
+      });
       const embed = new EmbedBuilder()
         .setTitle("✅  Bulk Manager Assignment Complete")
         .setColor(COLORS.approved)
@@ -788,7 +802,8 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
 
   // ── Remove item from order ─────────────────────────────────────────────────
   if (ns === "order" && action === "removeitem") {
-    await interaction.deferUpdate();
+    await safeDeferUpdate(interaction);
+    await withOrderLock(extra, async () => {
     const orderId = extra;
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) return;
@@ -827,7 +842,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .setPlaceholder("Add more services...")
       .addOptions(categories.map(c => new StringSelectMenuOptionBuilder().setLabel(c).setValue(c)));
 
-    await interaction.editReply({
+    await safeEditReply(interaction, {
       content: `✅ Removed ${indicesToRemove.size} item(s) from the order.`,
       embeds: [buildDraftEmbed(updated, commData.weekCommission, commData.rate, crewCutInfo)],
       components: [
@@ -835,12 +850,14 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
         ...mainDraftButtonRows(orderId)
       ]
     });
+    });
     return;
   }
 
   // ── Select category → show items ───────────────────────────────────────────
   if (ns === "order" && action === "selectcategory") {
-    await interaction.deferUpdate();
+    await safeDeferUpdate(interaction);
+    await withOrderLock(extra, async () => {
     const category = interaction.values[0];
     const catalogStr = await getSetting("parts_catalog");
     const catalog = JSON.parse(catalogStr ?? "{}");
@@ -876,19 +893,21 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const embed = buildDraftEmbed(order, commData2.weekCommission, commData2.rate, crewCutInfo2);
     embed.setTitle(`📝  DRAFT  ·  ${order.order_number}  ·  ${category}`);
 
-    await interaction.editReply({
+    await safeEditReply(interaction, {
       embeds: [embed],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(itemSelect),
         categoryViewButtonRow(extra)
       ]
     });
+    });
     return;
   }
 
   // ── Select specific items ──────────────────────────────────────────────────
   if (ns === "order" && action === "selectitem") {
-    await interaction.deferUpdate();
+    await safeDeferUpdate(interaction);
+    await withOrderLock(extra.split(":")[0], async () => {
     const orderId = extra.split(":")[0];
     const category = extra.split(":").slice(1).join(":");
     const catalogStr = await getSetting("parts_catalog");
@@ -942,13 +961,14 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
       .addOptions(categories.map(cat => new StringSelectMenuOptionBuilder().setLabel(cat).setValue(cat)));
 
     const addedNames = (newItems as any[]).map(i => i.label).join(", ");
-    await interaction.editReply({
+    await safeEditReply(interaction, {
       content: `✅ Added: **${addedNames}**`,
       embeds: [buildDraftEmbed(updated, commData3.weekCommission, commData3.rate, crewCutInfo3)],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(catSelect),
         ...mainDraftButtonRows(orderId)
       ]
+    });
     });
     return;
   }
