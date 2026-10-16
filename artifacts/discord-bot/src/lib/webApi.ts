@@ -7,6 +7,7 @@ import { getCommissionData } from "../interactions/draftbuttons.js";
 import { resendOrderPanel } from "../interactions/orderpanel.js";
 import { logEvent } from "./eventLog.js";
 import { COLORS, money } from "./embeds.js";
+import { websiteIdentity, websiteManagement, websiteComplete, websitePayroll, websiteRemove, websiteAnnounce, websiteBank } from "./websiteActions.js";
 
 const SINCE_RESET_SQL =
   "datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))";
@@ -157,7 +158,7 @@ async function setPay(client: Client, body: any) {
   args.push(id);
   await db.execute({ sql: `UPDATE profiles SET ${updates.join(", ")} WHERE discord_id = ?`, args });
   await saveDatabaseSnapshot();
-  logEvent({ kind: "pay_adjusted", userName: "website", amount: commission ?? undefined, detail: `web: target ${id} ${JSON.stringify({ commission, managerCut, commissionRate, managerRate })}` });
+  logEvent({ kind: "pay_adjusted", userId: String(body.actor_id), userName: "website", amount: commission ?? undefined, detail: `web: target ${id} ${JSON.stringify({ commission, managerCut, commissionRate, managerRate })}` });
 
   // Mirror the change into Discord: log channel embed + refresh their sales panel.
   const lines: string[] = [];
@@ -196,12 +197,21 @@ export async function handleWebApi(req: IncomingMessage, res: ServerResponse, cl
   const secret = process.env.WEB_API_SECRET;
   if (!secret || req.headers["x-api-key"] !== secret) { send(res, 401, { error: "Unauthorized" }); return true; }
   try {
+    if (req.method === "GET" && url.pathname === "/api/identity") return send(res, 200, await websiteIdentity(client, String(url.searchParams.get("discord_id") ?? ""))), true;
+    if (req.method === "POST" && url.pathname === "/api/orders/complete") return send(res, 200, await websiteComplete(client, await readJson(req))), true;
+    if (req.method === "POST" && url.pathname === "/api/payroll") return send(res, 200, await websitePayroll(client, await readJson(req))), true;
+    if (req.method === "POST" && url.pathname === "/api/crew/remove") return send(res, 200, await websiteRemove(client, await readJson(req))), true;
+    if (req.method === "POST" && url.pathname === "/api/announce") return send(res, 200, await websiteAnnounce(client, await readJson(req))), true;
+    if (req.method === "GET" && url.pathname === "/api/bank-logs") return send(res, 200, await websiteBank(client, String(req.headers["x-user-discord-id"] ?? ""), 200)), true;
     const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 100)));
     if (req.method === "GET" && url.pathname === "/api/crew") return send(res, 200, await crew(client)), true;
     if (req.method === "GET" && url.pathname === "/api/orders") return send(res, 200, await orders(limit, url.searchParams.get("mechanic_id"))), true;
     if (req.method === "GET" && url.pathname === "/api/payouts") return send(res, 200, await payouts(limit)), true;
     if (req.method === "GET" && url.pathname === "/api/sales-channel") return send(res, 200, await salesChannel(client, String(url.searchParams.get("mechanic_id") ?? ""))), true;
-    if (req.method === "POST" && url.pathname === "/api/pay") return send(res, 200, await setPay(client, await readJson(req))), true;
+    if (req.method === "POST" && url.pathname === "/api/pay") {
+      const body = await readJson(req); await websiteManagement(client, body);
+      return send(res, 200, await setPay(client, body)), true;
+    }
     send(res, 404, { error: "Not found" });
   } catch (err: any) {
     send(res, 400, { error: String(err?.message ?? err) });
