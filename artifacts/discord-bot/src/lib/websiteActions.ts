@@ -1,5 +1,5 @@
 import { ChannelType, type Client, type TextChannel } from "discord.js";
-import { db, getProfile, getGuildConfig, splitRoleIds, rowToOrder, getSetting, saveDatabaseSnapshot } from "../db.js";
+import { db, getUserRole, getProfile, getGuildConfig, splitRoleIds, rowToOrder, getSetting, saveDatabaseSnapshot } from "../db.js";
 import { processPayall, refreshPayLogPanel } from "../commands/payall.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
 import { buildCompletedOrderRow, resendOrderPanel } from "../interactions/orderpanel.js";
@@ -20,18 +20,8 @@ export async function websiteIdentity(client: Client, id: string) {
   const profile = await getProfile(id);
   const active = await db.execute({ sql: "SELECT terminated_at FROM profiles WHERE discord_id=?", args: [id] });
   if (!guild || !profile || !active.rows[0] || active.rows[0][0]) throw new Error("Active crew member not found");
-  const config = await getGuildConfig(guild.id);
-  const member = await guild.members.fetch({ user: id, force: true }).catch((error) => { console.error("[website] member fetch failed", guild.id, id, error?.message ?? error); return null; });
-  if (!config) throw new Error(`Bot setup is missing for Discord server ${guild.name}`);
-  if (!member) throw new Error(`Discord membership could not be verified in ${guild.name}`);
-  const mappings = [
-    { role: "owner", ids: [...splitRoleIds(config.owner_role_id), ...splitRoleIds(config.head_manager_role_id)] },
-    { role: "manager", ids: splitRoleIds(config.manager_role_id) },
-    { role: "trainer", ids: splitRoleIds(config.trainer_role_id) },
-    { role: "mechanic", ids: [...splitRoleIds(config.mechanic_role_id), ...splitRoleIds((config as any).needs_training_role_id)] },
-  ];
-  const role = mappings.find(mapping => mapping.ids.some(roleId => member.roles.cache.has(roleId)))?.role;
-  if (!role) throw new Error("No active Discord crew role");
+  // Website logins use the bot's saved crew role, not a live Discord membership check.
+  const role = (await getUserRole(id)) ?? "mechanic";
   return { ...profile, role };
 }
 
