@@ -8,7 +8,9 @@ const db = createClient({
   url: `file:${path.join(__dirname, "../../discord-bot/data/tdc.db")}`
 });
 
-function parseRaffle(row: unknown[]) {
+type RaffleRow = { length: number; [index: number]: unknown };
+
+function parseRaffle(row: RaffleRow) {
   return {
     id:           String(row[0] ?? ""),
     guild_id:     String(row[1] ?? ""),
@@ -30,7 +32,7 @@ router.get("/raffles", async (_req, res) => {
     const r = await db.execute(
       "SELECT * FROM raffles ORDER BY rowid DESC LIMIT 20"
     );
-    res.json({ raffles: r.rows.map(row => parseRaffle(row as unknown[])) });
+    res.json({ raffles: r.rows.map(row => parseRaffle(row)) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -43,7 +45,7 @@ router.get("/raffles/:id", async (req, res) => {
       args: [req.params.id]
     });
     if (!r.rows[0]) { res.status(404).json({ error: "Not found" }); return; }
-    res.json({ raffle: parseRaffle(r.rows[0] as unknown[]) });
+    res.json({ raffle: parseRaffle(r.rows[0]) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -55,7 +57,7 @@ router.get("/raffles/:id/entries", async (req, res) => {
       sql: "SELECT user_id FROM raffle_entries WHERE raffle_id = ?",
       args: [req.params.id]
     });
-    const entries = r.rows.map(row => String((row as unknown[])[0]));
+    const entries = r.rows.map(row => String(row[0]));
     res.json({ entries, count: entries.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
