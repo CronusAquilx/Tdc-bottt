@@ -89,6 +89,19 @@ export async function detectUserRoleLevel(interaction: AnyInteraction): Promise<
   return dbRole ?? 'mechanic';
 }
 
+async function respondEphemeral(interaction: AnyInteraction, content: string): Promise<void> {
+  try {
+    const replyable = interaction as any;
+    if (replyable.deferred) {
+      await replyable.editReply({ content });
+    } else if (replyable.replied) {
+      await replyable.followUp({ content, flags: MessageFlags.Ephemeral });
+    } else {
+      await replyable.reply({ content, flags: MessageFlags.Ephemeral });
+    }
+  } catch { /* interaction may have expired */ }
+}
+
 export async function requireRole(interaction: AnyInteraction, minRole: string): Promise<boolean> {
   // Always allow Discord Administrators regardless of TDC role config
   if (interaction.guild && interaction.inGuild()) {
@@ -105,11 +118,7 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
 
   // If no guild or DM, deny
   if (!interaction.guild) {
-    try {
-      if (!interaction.replied && !(interaction as any).deferred) {
-        await (interaction as any).reply({ content: "❌ This can only be used in a server.", flags: MessageFlags.Ephemeral });
-      }
-    } catch { /* ignore */ }
+    await respondEphemeral(interaction, "❌ This can only be used in a server.");
     return false;
   }
 
@@ -131,12 +140,9 @@ export async function requireRole(interaction: AnyInteraction, minRole: string):
   const dbAllowed = await dbHasRole(interaction.user.id, minRole);
   if (dbAllowed) return true;
 
-  try {
-    if (!interaction.replied && !(interaction as any).deferred) {
-      await (interaction as any).reply({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, flags: MessageFlags.Ephemeral });
-    } else if ((interaction as any).deferred) {
-      await (interaction as any).followUp({ content: `❌ You don't have permission to do that. Required: **${minRole}** or above.`, flags: MessageFlags.Ephemeral });
-    }
-  } catch { /* ignore */ }
+  await respondEphemeral(
+    interaction,
+    `❌ You don't have permission to do that. Required: **${minRole}** or above.`
+  );
   return false;
 }

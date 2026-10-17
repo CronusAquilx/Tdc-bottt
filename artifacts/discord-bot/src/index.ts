@@ -399,12 +399,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
         : (interaction as any).customId ?? interaction.type.toString(),
     });
     try {
-      const msg = { content: "⚠️ Something went wrong. Please try again.", flags: MessageFlags.Ephemeral };
       if (interaction.isRepliable()) {
-        if ((interaction as any).replied || (interaction as any).deferred) {
-          await (interaction as any).followUp(msg);
+        const replyable = interaction as any;
+        if (replyable.deferred) {
+          // Resolve the original deferred response; a follow-up leaves Discord's
+          // "thinking..." state active on that original response.
+          await replyable.editReply({ content: "⚠️ Something went wrong. Please try again." });
+        } else if (replyable.replied) {
+          await replyable.followUp({
+            content: "⚠️ Something went wrong. Please try again.",
+            flags: MessageFlags.Ephemeral,
+          });
         } else {
-          await (interaction as any).reply(msg);
+          await replyable.reply({
+            content: "⚠️ Something went wrong. Please try again.",
+            flags: MessageFlags.Ephemeral,
+          });
         }
       }
     } catch { /* ignore */ }
