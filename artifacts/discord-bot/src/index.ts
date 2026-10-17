@@ -99,7 +99,7 @@ const tokenParts = token.split(".");
 const clientId = Buffer.from(tokenParts[0], "base64").toString("utf-8");
 
 // ── Health server ──────────────────────────────────────────────────────────────
-const HTTP_PORT = parseInt(process.env.PORT ?? process.env.BOT_HTTP_PORT ?? "3001", 10);
+const HTTP_PORT = parseInt(process.env.PORT ?? process.env.BOT_HTTP_PORT ?? "5000", 10);
 const httpServer = http.createServer(async (req, res) => {
   if (await handleWebApi(req, res, client).catch(() => false)) return;
   if (req.url === "/healthz" || req.url === "/") {
@@ -125,7 +125,7 @@ httpServer.on("error", (err: any) => {
     console.error("[TDC] HTTP server error:", err);
   }
 });
-httpServer.listen(HTTP_PORT, () => {
+httpServer.listen(HTTP_PORT, "0.0.0.0", () => {
   console.log(`[TDC] 🌐 Health server on port ${HTTP_PORT}`);
 });
 
