@@ -6,16 +6,39 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ChannelType, type Client, type TextChannel } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  type Client,
+  type Guild,
+  type TextChannel,
+} from "discord.js";
 import {
   db,
   getProfile,
+  getGuildConfig,
   getUserRole,
   saveDatabaseSnapshot,
+  splitRoleIds,
 } from "../db.js";
+import { buildClockOutEmbed, buildLoaEmbed } from "./embeds.js";
+import { logEvent } from "./eventLog.js";
+import { calculateCreditedShiftMinutes } from "./timeclock.js";
+import { warnedMechanics, stayedIn } from "./warnState.js";
+import {
+  buildBankLogEmbed,
+  buildBankPaidComponents,
+  recordBankBalance,
+  resetBankBaseline,
+} from "../interactions/bankaccount.js";
+import { isUpdateEnabled } from "./featureFlags.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
 import {
+  crewGuild,
   websiteComplete,
+  websitePayroll,
   websiteSetPay,
 } from "./websiteActions.js";
 
@@ -406,7 +429,7 @@ async function listCrew(client: Client): Promise<unknown[]> {
   const result = await db.execute(
     `SELECT p.discord_id, p.display_name, p.sales_channel_id, p.commission_rate,
             p.hours_worked_this_week, p.status, p.commission_adjustment, p.manager_cut_adjustment,
-            p.manager_override_rate
+            p.manager_override_rate, p.in_city_id
      FROM profiles p WHERE p.terminated_at IS NULL ORDER BY p.display_name`,
   );
   const guildId = client.guilds.cache.first()?.id ?? "";
@@ -428,8 +451,11 @@ async function listCrew(client: Client): Promise<unknown[]> {
     const channelId = row[2] ? String(row[2]) : null;
     const channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
     crew.push({
+      discord_id: discordId,
       display_name: displayName,
       role,
+      status: String(row[5] ?? "offline"),
+      in_city_id: row[9] ? String(row[9]) : null,
       sales_channel: channel?.type === ChannelType.GuildText ? channel.name : null,
       week_labour: Number(labor.rows[0]?.[0] ?? 0),
       week_orders: Number(labor.rows[0]?.[1] ?? 0),
@@ -572,6 +598,435 @@ async function listAccounts(): Promise<PortalAccount[]> {
     "SELECT id,username,username_key,role,password_hash,password_salt,active FROM portal_accounts ORDER BY username_key",
   );
   return (result.rows as unknown as AccountRow[]).map(toAccount);
+}
+
+function validDate(value: unknown): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new PortalError(400, "Dates must use YYYY-MM-DD");
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new PortalError(400, "Enter a valid calendar date");
+  }
+  return value;
+}
+
+async function listTimeclock(account: PortalAccount, limit: number): Promise<unknown[]> {
+  const maySeeAll = canManage(account.role) || account.role === "trainer";
+  const profile = maySeeAll ? null : await findCrewForAccount(account.username);
+  if (!maySeeAll && !profile) throw new PortalError(403, "No crew record matches this account");
+  const result = await db.execute({
+    sql: `SELECT t.id,t.mechanic_id,COALESCE(p.display_name,t.mechanic_id),t.clock_in_time,
+                 t.clock_out_time,t.duration_minutes,t.status,t.notes,t.approved_by,t.created_at
+          FROM timeclock t LEFT JOIN profiles p ON p.discord_id=t.mechanic_id
+          ${profile ? "WHERE t.mechanic_id=?" : ""}
+          ORDER BY datetime(t.created_at) DESC LIMIT ?`,
+    args: profile ? [String(profile.discord_id), limit] : [limit],
+  });
+  const entries: unknown[] = [];
+  for (const row of result.rows as any[]) {
+    const id = String(row[0] ?? "");
+    const mechanicId = String(row[1] ?? "");
+    const clockIn = String(row[3] ?? "");
+    const clockOut = row[4] ? String(row[4]) : null;
+    const active = clockOut === null;
+    const duration = active
+      ? await calculateCreditedShiftMinutes(id, mechanicId, clockIn)
+      : Number(row[5] ?? 0);
+    entries.push({
+      id,
+      mechanic_id: mechanicId,
+      mechanic_name: String(row[2] ?? mechanicId),
+      clock_in_time: clockIn,
+      clock_out_time: clockOut,
+      duration_minutes: duration,
+      status: String(row[6] ?? "approved"),
+      notes: row[7] ? String(row[7]) : null,
+      active,
+      approved_by: row[8] ? String(row[8]) : null,
+      created_at: String(row[9] ?? ""),
+    });
+  }
+  return entries;
+}
+
+async function closeTimeclockEntry(
+  client: Client,
+  guild: Guild,
+  id: string,
+  actorId: string,
+  actorName: string,
+  reason: string,
+): Promise<boolean> {
+  const result = await db.execute({
+    sql: `SELECT t.mechanic_id,t.clock_in_time,t.clock_message_id,t.clock_channel_id,p.display_name
+          FROM timeclock t LEFT JOIN profiles p ON p.discord_id=t.mechanic_id
+          WHERE t.id=? AND t.clock_out_time IS NULL`,
+    args: [id],
+  });
+  const row = result.rows[0] as any;
+  if (!row) return false;
+  const mechanicId = String(row[0] ?? "");
+  const clockIn = String(row[1] ?? "");
+  const name = String(row[4] ?? mechanicId);
+  const minutes = await calculateCreditedShiftMinutes(id, mechanicId, clockIn);
+  const clockOut = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const updated = await db.execute({
+    sql: `UPDATE timeclock
+          SET clock_out_time=?,duration_minutes=?,status='approved',approved_by=?,warned_at=NULL,stayed_in_at=NULL,notes=?
+          WHERE id=? AND clock_out_time IS NULL`,
+    args: [clockOut, minutes, actorId, reason, id],
+  });
+  if (!updated.rowsAffected) return false;
+  await db.execute({
+    sql: "UPDATE profiles SET hours_worked_this_week=hours_worked_this_week+?,status='offline' WHERE discord_id=?",
+    args: [minutes / 60, mechanicId],
+  });
+  warnedMechanics.delete(id);
+  stayedIn.delete(mechanicId);
+
+  const embed = buildClockOutEmbed(name, clockIn, clockOut, minutes, 0);
+  const messageId = row[2] ? String(row[2]) : "";
+  const messageChannelId = row[3] ? String(row[3]) : "";
+  if (messageId && messageChannelId) {
+    const sourceChannel = await client.channels.fetch(messageChannelId).catch(() => null);
+    if (sourceChannel?.isTextBased()) {
+      const message = await (sourceChannel as TextChannel).messages.fetch(messageId).catch(() => null);
+      if (message) await message.edit({ embeds: [embed] }).catch(() => null);
+    }
+  }
+  const config = await getGuildConfig(guild.id);
+  if (config?.timeclock_channel_id) {
+    const channel = await guild.channels.fetch(config.timeclock_channel_id).catch(() => null);
+    if (channel?.isTextBased()) {
+      await (channel as TextChannel).send({
+        content: `${name} was clocked out by ${actorName}. ${Math.floor(minutes / 60)}h ${Math.round(minutes % 60)}m credited. Reason: ${reason}`,
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+      }).catch(() => null);
+    }
+  }
+  logEvent({
+    kind: "clock_out",
+    guildId: guild.id,
+    userId: actorId,
+    userName: actorName,
+    detail: `Website clock-out for ${name}; ${Math.round(minutes)} minutes; ${reason}`,
+  });
+  await saveDatabaseSnapshot();
+  return true;
+}
+
+async function listLeaveRequests(account: PortalAccount, status: string | null): Promise<unknown[]> {
+  if (status && !["all", "pending", "approved", "denied"].includes(status)) {
+    throw new PortalError(400, "Invalid leave request status");
+  }
+  const profile = canManage(account.role) ? null : await findCrewForAccount(account.username);
+  if (!canManage(account.role) && !profile) throw new PortalError(403, "No crew record matches this account");
+  const clauses: string[] = [];
+  const args: string[] = [];
+  if (profile) {
+    clauses.push("l.mechanic_id=?");
+    args.push(String(profile.discord_id));
+  }
+  if (status && status !== "all") {
+    clauses.push("l.status=?");
+    args.push(status);
+  }
+  const result = await db.execute({
+    sql: `SELECT l.id,l.mechanic_id,COALESCE(p.display_name,l.mechanic_id),l.reason,
+                 l.start_date,l.return_date,l.notes,l.status,l.reviewed_by,l.created_at
+          FROM loa_requests l LEFT JOIN profiles p ON p.discord_id=l.mechanic_id
+          ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+          ORDER BY CASE WHEN l.status='pending' THEN 0 ELSE 1 END,datetime(l.created_at) DESC`,
+    args,
+  });
+  return (result.rows as any[]).map((row) => ({
+    id: String(row[0] ?? ""),
+    mechanic_id: String(row[1] ?? ""),
+    mechanic_name: String(row[2] ?? ""),
+    reason: String(row[3] ?? ""),
+    start_date: String(row[4] ?? ""),
+    return_date: String(row[5] ?? ""),
+    notes: row[6] ? String(row[6]) : null,
+    status: String(row[7] ?? "pending"),
+    reviewed_by: row[8] ? String(row[8]) : null,
+    created_at: String(row[9] ?? ""),
+  }));
+}
+
+async function getBankDashboard(client: Client): Promise<unknown> {
+  const guild = await crewGuild(client);
+  if (!guild) throw new PortalError(503, "Discord server unavailable");
+  const [logs, unpaid] = await Promise.all([
+    db.execute({
+      sql: `SELECT b.id,b.log_date,b.balance,b.expected_balance,b.variance,b.expected_change,
+                   b.payout_total,b.order_count,b.logged_by,p.display_name,b.logged_at
+            FROM bank_account_logs b LEFT JOIN profiles p ON p.discord_id=b.logged_by
+            WHERE b.guild_id=? ORDER BY datetime(b.logged_at) DESC LIMIT 100`,
+      args: [guild.id],
+    }),
+    db.execute({
+      sql: `SELECT p.discord_id,p.display_name,
+                   COALESCE(SUM(y.amount+COALESCE(y.manager_cut,0)),0),COUNT(y.id),
+                   COALESCE(p.current_pay_status,'pending')
+            FROM profiles p JOIN payouts y ON y.mechanic_id=p.discord_id AND y.paid_at IS NULL
+            GROUP BY p.discord_id,p.display_name,p.current_pay_status
+            ORDER BY p.display_name`,
+      args: [],
+    }),
+  ]);
+  return {
+    logs: (logs.rows as any[]).map((row) => ({
+      id: String(row[0] ?? ""),
+      log_date: String(row[1] ?? ""),
+      balance: Number(row[2] ?? 0),
+      expected_balance: Number(row[3] ?? 0),
+      variance: Number(row[4] ?? 0),
+      expected_change: Number(row[5] ?? 0),
+      payout_total: Number(row[6] ?? 0),
+      order_count: Number(row[7] ?? 0),
+      logged_by: String(row[8] ?? ""),
+      logged_by_name: row[9] ? String(row[9]) : null,
+      logged_at: String(row[10] ?? ""),
+    })),
+    unpaid: (unpaid.rows as any[]).map((row) => ({
+      discord_id: String(row[0] ?? ""),
+      display_name: String(row[1] ?? ""),
+      amount: Number(row[2] ?? 0),
+      payout_count: Number(row[3] ?? 0),
+      current_pay_status: String(row[4] ?? "pending"),
+    })),
+  };
+}
+
+async function syncMappedPortalRole(
+  oldName: string,
+  discordId: string,
+  newName: string,
+  role: string,
+): Promise<void> {
+  const account = await lookupAccountForCrewProfile({ display_name: oldName, discord_id: discordId });
+  if (!account || account.role === "owner" || account.role === "head_manager") return;
+  const oldNameKey = usernameKey(oldName);
+  const oldFirstNameKey = usernameKey(oldName.split(/\s+/)[0] ?? "");
+  const shouldRename = account.username_key === oldNameKey || account.username_key === oldFirstNameKey;
+  if (shouldRename) {
+    const collision = await db.execute({
+      sql: "SELECT 1 FROM portal_accounts WHERE username_key=? AND id<>? LIMIT 1",
+      args: [usernameKey(newName), account.id],
+    });
+    if (collision.rows[0]) {
+      throw new PortalError(409, "The matching crew login could not be renamed because that username is already in use");
+    }
+    await db.execute({
+      sql: "UPDATE portal_accounts SET role=?,username=?,username_key=? WHERE id=?",
+      args: [role, newName, usernameKey(newName), account.id],
+    });
+  } else {
+    await db.execute({ sql: "UPDATE portal_accounts SET role=? WHERE id=?", args: [role, account.id] });
+  }
+}
+
+async function addCrewMember(client: Client, account: PortalAccount, body: Record<string, unknown>) {
+  const discordId = typeof body.discord_id === "string" ? body.discord_id.trim() : "";
+  if (!/^\d{17,20}$/.test(discordId)) throw new PortalError(400, "Enter a valid Discord user ID");
+  const displayName = normalizeUsername(body.display_name);
+  const role = String(body.role ?? "");
+  if (!["mechanic", "trainer", "manager"].includes(role)) {
+    throw new PortalError(400, "Crew role must be mechanic, trainer, or manager");
+  }
+  if (role === "manager" && !isTopAdmin(account.role)) {
+    throw new PortalError(403, "Only an owner or head manager can assign the manager rank");
+  }
+  const currentRole = await getUserRole(discordId);
+  if (currentRole === "owner") throw new PortalError(403, "The owner crew rank cannot be changed through roster entry");
+  if (currentRole === "manager" && !isTopAdmin(account.role)) {
+    throw new PortalError(403, "Only an owner or head manager can change a manager's rank");
+  }
+  const existingName = await db.execute({
+    sql: "SELECT display_name FROM profiles WHERE discord_id=?",
+    args: [discordId],
+  });
+  const oldName = existingName.rows[0] ? String(existingName.rows[0][0] ?? displayName) : displayName;
+  const duplicate = await db.execute({
+    sql: "SELECT 1 FROM profiles WHERE display_name=? COLLATE NOCASE AND discord_id<>? AND terminated_at IS NULL LIMIT 1",
+    args: [displayName, discordId],
+  });
+  if (duplicate.rows[0]) throw new PortalError(409, "Another active crew member already has that display name");
+  const guild = await crewGuild(client);
+  if (!guild) throw new PortalError(503, "Discord server unavailable");
+  const member = await guild.members.fetch(discordId).catch(() => null);
+  if (!member || member.user.bot) throw new PortalError(404, "That Discord user is not an active member of the TDC server");
+  await db.execute({
+    sql: "INSERT OR IGNORE INTO profiles (discord_id,display_name,commission_rate) VALUES (?,?,0.3)",
+    args: [discordId, displayName],
+  });
+  await db.execute({
+    sql: "UPDATE profiles SET display_name=?,status=CASE WHEN terminated_at IS NOT NULL THEN 'offline' ELSE status END,terminated_at=NULL WHERE discord_id=?",
+    args: [displayName, discordId],
+  });
+  await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id=?", args: [discordId] });
+  await db.execute({ sql: "INSERT INTO user_roles (discord_id,role) VALUES (?,?)", args: [discordId, role] });
+  await syncMappedPortalRole(oldName, discordId, displayName, role);
+  logEvent({
+    kind: "crew_changed",
+    guildId: guild.id,
+    userId: discordId,
+    userName: displayName,
+    detail: `Added or updated as ${role} through the staff portal by ${account.username}`,
+  });
+  await saveDatabaseSnapshot();
+  return { ok: true };
+}
+
+async function updateCrewMember(
+  client: Client,
+  account: PortalAccount,
+  discordId: string,
+  body: Record<string, unknown>,
+) {
+  if (!/^\d{17,20}$/.test(discordId)) throw new PortalError(400, "Invalid crew record");
+  const result = await db.execute({
+    sql: "SELECT display_name,terminated_at FROM profiles WHERE discord_id=?",
+    args: [discordId],
+  });
+  if (!result.rows[0] || result.rows[0][1]) throw new PortalError(404, "Active crew member not found");
+  const oldName = String(result.rows[0][0] ?? "");
+  const oldRole = await getUserRole(discordId);
+  if ((oldRole === "owner" && account.role !== "owner") ||
+      (oldRole === "manager" && !isTopAdmin(account.role))) {
+    throw new PortalError(403, "Only an owner or head manager can change this crew record");
+  }
+  const updates: string[] = [];
+  const args: (string | null)[] = [];
+  let newName = oldName;
+  if (body.display_name !== undefined) {
+    newName = normalizeUsername(body.display_name);
+    const duplicate = await db.execute({
+      sql: "SELECT 1 FROM profiles WHERE display_name=? COLLATE NOCASE AND discord_id<>? AND terminated_at IS NULL LIMIT 1",
+      args: [newName, discordId],
+    });
+    if (duplicate.rows[0]) throw new PortalError(409, "Another active crew member already has that display name");
+    updates.push("display_name=?");
+    args.push(newName);
+  }
+  if (body.status !== undefined) {
+    if (!["online", "offline", "on_break"].includes(String(body.status))) {
+      throw new PortalError(400, "Invalid crew status");
+    }
+    updates.push("status=?");
+    args.push(String(body.status));
+  }
+  if (body.in_city_id !== undefined) {
+    if (body.in_city_id !== null && typeof body.in_city_id !== "string") {
+      throw new PortalError(400, "In-city ID must be text or blank");
+    }
+    const cityId = typeof body.in_city_id === "string" ? body.in_city_id.trim() : "";
+    if (cityId.length > 40) throw new PortalError(400, "In-city ID must be 40 characters or fewer");
+    updates.push("in_city_id=?");
+    args.push(cityId || null);
+  }
+  let newRole = oldRole ?? "mechanic";
+  if (body.role !== undefined) {
+    newRole = String(body.role);
+    if (!["mechanic", "trainer", "manager", "owner"].includes(newRole)) {
+      throw new PortalError(400, "Invalid crew rank");
+    }
+    if (newRole === "owner" && account.role !== "owner") {
+      throw new PortalError(403, "Only an owner can assign the owner rank");
+    }
+    if ((newRole === "manager" || oldRole === "manager") && !isTopAdmin(account.role)) {
+      throw new PortalError(403, "Only an owner or head manager can change manager ranks");
+    }
+    updates.push("__role__");
+  }
+  if (!updates.length) throw new PortalError(400, "No crew changes were provided");
+  if (newName !== oldName || body.role !== undefined) {
+    await syncMappedPortalRole(oldName, discordId, newName, newRole);
+  }
+  const roleChanged = updates.includes("__role__");
+  const profileUpdates = updates.filter((item) => item !== "__role__");
+  if (profileUpdates.length) {
+    args.push(discordId);
+    await db.execute({
+      sql: `UPDATE profiles SET ${profileUpdates.join(",")} WHERE discord_id=?`,
+      args,
+    });
+  }
+  if (roleChanged) {
+    await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id=?", args: [discordId] });
+    await db.execute({ sql: "INSERT INTO user_roles (discord_id,role) VALUES (?,?)", args: [discordId, newRole] });
+  }
+  const guild = await crewGuild(client);
+  logEvent({
+    kind: "crew_changed",
+    guildId: guild?.id,
+    userId: discordId,
+    userName: newName,
+    detail: `Updated through the staff portal by ${account.username}${roleChanged ? `; rank ${oldRole ?? "mechanic"} → ${newRole}` : ""}`,
+  });
+  await saveDatabaseSnapshot();
+  return { ok: true };
+}
+
+async function removeCrewMember(client: Client, account: PortalAccount, discordId: string) {
+  if (!/^\d{17,20}$/.test(discordId)) throw new PortalError(400, "Invalid crew record");
+  const result = await db.execute({
+    sql: "SELECT display_name,terminated_at FROM profiles WHERE discord_id=?",
+    args: [discordId],
+  });
+  if (!result.rows[0] || result.rows[0][1]) throw new PortalError(404, "Active crew member not found");
+  const displayName = String(result.rows[0][0] ?? "");
+  const ownProfile = await findCrewForAccount(account.username);
+  if (ownProfile?.discord_id === discordId) throw new PortalError(403, "You cannot remove your own crew record");
+  const role = await getUserRole(discordId);
+  if (role === "owner") throw new PortalError(403, "The owner crew record cannot be removed");
+  if (role === "manager" && !isTopAdmin(account.role)) {
+    throw new PortalError(403, "Only an owner or head manager can remove a manager");
+  }
+  const guild = await crewGuild(client);
+  if (!guild) throw new PortalError(503, "Discord server unavailable");
+  const config = await getGuildConfig(guild.id);
+  const member = await guild.members.fetch(discordId).catch(() => null);
+  if (member) {
+    const roleIds = [...new Set([
+      ...splitRoleIds(config?.mechanic_role_id),
+      ...splitRoleIds(config?.trainer_role_id),
+      ...splitRoleIds(config?.manager_role_id),
+      ...splitRoleIds((config as any)?.needs_training_role_id),
+    ])];
+    if (roleIds.length) {
+      try {
+        await member.roles.remove(roleIds, `Crew removed through staff portal by ${account.username}`);
+      } catch {
+        throw new PortalError(502, "Discord role cleanup failed; no crew records were changed");
+      }
+    }
+  }
+  const linkedAccount = await lookupAccountForCrewProfile({ display_name: displayName, discord_id: discordId });
+  await db.execute({
+    sql: "UPDATE profiles SET terminated_at=datetime('now'),status='offline' WHERE discord_id=? AND terminated_at IS NULL",
+    args: [discordId],
+  });
+  await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id=?", args: [discordId] });
+  if (linkedAccount && linkedAccount.role !== "owner" && linkedAccount.role !== "head_manager") {
+    await db.execute({ sql: "UPDATE portal_accounts SET active=0 WHERE id=?", args: [linkedAccount.id] });
+    await db.execute({ sql: "DELETE FROM portal_sessions WHERE account_id=?", args: [linkedAccount.id] });
+    await db.execute({
+      sql: "UPDATE portal_setup_tokens SET used_at=COALESCE(used_at,datetime('now')) WHERE account_id=?",
+      args: [linkedAccount.id],
+    });
+  }
+  logEvent({
+    kind: "crew_changed",
+    guildId: guild?.id,
+    userId: discordId,
+    userName: displayName,
+    detail: `Deactivated through the staff portal by ${account.username}; historical orders and payouts preserved`,
+  });
+  await saveDatabaseSnapshot();
+  return { ok: true };
 }
 
 export async function handlePortalApi(
@@ -818,6 +1273,402 @@ export async function handlePortalApi(
         actor_name: account.username,
       });
       json(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/payroll") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      const result = await websitePayroll(client, {
+        request_id: body.request_id,
+        portal_actor: {
+          id: account.id,
+          username: account.username,
+          role: account.role,
+        },
+      });
+      json(res, 200, result);
+      return;
+    }
+
+    if (req.method === "GET" && path === "/api/portal/timeclock") {
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 200)));
+      json(res, 200, { entries: await listTimeclock(account, limit) });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/timeclock/reset") {
+      if (account.role !== "owner") throw new PortalError(403, "Owner role required");
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      const active = await db.execute("SELECT id FROM timeclock WHERE clock_out_time IS NULL ORDER BY clock_in_time");
+      let clockedOut = 0;
+      for (const row of active.rows) {
+        const id = String((row as any)[0] ?? "");
+        if (await closeTimeclockEntry(client, guild, id, `portal:${account.id}`, account.username, "Emergency portal timeclock reset")) {
+          clockedOut++;
+        }
+      }
+      warnedMechanics.clear();
+      stayedIn.clear();
+      await db.execute("UPDATE timeclock SET warned_at=NULL,stayed_in_at=NULL WHERE warned_at IS NOT NULL OR stayed_in_at IS NOT NULL");
+      logEvent({
+        kind: "crew_changed",
+        guildId: guild.id,
+        userId: `portal:${account.id}`,
+        userName: account.username,
+        detail: `Emergency clock-out reset from staff portal; ${clockedOut} active session(s) closed`,
+      });
+      await saveDatabaseSnapshot();
+      json(res, 200, { ok: true, clocked_out: clockedOut });
+      return;
+    }
+
+    const clockReviewMatch = path.match(/^\/api\/portal\/timeclock\/([^/]+)\/review$/);
+    if (req.method === "POST" && clockReviewMatch) {
+      if (!(canManage(account.role) || account.role === "trainer")) {
+        throw new PortalError(403, "Trainer or manager role required");
+      }
+      const body = await bodyJson(req);
+      const decision = String(body.decision ?? "");
+      if (decision !== "approved" && decision !== "rejected") {
+        throw new PortalError(400, "Choose approve or reject");
+      }
+      const id = decodeURIComponent(clockReviewMatch[1]);
+      const entry = await db.execute({
+        sql: "SELECT mechanic_id,duration_minutes FROM timeclock WHERE id=? AND status='pending' AND clock_out_time IS NOT NULL",
+        args: [id],
+      });
+      if (!entry.rows[0]) throw new PortalError(409, "This timeclock entry is no longer pending review");
+      const mechanicId = String((entry.rows[0] as any)[0] ?? "");
+      const durationMinutes = Number((entry.rows[0] as any)[1] ?? 0);
+      const updated = await db.execute({
+        sql: "UPDATE timeclock SET status=?,approved_by=? WHERE id=? AND status='pending' AND clock_out_time IS NOT NULL",
+        args: [decision, `portal:${account.id}`, id],
+      });
+      if (!updated.rowsAffected) throw new PortalError(409, "This timeclock entry was already reviewed");
+      if (decision === "approved") {
+        await db.execute({
+          sql: "UPDATE profiles SET hours_worked_this_week=hours_worked_this_week+? WHERE discord_id=?",
+          args: [durationMinutes / 60, mechanicId],
+        });
+      }
+      const guild = await crewGuild(client);
+      logEvent({
+        kind: "crew_changed",
+        guildId: guild?.id,
+        userId: `portal:${account.id}`,
+        userName: account.username,
+        detail: `Timeclock ${id} ${decision} for ${mechanicId}; ${Math.round(durationMinutes)} minutes`,
+      });
+      await saveDatabaseSnapshot();
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    const forceClockOutMatch = path.match(/^\/api\/portal\/timeclock\/([^/]+)\/clock-out$/);
+    if (req.method === "POST" && forceClockOutMatch) {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 300) : "";
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      const id = decodeURIComponent(forceClockOutMatch[1]);
+      const closed = await closeTimeclockEntry(
+        client,
+        guild,
+        id,
+        `portal:${account.id}`,
+        account.username,
+        reason || "Clocked out by staff portal manager",
+      );
+      if (!closed) throw new PortalError(409, "This session is already clocked out");
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && path === "/api/portal/loa") {
+      const status = url.searchParams.get("status");
+      json(res, 200, { requests: await listLeaveRequests(account, status) });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/loa") {
+      const body = await bodyJson(req);
+      const profile = await findCrewForAccount(account.username);
+      if (!profile) throw new PortalError(403, "No matching crew record; leave requests must be submitted from a crew account");
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (!reason || reason.length > 500) throw new PortalError(400, "Reason must be 1–500 characters");
+      const startDate = validDate(body.start_date);
+      const returnDate = validDate(body.return_date);
+      if (returnDate < startDate) throw new PortalError(400, "Return date must be on or after the start date");
+      const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 300) : "";
+      const id = randomUUID();
+      await db.execute({
+        sql: "INSERT INTO loa_requests (id,mechanic_id,guild_id,reason,start_date,return_date,notes) VALUES (?,?,?,?,?,?,?)",
+        args: [id, String(profile.discord_id), guild.id, reason, startDate, returnDate, notes || null],
+      });
+      const request = {
+        id,
+        mechanic_id: String(profile.discord_id),
+        mechanic_name: String(profile.display_name ?? account.username),
+        reason,
+        start_date: startDate,
+        return_date: returnDate,
+        notes: notes || null,
+        status: "pending",
+        reviewed_by: null,
+        created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
+      };
+      logEvent({
+        kind: "loa_submitted",
+        guildId: guild.id,
+        userId: String(profile.discord_id),
+        userName: request.mechanic_name,
+        detail: `${startDate} → ${returnDate} · ${reason.slice(0, 120)}`,
+      });
+      const config = await getGuildConfig(guild.id);
+      if (config?.loa_channel_id) {
+        const channel = await guild.channels.fetch(config.loa_channel_id).catch(() => null);
+        if (channel?.isTextBased()) {
+          const embed = buildLoaEmbed({
+            mechanic_name: request.mechanic_name,
+            reason,
+            start_date: startDate,
+            return_date: returnDate,
+            notes: notes || undefined,
+            status: "pending",
+          });
+          const reviewRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`loa:approve:${id}`).setLabel("Approve").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`loa:deny:${id}`).setLabel("Deny").setStyle(ButtonStyle.Danger),
+          );
+          const message = await (channel as TextChannel).send({
+            content: `New leave request from ${request.mechanic_name}`,
+            embeds: [embed],
+            components: [reviewRow],
+            allowedMentions: { parse: [] },
+          }).catch(() => null);
+          if (message) {
+            await db.execute({ sql: "UPDATE loa_requests SET discord_message_id=? WHERE id=?", args: [message.id, id] });
+          }
+        }
+      }
+      await saveDatabaseSnapshot();
+      json(res, 201, { request });
+      return;
+    }
+
+    const leaveReviewMatch = path.match(/^\/api\/portal\/loa\/([^/]+)\/review$/);
+    if (req.method === "POST" && leaveReviewMatch) {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      const decision = String(body.decision ?? "");
+      if (decision !== "approved" && decision !== "denied") {
+        throw new PortalError(400, "Choose approve or deny");
+      }
+      const id = decodeURIComponent(leaveReviewMatch[1]);
+      const updated = await db.execute({
+        sql: "UPDATE loa_requests SET status=?,reviewed_by=? WHERE id=? AND status='pending'",
+        args: [decision, `portal:${account.id}`, id],
+      });
+      if (!updated.rowsAffected) throw new PortalError(409, "This leave request is no longer pending review");
+      const result = await db.execute({
+        sql: `SELECT l.mechanic_id,l.guild_id,l.reason,l.start_date,l.return_date,l.notes,
+                     l.discord_message_id,COALESCE(p.display_name,l.mechanic_id)
+              FROM loa_requests l LEFT JOIN profiles p ON p.discord_id=l.mechanic_id
+              WHERE l.id=?`,
+        args: [id],
+      });
+      const row = result.rows[0] as any;
+      if (!row) throw new PortalError(404, "Leave request not found");
+      const mechanicId = String(row[0] ?? "");
+      const guildId = String(row[1] ?? "");
+      const mechanicName = String(row[7] ?? mechanicId);
+      const reviewer = account.username;
+      const embed = buildLoaEmbed({
+        mechanic_name: mechanicName,
+        reason: String(row[2] ?? ""),
+        start_date: String(row[3] ?? ""),
+        return_date: String(row[4] ?? ""),
+        notes: row[5] ? String(row[5]) : undefined,
+        status: decision,
+      });
+      embed.addFields({ name: "Reviewed By", value: reviewer, inline: true });
+      const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId).catch(() => null);
+      const messageId = row[6] ? String(row[6]) : "";
+      const config = guild ? await getGuildConfig(guild.id) : null;
+      const channel = guild && config?.loa_channel_id
+        ? await guild.channels.fetch(config.loa_channel_id).catch(() => null)
+        : null;
+      if (channel?.isTextBased() && messageId) {
+        const message = await (channel as TextChannel).messages.fetch(messageId).catch(() => null);
+        if (message) await message.edit({ embeds: [embed], components: [] }).catch(() => null);
+      }
+      try {
+        const user = await client.users.fetch(mechanicId);
+        await user.send({
+          content: `Your leave request (${String(row[3])} to ${String(row[4])}) was ${decision}.`,
+          embeds: [embed],
+        });
+      } catch {
+        // A crew member may have DMs disabled; the portal decision remains saved.
+      }
+      logEvent({
+        kind: decision === "approved" ? "loa_approved" : "loa_denied",
+        guildId,
+        userId: mechanicId,
+        userName: mechanicName,
+        detail: `${String(row[3])} → ${String(row[4])} · reviewed by ${reviewer}`,
+      });
+      await saveDatabaseSnapshot();
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && path === "/api/portal/bank") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      json(res, 200, await getBankDashboard(client));
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/bank/record") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      if (typeof body.amount !== "number" || !Number.isFinite(body.amount) || body.amount < 0) {
+        throw new PortalError(400, "Enter a valid non-negative bank balance");
+      }
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      const comparison = await recordBankBalance(guild.id, body.amount, `portal:${account.id}`);
+      const config = await getGuildConfig(guild.id);
+      if (config?.bank_account_channel_id) {
+        const channel = await guild.channels.fetch(config.bank_account_channel_id).catch(() => null);
+        if (channel?.isTextBased()) {
+          await (channel as TextChannel).send({
+            embeds: [buildBankLogEmbed(comparison)],
+            components: (await isUpdateEnabled()) ? buildBankPaidComponents() : [],
+          }).catch(() => null);
+        }
+      }
+      logEvent({
+        kind: "database_event",
+        guildId: guild.id,
+        userId: `portal:${account.id}`,
+        userName: account.username,
+        amount: body.amount,
+        detail: `Bank balance recorded for ${comparison.logDate}; variance ${comparison.variance}`,
+      });
+      await saveDatabaseSnapshot();
+      json(res, 200, {
+        log_date: comparison.logDate,
+        balance: comparison.balance,
+        previous_balance: comparison.previousBalance,
+        order_revenue: comparison.orderRevenue,
+        order_count: comparison.orderCount,
+        payout_total: comparison.payoutTotal,
+        payout_count: comparison.payoutCount,
+        expected_balance: comparison.expectedBalance,
+        actual_change: comparison.actualChange,
+        variance: comparison.variance,
+        shortfall: comparison.shortfall,
+        surplus: comparison.surplus,
+        logged_by: comparison.loggedBy,
+        logged_at: comparison.loggedAt,
+        is_update: comparison.isUpdate,
+      });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/bank/reset") {
+      if (!isTopAdmin(account.role)) throw new PortalError(403, "Owner or head manager role required");
+      const body = await bodyJson(req);
+      if (typeof body.amount !== "number" || !Number.isFinite(body.amount) || body.amount < 0) {
+        throw new PortalError(400, "Enter a valid non-negative bank balance");
+      }
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      await resetBankBaseline(guild.id, body.amount, `portal:${account.id}`);
+      logEvent({
+        kind: "database_event",
+        guildId: guild.id,
+        userId: `portal:${account.id}`,
+        userName: account.username,
+        amount: body.amount,
+        detail: "Bank tracking baseline reset from staff portal; historical logs preserved",
+      });
+      await saveDatabaseSnapshot();
+      json(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/bank/mark-paid") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      if (!Array.isArray(body.discord_ids) || body.discord_ids.length < 1 || body.discord_ids.length > 100) {
+        throw new PortalError(400, "Choose at least one crew member to mark paid");
+      }
+      const ids = [...new Set(body.discord_ids.map((value) => String(value)))];
+      if (ids.some((id) => !/^\d{17,20}$/.test(id))) throw new PortalError(400, "One or more crew IDs are invalid");
+      let markedCount = 0;
+      let total = 0;
+      for (const discordId of ids) {
+        const unpaid = await db.execute({
+          sql: "SELECT COALESCE(SUM(amount+COALESCE(manager_cut,0)),0) FROM payouts WHERE mechanic_id=? AND paid_at IS NULL",
+          args: [discordId],
+        });
+        const amount = Number(unpaid.rows[0]?.[0] ?? 0);
+        const paid = await db.execute({
+          sql: "UPDATE payouts SET paid_at=datetime('now'),paid_by=? WHERE mechanic_id=? AND paid_at IS NULL",
+          args: [`portal:${account.id}`, discordId],
+        });
+        if (!paid.rowsAffected) continue;
+        await db.execute({
+          sql: "UPDATE profiles SET current_pay_status='paid' WHERE discord_id=?",
+          args: [discordId],
+        });
+        markedCount++;
+        total += amount;
+      }
+      const guild = await crewGuild(client);
+      if (guild) {
+        const { refreshPayLogPanel } = await import("../commands/payall.js");
+        refreshPayLogPanel(guild).catch(() => {});
+        logEvent({
+          kind: "payout_processed",
+          guildId: guild.id,
+          userId: `portal:${account.id}`,
+          userName: account.username,
+          amount: total,
+          detail: `Marked ${markedCount} crew member(s) paid through the staff portal`,
+        });
+      }
+      await saveDatabaseSnapshot();
+      json(res, 200, { ok: true, marked_count: markedCount, total });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/crew") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const body = await bodyJson(req);
+      json(res, 200, await addCrewMember(client, account, body));
+      return;
+    }
+
+    const crewMemberMatch = path.match(/^\/api\/portal\/crew\/([^/]+)$/);
+    if (crewMemberMatch && req.method === "PATCH") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const discordId = decodeURIComponent(crewMemberMatch[1]);
+      const body = await bodyJson(req);
+      json(res, 200, await updateCrewMember(client, account, discordId, body));
+      return;
+    }
+    if (crewMemberMatch && req.method === "DELETE") {
+      if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
+      const discordId = decodeURIComponent(crewMemberMatch[1]);
+      json(res, 200, await removeCrewMember(client, account, discordId));
       return;
     }
 

@@ -7,6 +7,7 @@ import { buildOrderEmbed, COLORS, money } from "./embeds.js";
 import { logEvent } from "./eventLog.js";
 import { weekStart } from "./utils.js";
 import { deliverCompletedOrder } from "./orderDelivery.js";
+import { withOrderLock } from "./resilience.js";
 
 /** Picks the Discord server the crew is configured in (the bot may be in several). */
 export async function crewGuild(client: Client) {
@@ -33,6 +34,12 @@ export async function websiteManagement(client: Client, body: any) {
 }
 
 export async function websiteComplete(client: Client, body: any) {
+  const orderId = String(body.order_id ?? "");
+  if (!orderId) throw new Error("Order ID is required");
+  return withOrderLock(orderId, () => websiteCompleteUnlocked(client, body));
+}
+
+async function websiteCompleteUnlocked(client: Client, body: any) {
   const portalActor = body.portal_actor;
   const actor = portalActor && typeof portalActor === "object"
     ? {
@@ -93,7 +100,7 @@ export async function websiteSetPay(client: Client, body: any) {
   if (!profile) throw new Error("Crew member not found");
   if (managerCut !== null || managerRate !== null) {
     const role = await getUserRole(id);
-    if (role !== "manager" && role !== "owner") throw new Error("Manager cut only applies to managers/owners");
+    if (role !== "manager" && role !== "owner" && role !== "head_manager") throw new Error("Manager cut only applies to managers/owners");
   }
   const updates: string[] = [];
   const args: (string | number)[] = [];
@@ -146,7 +153,16 @@ export async function websiteSetPay(client: Client, body: any) {
 }
 
 export async function websitePayroll(client: Client, body: any) {
-  const actor = await websiteManagement(client, body);
+  const portalActor = body.portal_actor && typeof body.portal_actor === "object"
+    ? {
+        discord_id: String(body.portal_actor.discord_id ?? `portal:${body.portal_actor.id ?? "unknown"}`),
+        display_name: String(body.portal_actor.username ?? "Website account"),
+        role: String(body.portal_actor.role ?? "mechanic"),
+      }
+    : await websiteManagement(client, body);
+  if (!["owner", "head_manager", "manager"].includes(portalActor.role)) {
+    throw new Error("Management role required");
+  }
   const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const requestId = String(body.request_id ?? "");
@@ -157,7 +173,7 @@ export async function websitePayroll(client: Client, body: any) {
   // for manual reconciliation; never retry uncertain financial work automatically.
   const claim = await db.execute({ sql: "INSERT OR IGNORE INTO app_settings (key,value) VALUES ('website_payroll_lock',?)", args: [requestId] });
   if (!claim.rowsAffected) throw new Error("Payroll is already running or needs management reconciliation");
-  const result = await processPayall(guild, weekStart(), actor.discord_id);
+  const result = await processPayall(guild, weekStart(), portalActor.discord_id);
   const response = { ok: true, mechanicCount: result?.mechanicCount ?? 0, totalToBill: result?.totalToBill ?? 0 };
   await db.execute({ sql: "INSERT INTO app_settings(key,value) VALUES (?,?)", args: [`website_payroll_result:${requestId}`, JSON.stringify(response)] });
   await saveDatabaseSnapshot();
@@ -171,7 +187,12 @@ export async function websitePayroll(client: Client, body: any) {
     }
     const config = await getGuildConfig(guild.id);
     const log = config?.payday_channel_id ? await guild.channels.fetch(config.payday_channel_id).catch(() => null) : null;
-    if (log?.type === ChannelType.GuildText) await log.send(`Website payroll processed by <@${actor.discord_id}>: ${result.mechanicCount} crew · ${money(result.totalToBill)}`).catch(console.error);
+    if (log?.type === ChannelType.GuildText) {
+      const actorLabel = portalActor.discord_id.startsWith("portal:")
+        ? portalActor.display_name
+        : `<@${portalActor.discord_id}>`;
+      await log.send(`Website payroll processed by ${actorLabel}: ${result.mechanicCount} crew · ${money(result.totalToBill)}`).catch(console.error);
+    }
   }
   await refreshPayLogPanel(guild);
   await db.execute("DELETE FROM app_settings WHERE key='website_payroll_lock'");

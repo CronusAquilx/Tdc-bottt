@@ -105,9 +105,22 @@ export interface PortalOrder {
   completed_at?: string | null;
 }
 
+export type PortalCrewMemberStatus = typeof PortalCrewMemberStatus[keyof typeof PortalCrewMemberStatus];
+
+
+export const PortalCrewMemberStatus = {
+  online: 'online',
+  offline: 'offline',
+  on_break: 'on_break',
+} as const;
+
 export interface PortalCrewMember {
+  discord_id: string;
   display_name: string;
   role: PortalRole;
+  status: PortalCrewMemberStatus;
+  /** @nullable */
+  in_city_id: string | null;
   /** @nullable */
   sales_channel: string | null;
   week_labour: number;
@@ -214,6 +227,235 @@ export interface PortalPayUpdate {
   manager_rate?: number | null;
 }
 
+export interface PortalPayrollInput {
+  request_id: string;
+}
+
+export interface PortalPayrollResult {
+  ok: boolean;
+  mechanicCount: number;
+  totalToBill: number;
+}
+
+export type PortalTimeclockEntryStatus = typeof PortalTimeclockEntryStatus[keyof typeof PortalTimeclockEntryStatus];
+
+
+export const PortalTimeclockEntryStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface PortalTimeclockEntry {
+  id: string;
+  mechanic_id: string;
+  mechanic_name: string;
+  clock_in_time: string;
+  /** @nullable */
+  clock_out_time: string | null;
+  duration_minutes: number;
+  status: PortalTimeclockEntryStatus;
+  /** @nullable */
+  notes: string | null;
+  active: boolean;
+  /** @nullable */
+  approved_by: string | null;
+  created_at: string;
+}
+
+export type PortalTimeclockReviewInputDecision = typeof PortalTimeclockReviewInputDecision[keyof typeof PortalTimeclockReviewInputDecision];
+
+
+export const PortalTimeclockReviewInputDecision = {
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface PortalTimeclockReviewInput {
+  decision: PortalTimeclockReviewInputDecision;
+}
+
+export interface PortalClockOutInput {
+  /** @maxLength 300 */
+  reason?: string;
+}
+
+export interface PortalTimeclockResetResult {
+  ok: boolean;
+  clocked_out: number;
+}
+
+export type PortalLeaveRequestStatus = typeof PortalLeaveRequestStatus[keyof typeof PortalLeaveRequestStatus];
+
+
+export const PortalLeaveRequestStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  denied: 'denied',
+} as const;
+
+export interface PortalLeaveRequest {
+  id: string;
+  mechanic_id: string;
+  mechanic_name: string;
+  reason: string;
+  start_date: string;
+  return_date: string;
+  /** @nullable */
+  notes: string | null;
+  status: PortalLeaveRequestStatus;
+  /** @nullable */
+  reviewed_by: string | null;
+  created_at: string;
+}
+
+export interface PortalLeaveInput {
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  start_date: string;
+  return_date: string;
+  /** @maxLength 300 */
+  notes?: string;
+}
+
+export type PortalLeaveReviewInputDecision = typeof PortalLeaveReviewInputDecision[keyof typeof PortalLeaveReviewInputDecision];
+
+
+export const PortalLeaveReviewInputDecision = {
+  approved: 'approved',
+  denied: 'denied',
+} as const;
+
+export interface PortalLeaveReviewInput {
+  decision: PortalLeaveReviewInputDecision;
+}
+
+export interface PortalBankLog {
+  id: string;
+  log_date: string;
+  balance: number;
+  expected_balance: number;
+  variance: number;
+  expected_change: number;
+  payout_total: number;
+  order_count: number;
+  logged_by: string;
+  /** @nullable */
+  logged_by_name: string | null;
+  logged_at: string;
+}
+
+export interface PortalUnpaidPayout {
+  discord_id: string;
+  display_name: string;
+  amount: number;
+  payout_count: number;
+  current_pay_status: string;
+}
+
+export interface PortalBankDashboard {
+  logs: PortalBankLog[];
+  unpaid: PortalUnpaidPayout[];
+}
+
+export interface PortalBankAmountInput {
+  /** @minimum 0 */
+  amount: number;
+}
+
+export interface PortalBankRecordResult {
+  log_date: string;
+  balance: number;
+  /** @nullable */
+  previous_balance: number | null;
+  order_revenue: number;
+  order_count: number;
+  payout_total: number;
+  payout_count: number;
+  expected_balance: number;
+  actual_change: number;
+  variance: number;
+  shortfall: number;
+  surplus: number;
+  logged_by: string;
+  logged_at: string;
+  is_update: boolean;
+}
+
+export interface PortalBankPaidInput {
+  /**
+     * @minItems 1
+     * @maxItems 100
+     */
+  discord_ids: string[];
+}
+
+export interface PortalBankPaidResult {
+  ok: boolean;
+  marked_count: number;
+  total: number;
+}
+
+export type PortalCrewRole = typeof PortalCrewRole[keyof typeof PortalCrewRole];
+
+
+export const PortalCrewRole = {
+  mechanic: 'mechanic',
+  trainer: 'trainer',
+  manager: 'manager',
+  owner: 'owner',
+} as const;
+
+export type PortalCrewInputRole = typeof PortalCrewInputRole[keyof typeof PortalCrewInputRole];
+
+
+export const PortalCrewInputRole = {
+  mechanic: 'mechanic',
+  trainer: 'trainer',
+  manager: 'manager',
+} as const;
+
+export interface PortalCrewInput {
+  /**
+     * @minLength 17
+     * @maxLength 20
+     */
+  discord_id: string;
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  display_name: string;
+  role: PortalCrewInputRole;
+}
+
+export type PortalCrewUpdateStatus = typeof PortalCrewUpdateStatus[keyof typeof PortalCrewUpdateStatus];
+
+
+export const PortalCrewUpdateStatus = {
+  online: 'online',
+  offline: 'offline',
+  on_break: 'on_break',
+} as const;
+
+export interface PortalCrewUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  display_name?: string;
+  role?: PortalCrewRole;
+  status?: PortalCrewUpdateStatus;
+  /**
+     * @maxLength 40
+     * @nullable
+     */
+  in_city_id?: string | null;
+}
+
 export type GetRaffles200 = {
   raffles: Raffle[];
 };
@@ -266,5 +508,39 @@ export type GetPortalPayouts200 = {
 
 export type GetPortalAccounts200 = {
   accounts: PortalAccount[];
+};
+
+export type GetPortalTimeclockParams = {
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
+};
+
+export type GetPortalTimeclock200 = {
+  entries: PortalTimeclockEntry[];
+};
+
+export type GetPortalLeaveRequestsParams = {
+status?: GetPortalLeaveRequestsStatus;
+};
+
+export type GetPortalLeaveRequestsStatus = typeof GetPortalLeaveRequestsStatus[keyof typeof GetPortalLeaveRequestsStatus];
+
+
+export const GetPortalLeaveRequestsStatus = {
+  all: 'all',
+  pending: 'pending',
+  approved: 'approved',
+  denied: 'denied',
+} as const;
+
+export type GetPortalLeaveRequests200 = {
+  requests: PortalLeaveRequest[];
+};
+
+export type CreatePortalLeaveRequest201 = {
+  request: PortalLeaveRequest;
 };
 

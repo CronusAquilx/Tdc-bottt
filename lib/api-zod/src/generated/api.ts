@@ -214,8 +214,11 @@ export const GetPortalOrdersResponse = zod.object({
  */
 export const GetPortalCrewResponse = zod.object({
   "crew": zod.array(zod.object({
+  "discord_id": zod.string(),
   "display_name": zod.string(),
   "role": zod.enum(['owner', 'head_manager', 'manager', 'trainer', 'mechanic']),
+  "status": zod.enum(['online', 'offline', 'on_break']),
+  "in_city_id": zod.string().nullable(),
   "sales_channel": zod.string().nullable(),
   "week_labour": zod.number(),
   "week_orders": zod.int(),
@@ -225,6 +228,27 @@ export const GetPortalCrewResponse = zod.object({
   "crew_cut_rate": zod.number(),
   "total_pay": zod.number()
 }))
+})
+
+
+/**
+ * @summary Add or update a crew profile in the bot
+ */
+export const addPortalCrewMemberBodyDiscordIdMin = 17;
+export const addPortalCrewMemberBodyDiscordIdMax = 20;
+
+export const addPortalCrewMemberBodyDisplayNameMax = 64;
+
+
+
+export const AddPortalCrewMemberBody = zod.object({
+  "discord_id": zod.string().min(addPortalCrewMemberBodyDiscordIdMin).max(addPortalCrewMemberBodyDiscordIdMax),
+  "display_name": zod.string().min(1).max(addPortalCrewMemberBodyDisplayNameMax),
+  "role": zod.enum(['mechanic', 'trainer', 'manager'])
+})
+
+export const AddPortalCrewMemberResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 
@@ -373,6 +397,292 @@ export const UpdatePortalPayBody = zod.object({
 })
 
 export const UpdatePortalPayResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Run the regular crew payroll close through the bot
+ */
+export const ProcessPortalPayrollBody = zod.object({
+  "request_id": zod.uuid()
+})
+
+export const ProcessPortalPayrollResponse = zod.object({
+  "ok": zod.boolean(),
+  "mechanicCount": zod.int(),
+  "totalToBill": zod.number()
+})
+
+
+/**
+ * @summary List timeclock history visible to the signed-in account
+ */
+export const getPortalTimeclockQueryLimitMax = 500;
+
+
+
+export const GetPortalTimeclockQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(getPortalTimeclockQueryLimitMax).optional()
+})
+
+export const GetPortalTimeclockResponse = zod.object({
+  "entries": zod.array(zod.object({
+  "id": zod.string(),
+  "mechanic_id": zod.string(),
+  "mechanic_name": zod.string(),
+  "clock_in_time": zod.string(),
+  "clock_out_time": zod.string().nullable(),
+  "duration_minutes": zod.number(),
+  "status": zod.enum(['pending', 'approved', 'rejected']),
+  "notes": zod.string().nullable(),
+  "active": zod.boolean(),
+  "approved_by": zod.string().nullable(),
+  "created_at": zod.string()
+}))
+})
+
+
+/**
+ * @summary Approve or reject a completed timeclock entry
+ */
+export const ReviewPortalTimeclockParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ReviewPortalTimeclockBody = zod.object({
+  "decision": zod.enum(['approved', 'rejected'])
+})
+
+export const ReviewPortalTimeclockResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Clock out an active crew session as a manager
+ */
+export const ForcePortalClockOutParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const forcePortalClockOutBodyReasonMax = 300;
+
+
+
+export const ForcePortalClockOutBody = zod.object({
+  "reason": zod.string().max(forcePortalClockOutBodyReasonMax).optional()
+})
+
+export const ForcePortalClockOutResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Emergency clock out all active sessions
+ */
+export const ResetPortalTimeclockResponse = zod.object({
+  "ok": zod.boolean(),
+  "clocked_out": zod.int()
+})
+
+
+/**
+ * @summary List leave requests visible to the signed-in account
+ */
+export const GetPortalLeaveRequestsQueryParams = zod.object({
+  "status": zod.enum(['all', 'pending', 'approved', 'denied']).optional()
+})
+
+export const GetPortalLeaveRequestsResponse = zod.object({
+  "requests": zod.array(zod.object({
+  "id": zod.string(),
+  "mechanic_id": zod.string(),
+  "mechanic_name": zod.string(),
+  "reason": zod.string(),
+  "start_date": zod.string(),
+  "return_date": zod.string(),
+  "notes": zod.string().nullable(),
+  "status": zod.enum(['pending', 'approved', 'denied']),
+  "reviewed_by": zod.string().nullable(),
+  "created_at": zod.string()
+}))
+})
+
+
+/**
+ * @summary Submit a leave request for the signed-in crew account
+ */
+export const createPortalLeaveRequestBodyReasonMax = 500;
+
+export const createPortalLeaveRequestBodyNotesMax = 300;
+
+
+
+export const CreatePortalLeaveRequestBody = zod.object({
+  "reason": zod.string().min(1).max(createPortalLeaveRequestBodyReasonMax),
+  "start_date": zod.coerce.date(),
+  "return_date": zod.coerce.date(),
+  "notes": zod.string().max(createPortalLeaveRequestBodyNotesMax).optional()
+})
+
+export const CreatePortalLeaveRequestResponse = zod.object({
+  "request": zod.object({
+  "id": zod.string(),
+  "mechanic_id": zod.string(),
+  "mechanic_name": zod.string(),
+  "reason": zod.string(),
+  "start_date": zod.string(),
+  "return_date": zod.string(),
+  "notes": zod.string().nullable(),
+  "status": zod.enum(['pending', 'approved', 'denied']),
+  "reviewed_by": zod.string().nullable(),
+  "created_at": zod.string()
+})
+})
+
+
+/**
+ * @summary Approve or deny a pending leave request
+ */
+export const ReviewPortalLeaveRequestParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ReviewPortalLeaveRequestBody = zod.object({
+  "decision": zod.enum(['approved', 'denied'])
+})
+
+export const ReviewPortalLeaveRequestResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Load bank reconciliation and unpaid payout information
+ */
+export const GetPortalBankResponse = zod.object({
+  "logs": zod.array(zod.object({
+  "id": zod.string(),
+  "log_date": zod.string(),
+  "balance": zod.number(),
+  "expected_balance": zod.number(),
+  "variance": zod.number(),
+  "expected_change": zod.number(),
+  "payout_total": zod.number(),
+  "order_count": zod.int(),
+  "logged_by": zod.string(),
+  "logged_by_name": zod.string().nullable(),
+  "logged_at": zod.string()
+})),
+  "unpaid": zod.array(zod.object({
+  "discord_id": zod.string(),
+  "display_name": zod.string(),
+  "amount": zod.number(),
+  "payout_count": zod.int(),
+  "current_pay_status": zod.string()
+}))
+})
+
+
+/**
+ * @summary Record the current bank balance using the bot's reconciliation rules
+ */
+export const recordPortalBankBalanceBodyAmountMin = 0;
+
+
+
+export const RecordPortalBankBalanceBody = zod.object({
+  "amount": zod.number().min(recordPortalBankBalanceBodyAmountMin)
+})
+
+export const RecordPortalBankBalanceResponse = zod.object({
+  "log_date": zod.string(),
+  "balance": zod.number(),
+  "previous_balance": zod.number().nullable(),
+  "order_revenue": zod.number(),
+  "order_count": zod.int(),
+  "payout_total": zod.number(),
+  "payout_count": zod.int(),
+  "expected_balance": zod.number(),
+  "actual_change": zod.number(),
+  "variance": zod.number(),
+  "shortfall": zod.number(),
+  "surplus": zod.number(),
+  "logged_by": zod.string(),
+  "logged_at": zod.string(),
+  "is_update": zod.boolean()
+})
+
+
+/**
+ * @summary Start a new bank comparison baseline without deleting history
+ */
+export const resetPortalBankBaselineBodyAmountMin = 0;
+
+
+
+export const ResetPortalBankBaselineBody = zod.object({
+  "amount": zod.number().min(resetPortalBankBaselineBodyAmountMin)
+})
+
+export const ResetPortalBankBaselineResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Mark selected pending payouts as paid
+ */
+export const markPortalCrewPaidBodyDiscordIdsMax = 100;
+
+
+
+export const MarkPortalCrewPaidBody = zod.object({
+  "discord_ids": zod.array(zod.string()).min(1).max(markPortalCrewPaidBodyDiscordIdsMax)
+})
+
+export const MarkPortalCrewPaidResponse = zod.object({
+  "ok": zod.boolean(),
+  "marked_count": zod.int(),
+  "total": zod.number()
+})
+
+
+/**
+ * @summary Update a crew member's role or profile details
+ */
+export const UpdatePortalCrewMemberParams = zod.object({
+  "discordId": zod.coerce.string()
+})
+
+export const updatePortalCrewMemberBodyDisplayNameMax = 64;
+
+export const updatePortalCrewMemberBodyInCityIdMax = 40;
+
+
+
+export const UpdatePortalCrewMemberBody = zod.object({
+  "display_name": zod.string().min(1).max(updatePortalCrewMemberBodyDisplayNameMax).optional(),
+  "role": zod.enum(['mechanic', 'trainer', 'manager', 'owner']).optional(),
+  "status": zod.enum(['online', 'offline', 'on_break']).optional(),
+  "in_city_id": zod.string().max(updatePortalCrewMemberBodyInCityIdMax).nullish()
+})
+
+export const UpdatePortalCrewMemberResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Remove crew access while preserving orders and payroll history
+ */
+export const RemovePortalCrewMemberParams = zod.object({
+  "discordId": zod.coerce.string()
+})
+
+export const RemovePortalCrewMemberResponse = zod.object({
   "ok": zod.boolean()
 })
 

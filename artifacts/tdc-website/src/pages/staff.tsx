@@ -7,6 +7,7 @@ import {
   useGetPortalAccounts, useGetPortalChannels, useGetPortalCrew, useGetPortalOrders,
   useGetPortalPayouts, useGetPortalSession, useInviteAllPortalCrew,
   useInviteOnePortalCrewMember, useLoginPortal, useLogoutPortal, useUpdatePortalPay,
+  useProcessPortalPayroll,
   getGetPortalAccountsQueryKey, getGetPortalChannelsQueryKey, getGetPortalCrewQueryKey,
   getGetPortalOrdersQueryKey, getGetPortalPayoutsQueryKey, getGetPortalSessionQueryKey,
 } from "@workspace/api-client-react";
@@ -29,10 +30,10 @@ const isLead = (role?: PortalRole | null) => role === "owner" || role === "head_
 const canManageCrew = (role?: PortalRole | null) => isLead(role) || role === "manager";
 const isCompletedStatus = (status: string) => ["complete", "approved", "paid"].includes(status.toLowerCase());
 
-function Notice({ children, kind = "info" }: { children: ReactNode; kind?: "info" | "error" | "success" }) {
+export function Notice({ children, kind = "info" }: { children: ReactNode; kind?: "info" | "error" | "success" }) {
   return <div role="status" data-testid={`notice-${kind}`} className={`rounded-lg border px-4 py-3 text-sm ${kind === "error" ? "border-red-300 bg-red-50 text-red-800" : kind === "success" ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-border bg-card text-muted-foreground"}`}>{children}</div>;
 }
-function QueryState({ loading, error, retry }: { loading: boolean; error: boolean; retry: () => void }) {
+export function QueryState({ loading, error, retry }: { loading: boolean; error: boolean; retry: () => void }) {
   if (loading) return <div className="space-y-3" aria-label="Loading"><Skeleton className="h-12 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /></div>;
   if (error) return <Notice kind="error"><span>Could not load this desk view. </span><button className="font-semibold underline" onClick={retry} data-testid="button-retry">Try again</button></Notice>;
   return null;
@@ -110,7 +111,7 @@ export function PortalAuthPage({ mode }: { mode: "login" | "setup" | "activate" 
   </main>;
 }
 
-function StaffShell({ children, active }: { children: ReactNode; active: string }) {
+export function StaffShell({ children, active }: { children: ReactNode; active: string }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const session = useGetPortalSession();
@@ -128,6 +129,10 @@ function StaffShell({ children, active }: { children: ReactNode; active: string 
     { href: "/staff", label: "Overview", icon: Gauge, show: true },
     { href: "/staff/orders", label: "Orders", icon: ClipboardList, show: true },
     { href: "/staff/crew", label: "Crew & pay", icon: Users, show: canManageCrew(account.role) },
+    { href: "/staff/timeclock", label: "Timeclock", icon: Gauge, show: true },
+    { href: "/staff/leave", label: "Leave", icon: Activity, show: true },
+    { href: "/staff/bank", label: "Bank", icon: BadgeDollarSign, show: canManageCrew(account.role) },
+    { href: "/staff/crew-admin", label: "Crew admin", icon: Wrench, show: canManageCrew(account.role) },
     { href: "/staff/channels", label: "Sales channels", icon: MessageSquareText, show: true },
     { href: "/staff/accounts", label: "Portal accounts", icon: Settings2, show: isLead(account.role) },
   ];
@@ -147,7 +152,7 @@ function StaffShell({ children, active }: { children: ReactNode; active: string 
       <div className="flex items-center gap-3"><div className="hidden text-right sm:block"><p className="text-sm font-semibold" data-testid="text-session-username">{account.username}</p><p className="tdc-kicker text-muted-foreground">{titleCase(account.role)}</p></div><button onClick={signOut} disabled={logout.isPending} className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-semibold hover:bg-muted" data-testid="button-logout"><LogOut size={14}/><span className="hidden sm:inline">Sign out</span></button></div>
     </header>
     <div className="mx-auto grid max-w-[1600px] md:grid-cols-[230px_minmax(0,1fr)]">
-      <aside className={`${mobileOpen ? "block" : "hidden"} fixed inset-x-0 top-[66px] z-20 border-b border-[#38424a] bg-[#202a32] p-4 text-[#eee8dd] md:sticky md:top-[66px] md:block md:h-[calc(100dvh-66px)] md:border-b-0 md:border-r md:border-[#38424a] md:p-5`}>
+      <aside className={`${mobileOpen ? "block" : "hidden"} fixed inset-x-0 top-[66px] z-20 max-h-[calc(100dvh-66px)] overflow-y-auto border-b border-[#38424a] bg-[#202a32] p-4 text-[#eee8dd] md:sticky md:top-[66px] md:block md:h-[calc(100dvh-66px)] md:max-h-none md:overflow-visible md:border-b-0 md:border-r md:border-[#38424a] md:p-5`}>
         <p className="tdc-kicker mb-3 px-3 text-white/40">Operations</p>
         <nav className="space-y-1">{links.filter(l => l.show).map(({ href, label, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm transition-colors ${active === href ? "bg-[#34414a] text-white" : "text-white/65 hover:bg-white/5 hover:text-white"}`} data-testid={`link-nav-${href.split("/").pop() || "overview"}`}><Icon size={16}/>{label}{active === href && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#e0b448]"/>}</Link>)}</nav>
         <div className="mt-10 rounded-lg border border-white/10 bg-white/[.035] p-4"><p className="tdc-kicker text-[#e0b448]">Desk status</p><div className="mt-2 flex items-center gap-2 text-xs text-white/70"><span className="h-2 w-2 rounded-full bg-[#72a78a]"/>Private session active</div><p className="mt-2 text-[11px] leading-5 text-white/40">Account access is managed by your TDC lead.</p></div>
@@ -158,13 +163,13 @@ function StaffShell({ children, active }: { children: ReactNode; active: string 
   </div>;
 }
 
-function PageHead({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail: string; action?: React.ReactNode }) {
+export function PageHead({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail: string; action?: React.ReactNode }) {
   return <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="tdc-kicker text-primary">{eyebrow}</p><h1 className="mt-1 text-3xl font-bold tracking-tight md:text-[2.15rem]" data-testid="text-page-title">{title}</h1><p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{detail}</p></div>{action}</div>;
 }
 function Metric({ label, value, hint, icon: Icon, accent = "coral" }: { label: string; value: string; hint: string; icon: typeof Gauge; accent?: "coral" | "gold" | "green" }) {
   return <article className="tdc-panel p-5"><div className="flex items-start justify-between"><div><p className="tdc-kicker text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-bold tracking-tight" data-testid={`metric-${label.toLowerCase().replaceAll(" ", "-")}`}>{value}</p></div><span className={`grid h-9 w-9 place-items-center rounded-lg ${accent === "gold" ? "bg-[#f5eccf] text-[#896510]" : accent === "green" ? "bg-[#e0eee5] text-[#47785a]" : "bg-[#f7e4de] text-[#b34c37]"}`}><Icon size={17}/></span></div><p className="mt-2 text-xs text-muted-foreground">{hint}</p></article>;
 }
-function Empty({ icon: Icon, title, detail }: { icon: typeof Gauge; title: string; detail: string }) {
+export function Empty({ icon: Icon, title, detail }: { icon: typeof Gauge; title: string; detail: string }) {
   return <div className="flex flex-col items-center justify-center px-6 py-14 text-center"><span className="grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground"><Icon size={21}/></span><h3 className="mt-4 font-semibold">{title}</h3><p className="mt-1 max-w-sm text-sm text-muted-foreground">{detail}</p></div>;
 }
 
@@ -243,9 +248,12 @@ export function OrdersPage() {
 }
 
 export function CrewPage() {
+  const session = useGetPortalSession();
+  const canEditPay = canManageCrew(session.data?.account?.role);
   const crew = useGetPortalCrew();
   const payouts = useGetPortalPayouts({ limit: 100 });
   const pay = useUpdatePortalPay();
+  const payroll = useProcessPortalPayroll();
   const qc = useQueryClient();
   const [person, setPerson] = useState("");
   const [commission, setCommission] = useState("");
@@ -253,6 +261,8 @@ export function CrewPage() {
   const [commissionRate, setCommissionRate] = useState("");
   const [managerRate, setManagerRate] = useState("");
   const [message, setMessage] = useState("");
+  const [payrollRequestId, setPayrollRequestId] = useState("");
+  const [payrollMessage, setPayrollMessage] = useState("");
   const selectedCrew = crew.data?.crew.find(c => c.display_name === person);
   const managerEligible = selectedCrew?.role === "manager" || selectedCrew?.role === "owner";
   const hasPayChanges = Boolean(commission || cut || commissionRate || managerRate);
@@ -276,9 +286,23 @@ export function CrewPage() {
       await qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() });
     } catch { setMessage("Pay settings could not be saved. Please check the values and try again."); }
   };
+  const closePayroll = async () => {
+    if (!payrollRequestId.trim()) { setPayrollMessage("Enter the payroll request reference before closing."); return; }
+    if (!window.confirm("Confirm payroll close? This sends the weekly crew payroll through the bot.")) return;
+    setPayrollMessage("");
+    try {
+      const result = await payroll.mutateAsync({ data: { request_id: payrollRequestId.trim() } });
+      setPayrollMessage(`Payroll close recorded for ${result.mechanicCount} crew members · ${cash(result.totalToBill)} to bill.`);
+      setPayrollRequestId("");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() }),
+        qc.invalidateQueries({ queryKey: getGetPortalPayoutsQueryKey({ limit: 100 }) }),
+      ]);
+    } catch (err) { setPayrollMessage(err instanceof Error ? err.message : "Payroll close failed. Check your permissions and try again."); }
+  };
   return <StaffShell active="/staff/crew"><PageHead eyebrow="People / compensation" title="Crew & pay" detail="A clear weekly picture of labour, commission, crew cut and total pay."/>
     <section className="tdc-panel overflow-hidden"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Current week</p><h2 className="mt-1 font-bold">Crew earnings</h2></div><div className="tdc-kicker text-muted-foreground">{crew.data?.crew.length ?? 0} crew members</div></div><QueryState loading={crew.isLoading} error={!!crew.error} retry={() => void qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() })}/>{!crew.isLoading && !crew.error && (crew.data?.crew.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Crew member</th><th>Role</th><th>Sales channel</th><th>Orders</th><th>Labour</th><th>Rate</th><th>Commission</th><th>Crew cut</th><th>Total pay</th></tr></thead><tbody>{crew.data.crew.map((c, i) => <tr key={`${c.display_name}-${i}`} data-testid={`row-crew-${i}`}><td className="font-semibold">{c.display_name}</td><td className="capitalize">{titleCase(c.role)}</td><td className="text-muted-foreground">{c.sales_channel || "—"}</td><td>{c.week_orders}</td><td className="font-mono">{cash(c.week_labour)}</td><td className="font-mono">{(c.effective_rate * 100).toFixed(1)}%</td><td className="font-mono">{cash(c.week_commission)}</td><td className="font-mono">{cash(c.crew_cut)} <span className="text-[10px] text-muted-foreground">({c.crew_cut_rate}%)</span></td><td className="font-mono font-bold">{cash(c.total_pay)}</td></tr>)}</tbody></table></div> : <Empty icon={Users} title="No crew data" detail="Crew earnings will appear when the roster is available."/>)}</section>
-    <div className="mt-5 grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
+    {canEditPay && <div className="mt-5 grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
       <section className="tdc-panel p-5">
         <p className="tdc-kicker text-primary">Manager controls</p>
         <h2 className="mt-1 font-bold">Set weekly pay</h2>
@@ -299,7 +323,19 @@ export function CrewPage() {
         {message && <p className={`mt-3 text-xs ${message.includes("could not") ? "text-red-700" : "text-emerald-800"}`} role="status" data-testid="status-pay-result">{message}</p>}
       </section>
       <section className="tdc-panel overflow-hidden"><div className="border-b border-border px-5 py-4"><p className="tdc-kicker text-primary">Payroll record</p><h2 className="mt-1 font-bold">Payout history</h2></div><QueryState loading={payouts.isLoading} error={!!payouts.error} retry={() => void qc.invalidateQueries({ queryKey: getGetPortalPayoutsQueryKey({ limit: 100 }) })}/>{!payouts.isLoading && !payouts.error && (payouts.data?.payouts.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Week starting</th><th>Crew</th><th>Orders</th><th>Hours</th><th>Hourly pay</th><th>Manager cut</th><th>Total payout</th><th>Paid</th></tr></thead><tbody>{payouts.data.payouts.map(p => <tr key={p.id} data-testid={`row-payout-${p.id}`}><td>{dateOnly(p.week_start)}</td><td className="font-semibold">{p.mechanic_name}</td><td>{p.order_count}</td><td>{p.hours_worked}</td><td className="font-mono">{cash(p.hourly_pay)}</td><td className="font-mono">{cash(p.manager_cut)}</td><td className="font-mono font-bold">{cash(p.amount)}</td><td>{p.paid_at ? dateOnly(p.paid_at) : <span className="text-muted-foreground">Not marked paid</span>}</td></tr>)}</tbody></table></div> : <Empty icon={BadgeDollarSign} title="No payout records" detail="Payout entries will appear here when recorded."/>)}</section>
-    </div>
+    </div>}
+    {canEditPay && <section className="tdc-panel mt-5 p-5">
+      <p className="tdc-kicker text-primary">Weekly close</p>
+      <div className="mt-2 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div><h2 className="text-lg font-bold">Process crew payroll</h2><p className="mt-1 max-w-xl text-sm text-muted-foreground">Runs the regular payroll close through the bot. Confirm before posting the close.</p></div>
+        <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+          <label className="sr-only" htmlFor="payroll-request-id">Payroll request reference</label>
+          <Input id="payroll-request-id" className="tdc-input sm:w-64" value={payrollRequestId} onChange={e => setPayrollRequestId(e.target.value)} placeholder="Payroll request reference" data-testid="input-payroll-request-id"/>
+          <Button disabled={payroll.isPending || !payrollRequestId.trim()} onClick={() => void closePayroll()} data-testid="button-process-payroll">{payroll.isPending ? "Closing…" : "Close payroll"}</Button>
+        </div>
+      </div>
+      {payrollMessage && <div className="mt-3"><Notice kind={payrollMessage.includes("failed") || payrollMessage.includes("Enter") ? "error" : "success"}>{payrollMessage}</Notice></div>}
+    </section>}
   </StaffShell>;
 }
 

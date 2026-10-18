@@ -10,6 +10,7 @@ import { RaffleDetail } from "@/pages/raffle-detail";
 import {
   AccountsPage, ChannelsPage, CrewPage, OrdersPage, PortalAuthPage, StaffHome,
 } from "@/pages/staff";
+import { BankPage, CrewAdminPage, LeavePage, TimeclockPage } from "@/pages/staff-operations";
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,10 @@ function Router() {
       <Route path="/staff/activate" component={() => <PortalAuthPage mode="activate" />} />
       <Route path="/staff/orders" component={OrdersPage} />
       <Route path="/staff/crew" component={CrewPage} />
+      <Route path="/staff/timeclock" component={TimeclockPage} />
+      <Route path="/staff/leave" component={LeavePage} />
+      <Route path="/staff/bank" component={BankPage} />
+      <Route path="/staff/crew-admin" component={CrewAdminPage} />
       <Route path="/staff/channels" component={ChannelsPage} />
       <Route path="/staff/accounts" component={AccountsPage} />
       <Route path="/staff" component={StaffHome} />

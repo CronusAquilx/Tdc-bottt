@@ -235,6 +235,27 @@ paths:
           description: Sign in required
         "403":
           description: Management role required
+    post:
+      operationId: addPortalCrewMember
+      tags: [portal]
+      summary: Add or update a crew profile in the bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCrewInput"
+      responses:
+        "200":
+          description: Crew profile added or updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
   /portal/channels:
     get:
       operationId: getPortalChannels
@@ -394,6 +415,339 @@ paths:
           description: Sign in required
         "403":
           description: Manager role required
+  /portal/payroll:
+    post:
+      operationId: processPortalPayroll
+      tags: [portal]
+      summary: Run the regular crew payroll close through the bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalPayrollInput"
+      responses:
+        "200":
+          description: Payroll processing result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPayrollResult"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/timeclock:
+    get:
+      operationId: getPortalTimeclock
+      tags: [portal]
+      summary: List timeclock history visible to the signed-in account
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Timeclock entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalTimeclockEntry"
+        "401":
+          description: Sign in required
+  /portal/timeclock/{id}/review:
+    post:
+      operationId: reviewPortalTimeclock
+      tags: [portal]
+      summary: Approve or reject a completed timeclock entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalTimeclockReviewInput"
+      responses:
+        "200":
+          description: Timeclock entry reviewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Trainer or manager role required
+  /portal/timeclock/{id}/clock-out:
+    post:
+      operationId: forcePortalClockOut
+      tags: [portal]
+      summary: Clock out an active crew session as a manager
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalClockOutInput"
+      responses:
+        "200":
+          description: Crew session clocked out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/timeclock/reset:
+    post:
+      operationId: resetPortalTimeclock
+      tags: [portal]
+      summary: Emergency clock out all active sessions
+      responses:
+        "200":
+          description: Reset result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalTimeclockResetResult"
+        "401":
+          description: Sign in required
+        "403":
+          description: Owner role required
+  /portal/loa:
+    get:
+      operationId: getPortalLeaveRequests
+      tags: [portal]
+      summary: List leave requests visible to the signed-in account
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, pending, approved, denied]
+      responses:
+        "200":
+          description: Leave requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requests]
+                properties:
+                  requests:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalLeaveRequest"
+        "401":
+          description: Sign in required
+    post:
+      operationId: createPortalLeaveRequest
+      tags: [portal]
+      summary: Submit a leave request for the signed-in crew account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLeaveInput"
+      responses:
+        "201":
+          description: Leave request submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request]
+                properties:
+                  request:
+                    $ref: "#/components/schemas/PortalLeaveRequest"
+        "401":
+          description: Sign in required
+        "403":
+          description: No matching crew record
+  /portal/loa/{id}/review:
+    post:
+      operationId: reviewPortalLeaveRequest
+      tags: [portal]
+      summary: Approve or deny a pending leave request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLeaveReviewInput"
+      responses:
+        "200":
+          description: Leave request reviewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/bank:
+    get:
+      operationId: getPortalBank
+      tags: [portal]
+      summary: Load bank reconciliation and unpaid payout information
+      responses:
+        "200":
+          description: Bank reconciliation data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalBankDashboard"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/bank/record:
+    post:
+      operationId: recordPortalBankBalance
+      tags: [portal]
+      summary: Record the current bank balance using the bot's reconciliation rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalBankAmountInput"
+      responses:
+        "200":
+          description: Bank balance recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalBankRecordResult"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/bank/reset:
+    post:
+      operationId: resetPortalBankBaseline
+      tags: [portal]
+      summary: Start a new bank comparison baseline without deleting history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalBankAmountInput"
+      responses:
+        "200":
+          description: Bank baseline reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/bank/mark-paid:
+    post:
+      operationId: markPortalCrewPaid
+      tags: [portal]
+      summary: Mark selected pending payouts as paid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalBankPaidInput"
+      responses:
+        "200":
+          description: Payment marking result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalBankPaidResult"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/crew/{discordId}:
+    patch:
+      operationId: updatePortalCrewMember
+      tags: [portal]
+      summary: Update a crew member's role or profile details
+      parameters:
+        - name: discordId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCrewUpdate"
+      responses:
+        "200":
+          description: Crew profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account cannot change this crew member
+    delete:
+      operationId: removePortalCrewMember
+      tags: [portal]
+      summary: Remove crew access while preserving orders and payroll history
+      parameters:
+        - name: discordId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Crew member removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account cannot remove this crew member
   /portal/orders/{id}/complete:
     post:
       operationId: completePortalOrder
@@ -570,12 +924,19 @@ components:
           type: ["string", "null"]
     PortalCrewMember:
       type: object
-      required: [display_name, role, sales_channel, week_labour, week_orders, effective_rate, week_commission, crew_cut, crew_cut_rate, total_pay]
+      required: [discord_id, display_name, role, status, in_city_id, sales_channel, week_labour, week_orders, effective_rate, week_commission, crew_cut, crew_cut_rate, total_pay]
       properties:
+        discord_id:
+          type: string
         display_name:
           type: string
         role:
           $ref: "#/components/schemas/PortalRole"
+        status:
+          type: string
+          enum: [online, offline, on_break]
+        in_city_id:
+          type: ["string", "null"]
         sales_channel:
           type: ["string", "null"]
         week_labour:
@@ -724,3 +1085,263 @@ components:
           type: ["number", "null"]
           minimum: 0
           maximum: 100
+    PortalPayrollInput:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+    PortalPayrollResult:
+      type: object
+      required: [ok, mechanicCount, totalToBill]
+      properties:
+        ok:
+          type: boolean
+        mechanicCount:
+          type: integer
+        totalToBill:
+          type: number
+    PortalTimeclockEntry:
+      type: object
+      required: [id, mechanic_id, mechanic_name, clock_in_time, clock_out_time, duration_minutes, status, notes, active, approved_by, created_at]
+      properties:
+        id:
+          type: string
+        mechanic_id:
+          type: string
+        mechanic_name:
+          type: string
+        clock_in_time:
+          type: string
+        clock_out_time:
+          type: ["string", "null"]
+        duration_minutes:
+          type: number
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        notes:
+          type: ["string", "null"]
+        active:
+          type: boolean
+        approved_by:
+          type: ["string", "null"]
+        created_at:
+          type: string
+    PortalTimeclockReviewInput:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+    PortalClockOutInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 300
+    PortalTimeclockResetResult:
+      type: object
+      required: [ok, clocked_out]
+      properties:
+        ok:
+          type: boolean
+        clocked_out:
+          type: integer
+    PortalLeaveRequest:
+      type: object
+      required: [id, mechanic_id, mechanic_name, reason, start_date, return_date, notes, status, reviewed_by, created_at]
+      properties:
+        id:
+          type: string
+        mechanic_id:
+          type: string
+        mechanic_name:
+          type: string
+        reason:
+          type: string
+        start_date:
+          type: string
+        return_date:
+          type: string
+        notes:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, approved, denied]
+        reviewed_by:
+          type: ["string", "null"]
+        created_at:
+          type: string
+    PortalLeaveInput:
+      type: object
+      required: [reason, start_date, return_date]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        start_date:
+          type: string
+          format: date
+        return_date:
+          type: string
+          format: date
+        notes:
+          type: string
+          maxLength: 300
+    PortalLeaveReviewInput:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, denied]
+    PortalBankDashboard:
+      type: object
+      required: [logs, unpaid]
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalBankLog"
+        unpaid:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalUnpaidPayout"
+    PortalBankLog:
+      type: object
+      required: [id, log_date, balance, expected_balance, variance, expected_change, payout_total, order_count, logged_by, logged_by_name, logged_at]
+      properties:
+        id:
+          type: string
+        log_date:
+          type: string
+        balance:
+          type: number
+        expected_balance:
+          type: number
+        variance:
+          type: number
+        expected_change:
+          type: number
+        payout_total:
+          type: number
+        order_count:
+          type: integer
+        logged_by:
+          type: string
+        logged_by_name:
+          type: ["string", "null"]
+        logged_at:
+          type: string
+    PortalUnpaidPayout:
+      type: object
+      required: [discord_id, display_name, amount, payout_count, current_pay_status]
+      properties:
+        discord_id:
+          type: string
+        display_name:
+          type: string
+        amount:
+          type: number
+        payout_count:
+          type: integer
+        current_pay_status:
+          type: string
+    PortalBankAmountInput:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          minimum: 0
+    PortalBankRecordResult:
+      type: object
+      required: [log_date, balance, previous_balance, order_revenue, order_count, payout_total, payout_count, expected_balance, actual_change, variance, shortfall, surplus, logged_by, logged_at, is_update]
+      properties:
+        log_date:
+          type: string
+        balance:
+          type: number
+        previous_balance:
+          type: ["number", "null"]
+        order_revenue:
+          type: number
+        order_count:
+          type: integer
+        payout_total:
+          type: number
+        payout_count:
+          type: integer
+        expected_balance:
+          type: number
+        actual_change:
+          type: number
+        variance:
+          type: number
+        shortfall:
+          type: number
+        surplus:
+          type: number
+        logged_by:
+          type: string
+        logged_at:
+          type: string
+        is_update:
+          type: boolean
+    PortalBankPaidInput:
+      type: object
+      required: [discord_ids]
+      properties:
+        discord_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+    PortalBankPaidResult:
+      type: object
+      required: [ok, marked_count, total]
+      properties:
+        ok:
+          type: boolean
+        marked_count:
+          type: integer
+        total:
+          type: number
+    PortalCrewRole:
+      type: string
+      enum: [mechanic, trainer, manager, owner]
+    PortalCrewInput:
+      type: object
+      required: [discord_id, display_name, role]
+      properties:
+        discord_id:
+          type: string
+          minLength: 17
+          maxLength: 20
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role:
+          type: string
+          enum: [mechanic, trainer, manager]
+    PortalCrewUpdate:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role:
+          $ref: "#/components/schemas/PortalCrewRole"
+        status:
+          type: string
+          enum: [online, offline, on_break]
+        in_city_id:
+          type: ["string", "null"]
+          maxLength: 40

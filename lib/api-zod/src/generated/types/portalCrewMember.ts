@@ -5,11 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PortalCrewMemberStatus } from './portalCrewMemberStatus';
 import type { PortalRole } from './portalRole';
 
 export interface PortalCrewMember {
+  discord_id: string;
   display_name: string;
   role: PortalRole;
+  status: PortalCrewMemberStatus;
+  /** @nullable */
+  in_city_id: string | null;
   /** @nullable */
   sales_channel: string | null;
   week_labour: number;

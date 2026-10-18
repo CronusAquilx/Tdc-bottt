@@ -25,14 +25,19 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CreatePortalLeaveRequest201,
   GetPortalAccounts200,
   GetPortalChannels200,
   GetPortalChannelsParams,
   GetPortalCrew200,
+  GetPortalLeaveRequests200,
+  GetPortalLeaveRequestsParams,
   GetPortalOrders200,
   GetPortalOrdersParams,
   GetPortalPayouts200,
   GetPortalPayoutsParams,
+  GetPortalTimeclock200,
+  GetPortalTimeclockParams,
   GetRaffle200,
   GetRaffleEntries200,
   GetRaffles200,
@@ -40,13 +45,27 @@ import type {
   PortalAccountInput,
   PortalAccountInvite,
   PortalActivation,
+  PortalBankAmountInput,
+  PortalBankDashboard,
+  PortalBankPaidInput,
+  PortalBankPaidResult,
+  PortalBankRecordResult,
   PortalBootstrap,
+  PortalClockOutInput,
+  PortalCrewInput,
+  PortalCrewUpdate,
   PortalInviteInput,
   PortalInviteSummary,
+  PortalLeaveInput,
+  PortalLeaveReviewInput,
   PortalLogin,
   PortalOk,
   PortalPayUpdate,
-  PortalSession
+  PortalPayrollInput,
+  PortalPayrollResult,
+  PortalSession,
+  PortalTimeclockResetResult,
+  PortalTimeclockReviewInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1128,6 +1147,94 @@ export function useGetPortalCrew<TData = Awaited<ReturnType<typeof getPortalCrew
 
 
 
+export const getAddPortalCrewMemberUrl = () => {
+
+
+
+
+  return `/api/portal/crew`
+}
+
+/**
+ * @summary Add or update a crew profile in the bot
+ */
+export const addPortalCrewMember = async (portalCrewInput: PortalCrewInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getAddPortalCrewMemberUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalCrewInput)
+  }
+);}
+
+
+
+
+
+export const getAddPortalCrewMemberMutationKey = () => ['addPortalCrewMember'] as const;
+
+export const getAddPortalCrewMemberMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPortalCrewMember>>, TError,AddPortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof addPortalCrewMember>>, TError,AddPortalCrewMemberMutationVariables, TContext> => {
+
+const mutationKey = getAddPortalCrewMemberMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addPortalCrewMember>>, AddPortalCrewMemberMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  addPortalCrewMember(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddPortalCrewMemberMutationResult = NonNullable<Awaited<ReturnType<typeof addPortalCrewMember>>>
+    export type AddPortalCrewMemberMutationBody = BodyType<PortalCrewInput>
+    export type AddPortalCrewMemberMutationError = ErrorType<void>
+    export type AddPortalCrewMemberMutationVariables = {data: BodyType<PortalCrewInput>}
+
+    /**
+ * @summary Add or update a crew profile in the bot
+ */
+export const useAddPortalCrewMember = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPortalCrewMember>>, TError,AddPortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addPortalCrewMember>>,
+        TError,
+        AddPortalCrewMemberMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAddPortalCrewMemberMutationOptions(options), queryClient);
+    }
+
 export const getGetPortalChannelsUrl = (params?: GetPortalChannelsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -1781,6 +1888,1267 @@ export const useUpdatePortalPay = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdatePortalPayMutationOptions(options), queryClient);
+    }
+
+export const getProcessPortalPayrollUrl = () => {
+
+
+
+
+  return `/api/portal/payroll`
+}
+
+/**
+ * @summary Run the regular crew payroll close through the bot
+ */
+export const processPortalPayroll = async (portalPayrollInput: PortalPayrollInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalPayrollResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalPayrollResult>(getProcessPortalPayrollUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalPayrollInput)
+  }
+);}
+
+
+
+
+
+export const getProcessPortalPayrollMutationKey = () => ['processPortalPayroll'] as const;
+
+export const getProcessPortalPayrollMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof processPortalPayroll>>, TError,ProcessPortalPayrollMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof processPortalPayroll>>, TError,ProcessPortalPayrollMutationVariables, TContext> => {
+
+const mutationKey = getProcessPortalPayrollMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof processPortalPayroll>>, ProcessPortalPayrollMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  processPortalPayroll(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProcessPortalPayrollMutationResult = NonNullable<Awaited<ReturnType<typeof processPortalPayroll>>>
+    export type ProcessPortalPayrollMutationBody = BodyType<PortalPayrollInput>
+    export type ProcessPortalPayrollMutationError = ErrorType<void>
+    export type ProcessPortalPayrollMutationVariables = {data: BodyType<PortalPayrollInput>}
+
+    /**
+ * @summary Run the regular crew payroll close through the bot
+ */
+export const useProcessPortalPayroll = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof processPortalPayroll>>, TError,ProcessPortalPayrollMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof processPortalPayroll>>,
+        TError,
+        ProcessPortalPayrollMutationVariables,
+        TContext
+      > => {
+      return useMutation(getProcessPortalPayrollMutationOptions(options), queryClient);
+    }
+
+export const getGetPortalTimeclockUrl = (params?: GetPortalTimeclockParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/portal/timeclock?${stringifiedParams}` : `/api/portal/timeclock`
+}
+
+/**
+ * @summary List timeclock history visible to the signed-in account
+ */
+export const getPortalTimeclock = async (params?: GetPortalTimeclockParams, options?: Parameters<typeof customFetch>[1]): Promise<GetPortalTimeclock200> => {
+
+  return customFetch<GetPortalTimeclock200>(getGetPortalTimeclockUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortalTimeclockQueryKey = (params?: GetPortalTimeclockParams,) => {
+    return [
+    `/api/portal/timeclock`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPortalTimeclockQueryOptions = <TData = Awaited<ReturnType<typeof getPortalTimeclock>>, TError = ErrorType<void>>(params?: GetPortalTimeclockParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalTimeclockQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalTimeclock>>> = ({ signal }) => getPortalTimeclock(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalTimeclockQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalTimeclock>>>
+export type GetPortalTimeclockQueryError = ErrorType<void>
+
+
+export function useGetPortalTimeclock<TData = Awaited<ReturnType<typeof getPortalTimeclock>>, TError = ErrorType<void>>(
+ params: undefined |  GetPortalTimeclockParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalTimeclock>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalTimeclock>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalTimeclock<TData = Awaited<ReturnType<typeof getPortalTimeclock>>, TError = ErrorType<void>>(
+ params?: GetPortalTimeclockParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalTimeclock>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalTimeclock>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalTimeclock<TData = Awaited<ReturnType<typeof getPortalTimeclock>>, TError = ErrorType<void>>(
+ params?: GetPortalTimeclockParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List timeclock history visible to the signed-in account
+ */
+
+export function useGetPortalTimeclock<TData = Awaited<ReturnType<typeof getPortalTimeclock>>, TError = ErrorType<void>>(
+ params?: GetPortalTimeclockParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalTimeclock>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalTimeclockQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReviewPortalTimeclockUrl = (id: string,) => {
+
+
+
+
+  return `/api/portal/timeclock/${id}/review`
+}
+
+/**
+ * @summary Approve or reject a completed timeclock entry
+ */
+export const reviewPortalTimeclock = async (id: string,
+    portalTimeclockReviewInput: PortalTimeclockReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getReviewPortalTimeclockUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalTimeclockReviewInput)
+  }
+);}
+
+
+
+
+
+export const getReviewPortalTimeclockMutationKey = () => ['reviewPortalTimeclock'] as const;
+
+export const getReviewPortalTimeclockMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewPortalTimeclock>>, TError,ReviewPortalTimeclockMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewPortalTimeclock>>, TError,ReviewPortalTimeclockMutationVariables, TContext> => {
+
+const mutationKey = getReviewPortalTimeclockMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewPortalTimeclock>>, ReviewPortalTimeclockMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  reviewPortalTimeclock(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewPortalTimeclockMutationResult = NonNullable<Awaited<ReturnType<typeof reviewPortalTimeclock>>>
+    export type ReviewPortalTimeclockMutationBody = BodyType<PortalTimeclockReviewInput>
+    export type ReviewPortalTimeclockMutationError = ErrorType<void>
+    export type ReviewPortalTimeclockMutationVariables = {id: string;data: BodyType<PortalTimeclockReviewInput>}
+
+    /**
+ * @summary Approve or reject a completed timeclock entry
+ */
+export const useReviewPortalTimeclock = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewPortalTimeclock>>, TError,ReviewPortalTimeclockMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reviewPortalTimeclock>>,
+        TError,
+        ReviewPortalTimeclockMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReviewPortalTimeclockMutationOptions(options), queryClient);
+    }
+
+export const getForcePortalClockOutUrl = (id: string,) => {
+
+
+
+
+  return `/api/portal/timeclock/${id}/clock-out`
+}
+
+/**
+ * @summary Clock out an active crew session as a manager
+ */
+export const forcePortalClockOut = async (id: string,
+    portalClockOutInput?: PortalClockOutInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getForcePortalClockOutUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalClockOutInput)
+  }
+);}
+
+
+
+
+
+export const getForcePortalClockOutMutationKey = () => ['forcePortalClockOut'] as const;
+
+export const getForcePortalClockOutMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forcePortalClockOut>>, TError,ForcePortalClockOutMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof forcePortalClockOut>>, TError,ForcePortalClockOutMutationVariables, TContext> => {
+
+const mutationKey = getForcePortalClockOutMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forcePortalClockOut>>, ForcePortalClockOutMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  forcePortalClockOut(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ForcePortalClockOutMutationResult = NonNullable<Awaited<ReturnType<typeof forcePortalClockOut>>>
+    export type ForcePortalClockOutMutationBody = BodyType<PortalClockOutInput> | undefined
+    export type ForcePortalClockOutMutationError = ErrorType<void>
+    export type ForcePortalClockOutMutationVariables = {id: string;data?: BodyType<PortalClockOutInput>}
+
+    /**
+ * @summary Clock out an active crew session as a manager
+ */
+export const useForcePortalClockOut = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forcePortalClockOut>>, TError,ForcePortalClockOutMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof forcePortalClockOut>>,
+        TError,
+        ForcePortalClockOutMutationVariables,
+        TContext
+      > => {
+      return useMutation(getForcePortalClockOutMutationOptions(options), queryClient);
+    }
+
+export const getResetPortalTimeclockUrl = () => {
+
+
+
+
+  return `/api/portal/timeclock/reset`
+}
+
+/**
+ * @summary Emergency clock out all active sessions
+ */
+export const resetPortalTimeclock = async ( options?: Parameters<typeof customFetch>[1]): Promise<PortalTimeclockResetResult> => {
+
+  return customFetch<PortalTimeclockResetResult>(getResetPortalTimeclockUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getResetPortalTimeclockMutationKey = () => ['resetPortalTimeclock'] as const;
+
+export const getResetPortalTimeclockMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPortalTimeclock>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetPortalTimeclock>>, TError,void, TContext> => {
+
+const mutationKey = getResetPortalTimeclockMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetPortalTimeclock>>, void> = () => {
+
+
+          return  resetPortalTimeclock(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResetPortalTimeclockMutationResult = NonNullable<Awaited<ReturnType<typeof resetPortalTimeclock>>>
+
+    export type ResetPortalTimeclockMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Emergency clock out all active sessions
+ */
+export const useResetPortalTimeclock = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPortalTimeclock>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resetPortalTimeclock>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getResetPortalTimeclockMutationOptions(options), queryClient);
+    }
+
+export const getGetPortalLeaveRequestsUrl = (params?: GetPortalLeaveRequestsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/portal/loa?${stringifiedParams}` : `/api/portal/loa`
+}
+
+/**
+ * @summary List leave requests visible to the signed-in account
+ */
+export const getPortalLeaveRequests = async (params?: GetPortalLeaveRequestsParams, options?: Parameters<typeof customFetch>[1]): Promise<GetPortalLeaveRequests200> => {
+
+  return customFetch<GetPortalLeaveRequests200>(getGetPortalLeaveRequestsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortalLeaveRequestsQueryKey = (params?: GetPortalLeaveRequestsParams,) => {
+    return [
+    `/api/portal/loa`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPortalLeaveRequestsQueryOptions = <TData = Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError = ErrorType<void>>(params?: GetPortalLeaveRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalLeaveRequestsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalLeaveRequests>>> = ({ signal }) => getPortalLeaveRequests(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalLeaveRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalLeaveRequests>>>
+export type GetPortalLeaveRequestsQueryError = ErrorType<void>
+
+
+export function useGetPortalLeaveRequests<TData = Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError = ErrorType<void>>(
+ params: undefined |  GetPortalLeaveRequestsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalLeaveRequests>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalLeaveRequests>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalLeaveRequests<TData = Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError = ErrorType<void>>(
+ params?: GetPortalLeaveRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalLeaveRequests>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalLeaveRequests>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalLeaveRequests<TData = Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError = ErrorType<void>>(
+ params?: GetPortalLeaveRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List leave requests visible to the signed-in account
+ */
+
+export function useGetPortalLeaveRequests<TData = Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError = ErrorType<void>>(
+ params?: GetPortalLeaveRequestsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalLeaveRequests>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalLeaveRequestsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePortalLeaveRequestUrl = () => {
+
+
+
+
+  return `/api/portal/loa`
+}
+
+/**
+ * @summary Submit a leave request for the signed-in crew account
+ */
+export const createPortalLeaveRequest = async (portalLeaveInput: PortalLeaveInput, options?: Parameters<typeof customFetch>[1]): Promise<CreatePortalLeaveRequest201> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<CreatePortalLeaveRequest201>(getCreatePortalLeaveRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalLeaveInput)
+  }
+);}
+
+
+
+
+
+export const getCreatePortalLeaveRequestMutationKey = () => ['createPortalLeaveRequest'] as const;
+
+export const getCreatePortalLeaveRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalLeaveRequest>>, TError,CreatePortalLeaveRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPortalLeaveRequest>>, TError,CreatePortalLeaveRequestMutationVariables, TContext> => {
+
+const mutationKey = getCreatePortalLeaveRequestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPortalLeaveRequest>>, CreatePortalLeaveRequestMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPortalLeaveRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePortalLeaveRequestMutationResult = NonNullable<Awaited<ReturnType<typeof createPortalLeaveRequest>>>
+    export type CreatePortalLeaveRequestMutationBody = BodyType<PortalLeaveInput>
+    export type CreatePortalLeaveRequestMutationError = ErrorType<void>
+    export type CreatePortalLeaveRequestMutationVariables = {data: BodyType<PortalLeaveInput>}
+
+    /**
+ * @summary Submit a leave request for the signed-in crew account
+ */
+export const useCreatePortalLeaveRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalLeaveRequest>>, TError,CreatePortalLeaveRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPortalLeaveRequest>>,
+        TError,
+        CreatePortalLeaveRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePortalLeaveRequestMutationOptions(options), queryClient);
+    }
+
+export const getReviewPortalLeaveRequestUrl = (id: string,) => {
+
+
+
+
+  return `/api/portal/loa/${id}/review`
+}
+
+/**
+ * @summary Approve or deny a pending leave request
+ */
+export const reviewPortalLeaveRequest = async (id: string,
+    portalLeaveReviewInput: PortalLeaveReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getReviewPortalLeaveRequestUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalLeaveReviewInput)
+  }
+);}
+
+
+
+
+
+export const getReviewPortalLeaveRequestMutationKey = () => ['reviewPortalLeaveRequest'] as const;
+
+export const getReviewPortalLeaveRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewPortalLeaveRequest>>, TError,ReviewPortalLeaveRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewPortalLeaveRequest>>, TError,ReviewPortalLeaveRequestMutationVariables, TContext> => {
+
+const mutationKey = getReviewPortalLeaveRequestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewPortalLeaveRequest>>, ReviewPortalLeaveRequestMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  reviewPortalLeaveRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewPortalLeaveRequestMutationResult = NonNullable<Awaited<ReturnType<typeof reviewPortalLeaveRequest>>>
+    export type ReviewPortalLeaveRequestMutationBody = BodyType<PortalLeaveReviewInput>
+    export type ReviewPortalLeaveRequestMutationError = ErrorType<void>
+    export type ReviewPortalLeaveRequestMutationVariables = {id: string;data: BodyType<PortalLeaveReviewInput>}
+
+    /**
+ * @summary Approve or deny a pending leave request
+ */
+export const useReviewPortalLeaveRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewPortalLeaveRequest>>, TError,ReviewPortalLeaveRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof reviewPortalLeaveRequest>>,
+        TError,
+        ReviewPortalLeaveRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReviewPortalLeaveRequestMutationOptions(options), queryClient);
+    }
+
+export const getGetPortalBankUrl = () => {
+
+
+
+
+  return `/api/portal/bank`
+}
+
+/**
+ * @summary Load bank reconciliation and unpaid payout information
+ */
+export const getPortalBank = async ( options?: Parameters<typeof customFetch>[1]): Promise<PortalBankDashboard> => {
+
+  return customFetch<PortalBankDashboard>(getGetPortalBankUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortalBankQueryKey = () => {
+    return [
+    `/api/portal/bank`
+    ] as const;
+    }
+
+
+export const getGetPortalBankQueryOptions = <TData = Awaited<ReturnType<typeof getPortalBank>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalBankQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalBank>>> = ({ signal }) => getPortalBank({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalBankQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalBank>>>
+export type GetPortalBankQueryError = ErrorType<void>
+
+
+export function useGetPortalBank<TData = Awaited<ReturnType<typeof getPortalBank>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalBank>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalBank>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalBank<TData = Awaited<ReturnType<typeof getPortalBank>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalBank>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalBank>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalBank<TData = Awaited<ReturnType<typeof getPortalBank>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Load bank reconciliation and unpaid payout information
+ */
+
+export function useGetPortalBank<TData = Awaited<ReturnType<typeof getPortalBank>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalBank>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalBankQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordPortalBankBalanceUrl = () => {
+
+
+
+
+  return `/api/portal/bank/record`
+}
+
+/**
+ * @summary Record the current bank balance using the bot's reconciliation rules
+ */
+export const recordPortalBankBalance = async (portalBankAmountInput: PortalBankAmountInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalBankRecordResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalBankRecordResult>(getRecordPortalBankBalanceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalBankAmountInput)
+  }
+);}
+
+
+
+
+
+export const getRecordPortalBankBalanceMutationKey = () => ['recordPortalBankBalance'] as const;
+
+export const getRecordPortalBankBalanceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordPortalBankBalance>>, TError,RecordPortalBankBalanceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordPortalBankBalance>>, TError,RecordPortalBankBalanceMutationVariables, TContext> => {
+
+const mutationKey = getRecordPortalBankBalanceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordPortalBankBalance>>, RecordPortalBankBalanceMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordPortalBankBalance(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordPortalBankBalanceMutationResult = NonNullable<Awaited<ReturnType<typeof recordPortalBankBalance>>>
+    export type RecordPortalBankBalanceMutationBody = BodyType<PortalBankAmountInput>
+    export type RecordPortalBankBalanceMutationError = ErrorType<void>
+    export type RecordPortalBankBalanceMutationVariables = {data: BodyType<PortalBankAmountInput>}
+
+    /**
+ * @summary Record the current bank balance using the bot's reconciliation rules
+ */
+export const useRecordPortalBankBalance = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordPortalBankBalance>>, TError,RecordPortalBankBalanceMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordPortalBankBalance>>,
+        TError,
+        RecordPortalBankBalanceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordPortalBankBalanceMutationOptions(options), queryClient);
+    }
+
+export const getResetPortalBankBaselineUrl = () => {
+
+
+
+
+  return `/api/portal/bank/reset`
+}
+
+/**
+ * @summary Start a new bank comparison baseline without deleting history
+ */
+export const resetPortalBankBaseline = async (portalBankAmountInput: PortalBankAmountInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getResetPortalBankBaselineUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalBankAmountInput)
+  }
+);}
+
+
+
+
+
+export const getResetPortalBankBaselineMutationKey = () => ['resetPortalBankBaseline'] as const;
+
+export const getResetPortalBankBaselineMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPortalBankBaseline>>, TError,ResetPortalBankBaselineMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetPortalBankBaseline>>, TError,ResetPortalBankBaselineMutationVariables, TContext> => {
+
+const mutationKey = getResetPortalBankBaselineMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetPortalBankBaseline>>, ResetPortalBankBaselineMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  resetPortalBankBaseline(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResetPortalBankBaselineMutationResult = NonNullable<Awaited<ReturnType<typeof resetPortalBankBaseline>>>
+    export type ResetPortalBankBaselineMutationBody = BodyType<PortalBankAmountInput>
+    export type ResetPortalBankBaselineMutationError = ErrorType<void>
+    export type ResetPortalBankBaselineMutationVariables = {data: BodyType<PortalBankAmountInput>}
+
+    /**
+ * @summary Start a new bank comparison baseline without deleting history
+ */
+export const useResetPortalBankBaseline = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPortalBankBaseline>>, TError,ResetPortalBankBaselineMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resetPortalBankBaseline>>,
+        TError,
+        ResetPortalBankBaselineMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResetPortalBankBaselineMutationOptions(options), queryClient);
+    }
+
+export const getMarkPortalCrewPaidUrl = () => {
+
+
+
+
+  return `/api/portal/bank/mark-paid`
+}
+
+/**
+ * @summary Mark selected pending payouts as paid
+ */
+export const markPortalCrewPaid = async (portalBankPaidInput: PortalBankPaidInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalBankPaidResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalBankPaidResult>(getMarkPortalCrewPaidUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalBankPaidInput)
+  }
+);}
+
+
+
+
+
+export const getMarkPortalCrewPaidMutationKey = () => ['markPortalCrewPaid'] as const;
+
+export const getMarkPortalCrewPaidMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markPortalCrewPaid>>, TError,MarkPortalCrewPaidMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markPortalCrewPaid>>, TError,MarkPortalCrewPaidMutationVariables, TContext> => {
+
+const mutationKey = getMarkPortalCrewPaidMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markPortalCrewPaid>>, MarkPortalCrewPaidMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  markPortalCrewPaid(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkPortalCrewPaidMutationResult = NonNullable<Awaited<ReturnType<typeof markPortalCrewPaid>>>
+    export type MarkPortalCrewPaidMutationBody = BodyType<PortalBankPaidInput>
+    export type MarkPortalCrewPaidMutationError = ErrorType<void>
+    export type MarkPortalCrewPaidMutationVariables = {data: BodyType<PortalBankPaidInput>}
+
+    /**
+ * @summary Mark selected pending payouts as paid
+ */
+export const useMarkPortalCrewPaid = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markPortalCrewPaid>>, TError,MarkPortalCrewPaidMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof markPortalCrewPaid>>,
+        TError,
+        MarkPortalCrewPaidMutationVariables,
+        TContext
+      > => {
+      return useMutation(getMarkPortalCrewPaidMutationOptions(options), queryClient);
+    }
+
+export const getUpdatePortalCrewMemberUrl = (discordId: string,) => {
+
+
+
+
+  return `/api/portal/crew/${discordId}`
+}
+
+/**
+ * @summary Update a crew member's role or profile details
+ */
+export const updatePortalCrewMember = async (discordId: string,
+    portalCrewUpdate: PortalCrewUpdate, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOk>(getUpdatePortalCrewMemberUrl(discordId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalCrewUpdate)
+  }
+);}
+
+
+
+
+
+export const getUpdatePortalCrewMemberMutationKey = () => ['updatePortalCrewMember'] as const;
+
+export const getUpdatePortalCrewMemberMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePortalCrewMember>>, TError,UpdatePortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePortalCrewMember>>, TError,UpdatePortalCrewMemberMutationVariables, TContext> => {
+
+const mutationKey = getUpdatePortalCrewMemberMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePortalCrewMember>>, UpdatePortalCrewMemberMutationVariables> = (props) => {
+          const {discordId,data} = props ?? {};
+
+          return  updatePortalCrewMember(discordId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePortalCrewMemberMutationResult = NonNullable<Awaited<ReturnType<typeof updatePortalCrewMember>>>
+    export type UpdatePortalCrewMemberMutationBody = BodyType<PortalCrewUpdate>
+    export type UpdatePortalCrewMemberMutationError = ErrorType<void>
+    export type UpdatePortalCrewMemberMutationVariables = {discordId: string;data: BodyType<PortalCrewUpdate>}
+
+    /**
+ * @summary Update a crew member's role or profile details
+ */
+export const useUpdatePortalCrewMember = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePortalCrewMember>>, TError,UpdatePortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePortalCrewMember>>,
+        TError,
+        UpdatePortalCrewMemberMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdatePortalCrewMemberMutationOptions(options), queryClient);
+    }
+
+export const getRemovePortalCrewMemberUrl = (discordId: string,) => {
+
+
+
+
+  return `/api/portal/crew/${discordId}`
+}
+
+/**
+ * @summary Remove crew access while preserving orders and payroll history
+ */
+export const removePortalCrewMember = async (discordId: string, options?: Parameters<typeof customFetch>[1]): Promise<PortalOk> => {
+
+  return customFetch<PortalOk>(getRemovePortalCrewMemberUrl(discordId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRemovePortalCrewMemberMutationKey = () => ['removePortalCrewMember'] as const;
+
+export const getRemovePortalCrewMemberMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePortalCrewMember>>, TError,RemovePortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removePortalCrewMember>>, TError,RemovePortalCrewMemberMutationVariables, TContext> => {
+
+const mutationKey = getRemovePortalCrewMemberMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removePortalCrewMember>>, RemovePortalCrewMemberMutationVariables> = (props) => {
+          const {discordId} = props ?? {};
+
+          return  removePortalCrewMember(discordId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemovePortalCrewMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removePortalCrewMember>>>
+
+    export type RemovePortalCrewMemberMutationError = ErrorType<void>
+    export type RemovePortalCrewMemberMutationVariables = {discordId: string}
+
+    /**
+ * @summary Remove crew access while preserving orders and payroll history
+ */
+export const useRemovePortalCrewMember = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePortalCrewMember>>, TError,RemovePortalCrewMemberMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removePortalCrewMember>>,
+        TError,
+        RemovePortalCrewMemberMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRemovePortalCrewMemberMutationOptions(options), queryClient);
     }
 
 export const getCompletePortalOrderUrl = (id: string,) => {
