@@ -210,6 +210,51 @@ export const GetPortalOrdersResponse = zod.object({
 
 
 /**
+ * @summary Create a mechanic order draft from the shared shop catalog
+ */
+export const createPortalOrderBodyCustomerNameMax = 100;
+
+export const createPortalOrderBodyNotesMax = 500;
+
+export const createPortalOrderBodyItemIdsMax = 50;
+
+export const createPortalOrderBodyLabourMin = 0;
+
+
+
+export const CreatePortalOrderBody = zod.object({
+  "customer_name": zod.string().min(1).max(createPortalOrderBodyCustomerNameMax),
+  "notes": zod.string().max(createPortalOrderBodyNotesMax).optional(),
+  "item_ids": zod.array(zod.string()).min(1).max(createPortalOrderBodyItemIdsMax),
+  "labour": zod.number().min(createPortalOrderBodyLabourMin).optional()
+})
+
+export const CreatePortalOrderResponse = zod.object({
+  "id": zod.string(),
+  "order_number": zod.string()
+})
+
+
+/**
+ * @summary Get the shared shop catalog and the signed-in mechanic's current commission
+ */
+export const GetPortalOrderCatalogResponse = zod.object({
+  "categories": zod.array(zod.string()),
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "category": zod.string(),
+  "price": zod.number(),
+  "cost": zod.number(),
+  "labour": zod.number()
+})),
+  "commission_rate": zod.number(),
+  "week_commission": zod.number(),
+  "active_shift": zod.boolean()
+})
+
+
+/**
  * @summary List crew and current pay totals for management
  */
 export const GetPortalCrewResponse = zod.object({

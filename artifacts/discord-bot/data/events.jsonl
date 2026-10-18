@@ -39,3 +39,6 @@
 {"ts":"2026-10-12T16:23:30.577Z","kind":"order_created","guildId":"1503609933365514393","userId":"1363222342800511058","userName":".nxtcloudy","orderId":"a15c4c82-9cf4-4ddc-8404-04df0517c6cc","orderNumber":"TDC-0103"}
 {"ts":"2026-10-18T05:56:48.831Z","kind":"clock_in","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","detail":"clocked in via panel"}
 {"ts":"2026-10-18T06:37:52.756Z","kind":"clock_out","guildId":"1503609933365514393","userId":"1220987252616728616","userName":"goofieststeve","detail":"30 min credited"}
+{"ts":"2026-10-18T06:42:39.904Z","kind":"crew_changed","guildId":"1503609933365514393","userId":"1072603409372430356","userName":"Coral","detail":"Deactivated through the staff portal by ander; historical orders and payouts preserved"}
+{"ts":"2026-10-18T06:42:45.988Z","kind":"crew_changed","guildId":"1503609933365514393","userId":"1015683516077445130","userName":"Dolla","detail":"Deactivated through the staff portal by ander; historical orders and payouts preserved"}
+{"ts":"2026-10-18T06:42:50.530Z","kind":"crew_changed","guildId":"1503609933365514393","userId":"1487707116679725177","userName":"Eli","detail":"Deactivated through the staff portal by ander; historical orders and payouts preserved"}

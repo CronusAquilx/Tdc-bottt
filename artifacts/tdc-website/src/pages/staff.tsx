@@ -5,20 +5,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useActivatePortalAccount, useBootstrapPortal, useCompletePortalOrder, useCreatePortalAccount,
   useGetPortalAccounts, useGetPortalChannels, useGetPortalCrew, useGetPortalOrders,
-  useGetPortalPayouts, useGetPortalSession, useInviteAllPortalCrew,
+  useGetPortalPayouts, useGetPortalSession, useGetRaffles, useInviteAllPortalCrew,
   useInviteOnePortalCrewMember, useLoginPortal, useLogoutPortal, useUpdatePortalPay,
   useProcessPortalPayroll,
   getGetPortalAccountsQueryKey, getGetPortalChannelsQueryKey, getGetPortalCrewQueryKey,
   getGetPortalOrdersQueryKey, getGetPortalPayoutsQueryKey, getGetPortalSessionQueryKey,
 } from "@workspace/api-client-react";
-import type { PortalRole } from "@workspace/api-client-react";
+import type { PortalRole, Raffle } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Activity, BadgeDollarSign, Boxes, Check, ChevronRight,
   ClipboardList, Gauge, Hash, LockKeyhole, LogOut, Menu, MessageSquareText,
-  PackageCheck, Settings2, ShieldCheck, UserPlus, Users, Wrench,
+  PackageCheck, Settings2, ShieldCheck, UserPlus, Users, Wrench, PlusCircle, Wallet, Trophy,
 } from "lucide-react";
 
 const roles: PortalRole[] = ["owner", "head_manager", "manager", "trainer", "mechanic"];
@@ -176,6 +176,7 @@ export function Empty({ icon: Icon, title, detail }: { icon: typeof Gauge; title
 export function StaffHome() {
   const session = useGetPortalSession();
   const orders = useGetPortalOrders({ limit: 12 });
+  const raffles = useGetRaffles();
   const crewAllowed = canManageCrew(session.data?.account?.role);
   const crew = useGetPortalCrew({ query: { enabled: crewAllowed, queryKey: getGetPortalCrewQueryKey() } });
   const channels = useGetPortalChannels({});
@@ -184,9 +185,11 @@ export function StaffHome() {
   const retry = () => { void qc.invalidateQueries({ queryKey: getGetPortalOrdersQueryKey({ limit: 12 }) }); void qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() }); void qc.invalidateQueries({ queryKey: getGetPortalChannelsQueryKey({}) }); void qc.invalidateQueries({ queryKey: getGetPortalPayoutsQueryKey({ limit: 5 }) }); };
   const orderList = orders.data?.orders || [];
   const done = orderList.filter(o => isCompletedStatus(o.status));
+  const activeRaffles = (raffles.data?.raffles ?? []).filter(raffle => raffle.status === "active");
   return (
     <StaffShell active="/staff">
-      <PageHead eyebrow="Shift overview / live" title="Good work starts here." detail="Your operations desk for the shop floor, crew earnings and the latest sales activity." />
+      <PageHead eyebrow="Shift overview / live" title="Good work starts here." detail="Your operations desk for the shop floor, crew earnings and the latest sales activity."
+        action={<div className="flex flex-wrap gap-2"><Link href="/staff/new-order" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90" data-testid="button-home-new-order"><PlusCircle size={15}/>New order</Link><Link href="/staff/payouts" className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2.5 text-xs font-semibold hover:bg-muted" data-testid="button-home-payouts"><Wallet size={15}/>My payouts</Link></div>} />
       <QueryState loading={orders.isLoading || channels.isLoading || payouts.isLoading} error={!!(orders.error || channels.error || payouts.error)} retry={retry} />
       {!orders.isLoading && !orders.error && (
         <>
@@ -221,16 +224,57 @@ export function StaffHome() {
               <div className="grid divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">{channels.data.channels.slice(0, 2).map(ch => <div key={ch.display_name} className="p-5" data-testid={`channel-activity-${ch.display_name}`}><p className="flex items-center gap-2 text-xs font-semibold"><Hash size={14} className="text-primary" />{ch.channel_name || ch.display_name}</p>{ch.messages.slice(0, 2).map(m => <div key={m.id} className="mt-4 border-l-2 border-[#e0b448] pl-3"><p className="text-xs font-semibold">{m.author} <span className="ml-2 font-normal text-muted-foreground">{stamp(m.created_at)}</span></p><p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{m.content || m.embeds[0]?.description || m.embeds[0]?.title || "Embedded sale update"}</p></div>)}</div>)}</div>
             ) : <Empty icon={Activity} title="No channel activity" detail="Channel posts will appear when available." />}
           </section>
+          <section className="tdc-panel mt-5 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Crew hub</p><h2 className="mt-1 font-bold">Raffles</h2></div><Link href="/" className="text-xs font-semibold text-primary" data-testid="link-view-raffles">All raffles <ChevronRight className="inline" size={14}/></Link></div>
+            {raffles.isLoading ? <div className="space-y-3 p-5"><Skeleton className="h-14 w-full"/><Skeleton className="h-14 w-full"/></div> : raffles.error ? <div className="p-5"><Notice kind="error">Raffles could not load right now. <Link href="/" className="font-semibold underline">Open the raffle page</Link>.</Notice></div> : activeRaffles.length ? <div className="divide-y divide-border">{activeRaffles.slice(0, 3).map(raffle => <RaffleHubRow key={raffle.id} raffle={raffle}/>)}</div> : <Empty icon={Trophy} title="No active raffles" detail="New crew raffles will appear here when they open."/>}
+          </section>
         </>
       )}
     </StaffShell>
   );
 }
 
+function RaffleHubRow({ raffle }: { raffle: Raffle }) {
+  return <Link href={`/raffle/${raffle.id}`} className="flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-muted/40" data-testid={`link-crew-raffle-${raffle.id}`}>
+    <div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[#f5ecd0] text-[#896510]"><Trophy size={16}/></span><div className="min-w-0"><p className="truncate text-sm font-semibold">{raffle.title}</p><p className="mt-1 truncate text-xs text-muted-foreground">{raffle.prizes[0] ?? "Crew raffle"}{raffle.prizes.length > 1 ? ` · +${raffle.prizes.length - 1} more prize${raffle.prizes.length === 2 ? "" : "s"}` : ""}</p></div></div>
+    <span className="shrink-0 text-xs font-semibold text-primary">View draw <ChevronRight className="ml-1 inline" size={13}/></span>
+  </Link>;
+}
+
 function Status({ value }: { value: string }) {
   const state = value.toLowerCase();
   const color = isCompletedStatus(state) ? "bg-[#e3eee5] text-[#3f7051]" : state === "rejected" ? "bg-red-100 text-red-800" : state === "draft" ? "bg-[#f5ecd0] text-[#86640f]" : "bg-muted text-muted-foreground";
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${color}`} data-testid={`status-${state}`}>{titleCase(value)}</span>;
+}
+
+export function PayoutsPage() {
+  const session = useGetPortalSession();
+  const payoutQuery = useGetPortalPayouts({ limit: 100 });
+  const payouts = payoutQuery.data?.payouts ?? [];
+  const totalPaid = payouts.filter(payout => payout.paid_at).reduce((sum, payout) => sum + payout.amount, 0);
+  const waiting = payouts.filter(payout => !payout.paid_at).reduce((sum, payout) => sum + payout.amount, 0);
+  const recordedTotal = payouts.reduce((sum, payout) => sum + payout.amount, 0);
+  const canManage = canManageCrew(session.data?.account?.role);
+  return <StaffShell active="/staff/payouts">
+    <PageHead
+      eyebrow="Crew hub / earnings"
+      title="Payouts"
+      detail="Your recorded shop earnings are shared with the Discord order and payroll system."
+      action={canManage ? <Link href="/staff/bank" className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90" data-testid="button-open-payout-desk"><BadgeDollarSign size={15}/>Open payout desk</Link> : undefined}
+    />
+    <QueryState loading={payoutQuery.isLoading} error={!!payoutQuery.error} retry={() => void payoutQuery.refetch()}/>
+    {!payoutQuery.isLoading && !payoutQuery.error && <>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric label="Recorded payouts" value={cash(recordedTotal)} hint="All records visible to your account" icon={BadgeDollarSign} accent="gold"/>
+        <Metric label="Marked paid" value={cash(totalPaid)} hint="Confirmed in the payroll record" icon={Check} accent="green"/>
+        <Metric label="Not marked paid" value={cash(waiting)} hint="Awaiting payroll confirmation" icon={Wallet} accent="red"/>
+      </div>
+      <section className="tdc-panel mt-5 overflow-hidden">
+        <div className="border-b border-border px-5 py-4"><p className="tdc-kicker text-primary">Shared payroll</p><h2 className="mt-1 font-bold">Payout history</h2></div>
+        {payouts.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Week starting</th><th>Mechanic</th><th>Orders</th><th>Hours</th><th>Amount</th><th>Status</th><th>Recorded</th></tr></thead><tbody>{payouts.map(payout => <tr key={payout.id} data-testid={`row-my-payout-${payout.id}`}><td>{dateOnly(payout.week_start)}</td><td className="font-semibold">{payout.mechanic_name}</td><td>{payout.order_count}</td><td>{payout.hours_worked}</td><td className="font-mono font-semibold">{cash(payout.amount)}</td><td><Status value={payout.paid_at ? "Paid" : "Pending"}/></td><td className="text-muted-foreground">{payout.paid_at ? dateOnly(payout.paid_at) : dateOnly(payout.created_at)}</td></tr>)}</tbody></table></div> : <Empty icon={Wallet} title="No payout records yet" detail="Completed orders and payroll entries will show here as the shared pay history grows."/>}
+      </section>
+    </>}
+  </StaffShell>;
 }
 
 export function OrdersPage() {

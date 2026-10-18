@@ -105,6 +105,45 @@ export interface PortalOrder {
   completed_at?: string | null;
 }
 
+export interface PortalOrderCreateInput {
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  customer_name: string;
+  /** @maxLength 500 */
+  notes?: string;
+  /**
+     * @minItems 1
+     * @maxItems 50
+     */
+  item_ids: string[];
+  /** @minimum 0 */
+  labour?: number;
+}
+
+export interface PortalOrderCreated {
+  id: string;
+  order_number: string;
+}
+
+export type PortalOrderCatalogItemsItem = {
+  id: string;
+  label: string;
+  category: string;
+  price: number;
+  cost: number;
+  labour: number;
+};
+
+export interface PortalOrderCatalog {
+  categories: string[];
+  items: PortalOrderCatalogItemsItem[];
+  commission_rate: number;
+  week_commission: number;
+  active_shift: boolean;
+}
+
 export type PortalCrewMemberStatus = typeof PortalCrewMemberStatus[keyof typeof PortalCrewMemberStatus];
 
 

@@ -209,7 +209,14 @@ export function BankPage() {
   </StaffShell>;
 }
 
-function CrewMemberEditor({ member, actorRole, onChanged }: { member: PortalCrewMember; actorRole: PortalRole; onChanged: () => void }) {
+function CrewMemberEditor({ member, actorRole, selected, canSelect, onToggle, onChanged }: {
+  member: PortalCrewMember;
+  actorRole: PortalRole;
+  selected: boolean;
+  canSelect: boolean;
+  onToggle: (discordId: string) => void;
+  onChanged: () => void;
+}) {
   const update = useUpdatePortalCrewMember();
   const remove = useRemovePortalCrewMember();
   const [role, setRole] = useState<"mechanic" | "trainer" | "manager" | "owner" | "head_manager">(member.role);
@@ -235,7 +242,7 @@ function CrewMemberEditor({ member, actorRole, onChanged }: { member: PortalCrew
     catch (reason) { setError(messageOf(reason, `Could not remove ${member.display_name}.`)); }
   };
   return <article className="border-b border-border p-5 last:border-0" data-testid={`crew-admin-member-${member.discord_id}`}>
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{member.display_name}</h3><p className="mt-1 font-mono text-[11px] text-muted-foreground">{member.discord_id}</p></div><div className="text-right"><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold uppercase">{member.status.replaceAll("_", " ")}</span><p className="mt-2 text-xs text-muted-foreground">In-city ID: {member.in_city_id || "—"}</p></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3">{canSelect && <input type="checkbox" aria-label={`Select ${member.display_name}`} checked={selected} onChange={() => onToggle(member.discord_id)} className="mt-1 h-4 w-4 accent-[#cf563f]" data-testid={`checkbox-select-crew-${member.discord_id}`}/>}<div><h3 className="font-semibold">{member.display_name}</h3><p className="mt-1 font-mono text-[11px] text-muted-foreground">{member.discord_id}</p></div></div><div className="text-right"><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold uppercase">{member.status.replaceAll("_", " ")}</span><p className="mt-2 text-xs text-muted-foreground">In-city ID: {member.in_city_id || "—"}</p></div></div>
     <form className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_auto_auto]" onSubmit={save}>
       <label className="grid gap-1 text-xs font-semibold">Rank<select className="tdc-input !py-2" value={role} onChange={e => setRole(e.target.value as typeof role)} disabled={!canEdit} data-testid={`select-crew-role-${member.discord_id}`}>{member.role === "head_manager" && <option value="head_manager">Head manager</option>}<option value="mechanic">Mechanic</option><option value="trainer">Trainer</option>{(canAssignManager || member.role === "manager") && <option value="manager" disabled={!canAssignManager}>Manager</option>}{(canAssignOwner || member.role === "owner") && <option value="owner" disabled={!canAssignOwner}>Owner</option>}</select></label>
       <label className="grid gap-1 text-xs font-semibold">Status<select className="tdc-input !py-2" value={status} onChange={e => setStatus(e.target.value as PortalCrewMember["status"])} disabled={!canEdit} data-testid={`select-crew-status-${member.discord_id}`}><option value="online">Online</option><option value="offline">Offline</option><option value="on_break">On break</option></select></label>
@@ -259,7 +266,46 @@ export function CrewAdminPage() {
   const [role, setRole] = useState<"mechanic" | "trainer" | "manager">("mechanic");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const removeSelected = useRemovePortalCrewMember();
+  const actorRole = session.data?.account?.role ?? "mechanic";
   const refresh = () => queryClient.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() });
+  const activeCrew = crew.data?.crew ?? [];
+  const accountName = session.data?.account?.username.trim().toLocaleLowerCase() ?? "";
+  const ownMatches = activeCrew.filter(member => {
+    const name = member.display_name.trim().toLocaleLowerCase();
+    return name === accountName || name.split(/\s+/)[0] === accountName;
+  });
+  const ownCrewId = ownMatches.length === 1 ? ownMatches[0].discord_id : "";
+  const removable = (member: PortalCrewMember) =>
+    member.discord_id !== ownCrewId &&
+    (actorRole === "owner" ||
+      (actorRole === "head_manager" && member.role !== "owner") ||
+      (actorRole === "manager" && member.role !== "owner" && member.role !== "manager"));
+  const selectedRemovable = activeCrew.filter(member => selected.includes(member.discord_id) && removable(member));
+  const toggleSelected = (discordId: string) => setSelected(current =>
+    current.includes(discordId) ? current.filter(id => id !== discordId) : [...current, discordId]
+  );
+  const removeMany = async () => {
+    const targets = selectedRemovable;
+    if (!targets.length) return;
+    if (!window.confirm(`Remove ${targets.length} selected crew ${targets.length === 1 ? "member" : "members"}? Their website access will be disabled; orders and payroll history stay intact.`)) return;
+    setError(""); setMessage("");
+    const removed: string[] = [];
+    const failed: string[] = [];
+    for (const member of targets) {
+      try {
+        await removeSelected.mutateAsync({ discordId: member.discord_id });
+        removed.push(member.discord_id);
+      } catch {
+        failed.push(member.display_name);
+      }
+    }
+    setSelected(current => current.filter(id => !removed.includes(id)));
+    if (removed.length) await refresh();
+    if (failed.length) setError(`${removed.length} removed; could not remove: ${failed.join(", ")}.`);
+    else setMessage(`${removed.length} crew ${removed.length === 1 ? "member" : "members"} removed. Their historical orders and payroll remain.`);
+  };
   const addMember = async (event: FormEvent) => {
     event.preventDefault(); setError(""); setMessage("");
     try {
@@ -284,9 +330,9 @@ export function CrewAdminPage() {
         </form>
       </section>
       <section className="tdc-panel mt-5 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Roster register</p><h2 className="mt-1 font-bold">Crew profiles</h2></div><span className="text-xs text-muted-foreground">{crew.data?.crew.length ?? 0} records</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Roster register</p><h2 className="mt-1 font-bold">Crew profiles</h2><p className="mt-1 text-xs text-muted-foreground">Select several profiles to remove them together, including crew who have left the Discord server.</p></div><div className="flex items-center gap-3"><span className="text-xs text-muted-foreground">{crew.data?.crew.length ?? 0} records</span><Button variant="destructive" disabled={!selectedRemovable.length || removeSelected.isPending} onClick={() => void removeMany()} data-testid="button-remove-selected-crew"><UserMinus size={14}/>{removeSelected.isPending ? "Removing…" : `Remove selected (${selectedRemovable.length})`}</Button></div></div>
         <DeskQueryState loading={crew.isLoading} error={crew.error} retry={() => void refresh()}/>
-        {!crew.isLoading && !crew.error && (crew.data?.crew.length ? crew.data.crew.map(member => <CrewMemberEditor key={member.discord_id} member={member} actorRole={session.data?.account?.role ?? "mechanic"} onChanged={() => void refresh()}/>) : <Empty icon={Users} title="Roster is empty" detail="Add a crew member to start managing bot-backed profiles."/>)} 
+        {!crew.isLoading && !crew.error && (activeCrew.length ? activeCrew.map(member => <CrewMemberEditor key={member.discord_id} member={member} actorRole={actorRole} selected={selected.includes(member.discord_id)} canSelect={removable(member)} onToggle={toggleSelected} onChanged={() => { setSelected(current => current.filter(id => id !== member.discord_id)); void refresh(); }}/>) : <Empty icon={Users} title="Roster is empty" detail="Add a crew member to start managing bot-backed profiles."/>)}
       </section>
     </>}
   </StaffShell>;

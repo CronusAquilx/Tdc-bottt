@@ -60,6 +60,9 @@ import type {
   PortalLeaveReviewInput,
   PortalLogin,
   PortalOk,
+  PortalOrderCatalog,
+  PortalOrderCreateInput,
+  PortalOrderCreated,
   PortalPayUpdate,
   PortalPayrollInput,
   PortalPayrollResult,
@@ -1034,6 +1037,195 @@ export function useGetPortalOrders<TData = Awaited<ReturnType<typeof getPortalOr
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetPortalOrdersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePortalOrderUrl = () => {
+
+
+
+
+  return `/api/portal/orders`
+}
+
+/**
+ * @summary Create a mechanic order draft from the shared shop catalog
+ */
+export const createPortalOrder = async (portalOrderCreateInput: PortalOrderCreateInput, options?: Parameters<typeof customFetch>[1]): Promise<PortalOrderCreated> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<PortalOrderCreated>(getCreatePortalOrderUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(portalOrderCreateInput)
+  }
+);}
+
+
+
+
+
+export const getCreatePortalOrderMutationKey = () => ['createPortalOrder'] as const;
+
+export const getCreatePortalOrderMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalOrder>>, TError,CreatePortalOrderMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPortalOrder>>, TError,CreatePortalOrderMutationVariables, TContext> => {
+
+const mutationKey = getCreatePortalOrderMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPortalOrder>>, CreatePortalOrderMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPortalOrder(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePortalOrderMutationResult = NonNullable<Awaited<ReturnType<typeof createPortalOrder>>>
+    export type CreatePortalOrderMutationBody = BodyType<PortalOrderCreateInput>
+    export type CreatePortalOrderMutationError = ErrorType<void>
+    export type CreatePortalOrderMutationVariables = {data: BodyType<PortalOrderCreateInput>}
+
+    /**
+ * @summary Create a mechanic order draft from the shared shop catalog
+ */
+export const useCreatePortalOrder = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPortalOrder>>, TError,CreatePortalOrderMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPortalOrder>>,
+        TError,
+        CreatePortalOrderMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePortalOrderMutationOptions(options), queryClient);
+    }
+
+export const getGetPortalOrderCatalogUrl = () => {
+
+
+
+
+  return `/api/portal/catalog`
+}
+
+/**
+ * @summary Get the shared shop catalog and the signed-in mechanic's current commission
+ */
+export const getPortalOrderCatalog = async ( options?: Parameters<typeof customFetch>[1]): Promise<PortalOrderCatalog> => {
+
+  return customFetch<PortalOrderCatalog>(getGetPortalOrderCatalogUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPortalOrderCatalogQueryKey = () => {
+    return [
+    `/api/portal/catalog`
+    ] as const;
+    }
+
+
+export const getGetPortalOrderCatalogQueryOptions = <TData = Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPortalOrderCatalogQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPortalOrderCatalog>>> = ({ signal }) => getPortalOrderCatalog({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPortalOrderCatalogQueryResult = NonNullable<Awaited<ReturnType<typeof getPortalOrderCatalog>>>
+export type GetPortalOrderCatalogQueryError = ErrorType<void>
+
+
+export function useGetPortalOrderCatalog<TData = Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalOrderCatalog>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalOrderCatalog>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalOrderCatalog<TData = Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPortalOrderCatalog>>,
+          TError,
+          Awaited<ReturnType<typeof getPortalOrderCatalog>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPortalOrderCatalog<TData = Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get the shared shop catalog and the signed-in mechanic's current commission
+ */
+
+export function useGetPortalOrderCatalog<TData = Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPortalOrderCatalog>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPortalOrderCatalogQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

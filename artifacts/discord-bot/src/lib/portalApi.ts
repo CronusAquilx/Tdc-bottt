@@ -20,6 +20,8 @@ import {
   getProfile,
   getGuildConfig,
   getUserRole,
+  getSetting,
+  nextOrderNumber,
   saveDatabaseSnapshot,
   splitRoleIds,
 } from "../db.js";
@@ -35,6 +37,7 @@ import {
 } from "../interactions/bankaccount.js";
 import { isUpdateEnabled } from "./featureFlags.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
+import { withOrderLock } from "./resilience.js";
 import {
   crewGuild,
   websiteComplete,
@@ -43,7 +46,7 @@ import {
 } from "./websiteActions.js";
 
 type PortalRole = "owner" | "head_manager" | "manager" | "trainer" | "mechanic";
-type PortalAccount = {
+export type PortalAccount = {
   id: string;
   username: string;
   role: PortalRole;
@@ -391,18 +394,23 @@ async function sendSetupLink(
   account: AccountRow,
   origin: string,
 ): Promise<void> {
-  const channelId = String(profile.sales_channel_id ?? "");
-  if (!channelId) throw new PortalError(409, "No sales channel is configured");
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || channel.type !== ChannelType.GuildText) {
-    throw new PortalError(409, "The sales channel is unavailable to the bot");
-  }
+  const userId = String(profile.discord_id ?? "");
+  const user = userId ? await client.users.fetch(userId).catch(() => null) : null;
+  if (!user) throw new PortalError(409, "Discord could not find this crew member");
   const token = await issueSetupToken(account.id);
   const link = setupUrl(origin, token);
-  await (channel as TextChannel).send({
-    content: `Tokyo Drift Customs crew portal\nUsername: **${account.username}**\nSet your own private password using this one-time link (expires in ${SETUP_HOURS} hours):\n${link}`,
-    allowedMentions: { parse: [] },
-  });
+  try {
+    await user.send({
+      content: `Tokyo Drift Customs crew portal\nWebsite: ${origin}\nUsername: **${account.username}**\nSet your own private password using this one-time link (expires in ${SETUP_HOURS} hours):\n${link}`,
+      allowedMentions: { parse: [] },
+    });
+  } catch {
+    await db.execute({
+      sql: "DELETE FROM portal_setup_tokens WHERE token_hash=?",
+      args: [hashToken(token)],
+    }).catch(() => {});
+    throw new PortalError(409, "The bot could not DM this crew member. Ask them to allow direct messages, then retry");
+  }
 }
 
 function isLimited(key: string): boolean {
@@ -942,6 +950,32 @@ async function updateCrewMember(
     updates.push("__role__");
   }
   if (!updates.length) throw new PortalError(400, "No crew changes were provided");
+  if (body.role !== undefined && newRole !== oldRole) {
+    const guild = await crewGuild(client);
+    const member = guild ? await guild.members.fetch(discordId).catch(() => null) : null;
+    if (member && guild) {
+      const config = await getGuildConfig(guild.id);
+      const roleMap: Record<string, string[]> = {
+        owner: splitRoleIds(config?.owner_role_id),
+        head_manager: splitRoleIds(config?.head_manager_role_id),
+        manager: splitRoleIds(config?.manager_role_id),
+        trainer: splitRoleIds(config?.trainer_role_id),
+        mechanic: splitRoleIds(config?.mechanic_role_id),
+      };
+      const mappedIds = [...new Set([
+        ...Object.values(roleMap).flat(),
+        ...splitRoleIds((config as any)?.needs_training_role_id),
+      ])];
+      const toRemove = mappedIds.filter((roleId) => member.roles.cache.has(roleId));
+      const toAdd = roleMap[newRole] ?? [];
+      try {
+        if (toRemove.length) await member.roles.remove(toRemove, `Crew rank updated through the staff portal by ${account.username}`);
+        if (toAdd.length) await member.roles.add(toAdd, `Crew rank updated through the staff portal by ${account.username}`);
+      } catch {
+        throw new PortalError(502, "Discord role sync failed; the crew record was not changed");
+      }
+    }
+  }
   if (newName !== oldName || body.role !== undefined) {
     await syncMappedPortalRole(oldName, discordId, newName, newRole);
   }
@@ -970,7 +1004,7 @@ async function updateCrewMember(
   return { ok: true };
 }
 
-async function removeCrewMember(client: Client, account: PortalAccount, discordId: string) {
+export async function removeCrewMember(client: Client, account: PortalAccount, discordId: string) {
   if (!/^\d{17,20}$/.test(discordId)) throw new PortalError(400, "Invalid crew record");
   const result = await db.execute({
     sql: "SELECT display_name,terminated_at FROM profiles WHERE discord_id=?",
@@ -1154,6 +1188,160 @@ export async function handlePortalApi(
       return;
     }
 
+    if (req.method === "GET" && path === "/api/portal/catalog") {
+      const profile = await findCrewForAccount(account.username);
+      if (!profile) throw new PortalError(403, "No active crew profile is linked to this account");
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      const [catalogText, currentRole, shift] = await Promise.all([
+        getSetting("parts_catalog"),
+        getUserRole(String(profile.discord_id)),
+        db.execute({
+          sql: "SELECT 1 FROM timeclock WHERE mechanic_id=? AND clock_out_time IS NULL LIMIT 1",
+          args: [String(profile.discord_id)],
+        }),
+      ]);
+      let catalog: any;
+      try {
+        catalog = JSON.parse(catalogText ?? "{}");
+      } catch {
+        throw new PortalError(503, "The shop catalog could not be read");
+      }
+      const sourceItems = Array.isArray(catalog.items) ? catalog.items : [];
+      const categories = Array.isArray(catalog.categories)
+        ? catalog.categories.map((category: unknown) => String(category))
+        : [...new Set(sourceItems.map((item: any) => String(item.category ?? "")).filter(Boolean))];
+      const items = sourceItems
+        .map((item: any, index: number) => ({
+          id: String(index),
+          label: String(item.label ?? ""),
+          category: String(item.category ?? ""),
+          price: Number(item.price ?? 0),
+          cost: Number(item.cost ?? 0),
+          labour: Number(item.labour ?? 0),
+        }))
+        .filter((item: any) =>
+          item.label && item.category &&
+          [item.price, item.cost, item.labour].every(Number.isFinite) &&
+          item.price >= 0 && item.cost >= 0 && item.labour >= 0
+        );
+      const commission = await getCommissionData(
+        String(profile.discord_id),
+        guild.id,
+        currentRole ?? roleFromDiscord(account.role),
+      );
+      json(res, 200, {
+        categories,
+        items,
+        commission_rate: commission.rate,
+        week_commission: commission.weekCommission,
+        active_shift: Boolean(shift.rows[0]),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && path === "/api/portal/orders") {
+      const body = await bodyJson(req);
+      const customerName = typeof body.customer_name === "string" ? body.customer_name.trim() : "";
+      const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+      const itemIds = body.item_ids;
+      const requestedLabour = body.labour === undefined ? undefined : Number(body.labour);
+      if (!customerName || customerName.length > 100) {
+        throw new PortalError(400, "Enter a customer name (100 characters or fewer)");
+      }
+      if (notes.length > 500) throw new PortalError(400, "Notes must be 500 characters or fewer");
+      if (!Array.isArray(itemIds) || itemIds.length < 1 || itemIds.length > 50 ||
+          itemIds.some((id: unknown) => typeof id !== "string")) {
+        throw new PortalError(400, "Select between 1 and 50 catalog service lines");
+      }
+      if (requestedLabour !== undefined &&
+          (!Number.isFinite(requestedLabour) || requestedLabour < 0 || requestedLabour > 1_000_000_000)) {
+        throw new PortalError(400, "Enter a valid labour amount");
+      }
+      const profile = await findCrewForAccount(account.username);
+      if (!profile) throw new PortalError(403, "No active crew profile is linked to this account");
+      const guild = await crewGuild(client);
+      if (!guild) throw new PortalError(503, "Discord server unavailable");
+      return await withOrderLock(`portal-new-order:${guild.id}:${profile.discord_id}`, async () => {
+        const shift = await db.execute({
+          sql: "SELECT 1 FROM timeclock WHERE mechanic_id=? AND clock_out_time IS NULL LIMIT 1",
+          args: [String(profile.discord_id)],
+        });
+        if (!shift.rows[0]) throw new PortalError(409, "Clock in before starting an order, just like in Discord");
+        const existing = await db.execute({
+          sql: `SELECT order_number FROM orders
+                WHERE mechanic_id=? AND status='draft' AND (guild_id=? OR guild_id='')
+                ORDER BY datetime(created_at) DESC LIMIT 1`,
+          args: [String(profile.discord_id), guild.id],
+        });
+        if (existing.rows[0]) {
+          throw new PortalError(409, `Finish or cancel your open draft ${String(existing.rows[0][0])} before starting another order`);
+        }
+
+        let catalog: any;
+        try {
+          catalog = JSON.parse((await getSetting("parts_catalog")) ?? "{}");
+        } catch {
+          throw new PortalError(503, "The shop catalog could not be read");
+        }
+        const catalogItems = Array.isArray(catalog.items) ? catalog.items : [];
+        const selected = itemIds.map((id: string) => {
+          if (!/^\d+$/.test(id)) return null;
+          const item = catalogItems[Number(id)];
+          if (!item || !item.label || !item.category) return null;
+          return {
+            label: String(item.label),
+            category: String(item.category),
+            price: Number(item.price ?? 0),
+            cost: Number(item.cost ?? 0),
+            labour: Number(item.labour ?? 0),
+          };
+        });
+        if (selected.some((item: any) =>
+          !item || [item.price, item.cost, item.labour].some((value: number) => !Number.isFinite(value) || value < 0)
+        )) {
+          throw new PortalError(400, "One or more selected services are no longer in the shop catalog");
+        }
+        const partsCost = selected.reduce((sum: number, item: any) => sum + item.cost, 0);
+        const labour = requestedLabour ?? selected.reduce((sum: number, item: any) => sum + item.labour, 0);
+        const total = partsCost + labour;
+        const role = await getUserRole(String(profile.discord_id)) ?? roleFromDiscord(account.role);
+        const id = randomUUID();
+        let orderNumber = await nextOrderNumber();
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            await db.execute({
+              sql: `INSERT INTO orders
+                    (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level, customer_name, is_own_car)
+                    VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, 0)`,
+              args: [
+                id, orderNumber, String(profile.discord_id), guild.id, JSON.stringify(selected),
+                partsCost, total, labour, notes, role, customerName,
+              ],
+            });
+            break;
+          } catch (error: any) {
+            if (error?.code === "SQLITE_CONSTRAINT_UNIQUE" && attempt < 4) {
+              orderNumber = await nextOrderNumber();
+              continue;
+            }
+            throw error;
+          }
+        }
+        logEvent({
+          kind: "order_created",
+          guildId: guild.id,
+          userId: String(profile.discord_id),
+          userName: String(profile.display_name),
+          orderId: id,
+          orderNumber,
+          detail: "created through the crew website",
+        });
+        await saveDatabaseSnapshot();
+        return json(res, 201, { id, order_number: orderNumber });
+      });
+    }
+
     if (req.method === "GET" && path === "/api/portal/crew") {
       if (!canManage(account.role)) throw new PortalError(403, "Manager role required");
       json(res, 200, { crew: await listCrew(client) });
@@ -1217,13 +1405,12 @@ export async function handlePortalApi(
           display_name: String(row[1] ?? ""),
           sales_channel_id: row[2] ? String(row[2]) : null,
         };
-        if (!profile.sales_channel_id) {
-          skipped++;
-          failures.push(`${profile.display_name}: no sales channel configured`);
-          continue;
-        }
         try {
           const crewAccount = await accountForCrewProfile(profile);
+          if (Number(crewAccount.active) === 1) {
+            skipped++;
+            continue;
+          }
           await sendSetupLink(client, profile, crewAccount, origin);
           sent++;
         } catch (error) {
@@ -1241,12 +1428,12 @@ export async function handlePortalApi(
       const body = await bodyJson(req);
       const name = normalizeUsername(body.display_name);
       const profile = await findCrewByName(name);
-      if (!profile.sales_channel_id) {
-        json(res, 200, { sent: 0, skipped: 1, failures: [`${name}: no sales channel configured`] });
-        return;
-      }
       const origin = setupOrigin(req);
       const crewAccount = await accountForCrewProfile(profile);
+      if (Number(crewAccount.active) === 1) {
+        json(res, 200, { sent: 0, skipped: 1, failures: [`${name}: account is already active`] });
+        return;
+      }
       try {
         await sendSetupLink(client, profile, crewAccount, origin);
         await saveDatabaseSnapshot();

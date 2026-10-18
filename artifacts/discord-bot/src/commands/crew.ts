@@ -5,6 +5,7 @@ import { COLORS, statusEmoji, money } from "../lib/embeds.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
 import { logEvent } from "../lib/eventLog.js";
+import { removeCrewMember, type PortalAccount } from "../lib/portalApi.js";
 
 export const data = new SlashCommandBuilder()
   .setName("crew")
@@ -26,7 +27,8 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(s =>
     s.setName("remove")
       .setDescription("Remove a crew member")
-      .addUserOption(o => o.setName("user").setDescription("Discord user").setRequired(true))
+      .addUserOption(o => o.setName("user").setDescription("Current server member").setRequired(false))
+      .addStringOption(o => o.setName("discord_id").setDescription("Discord ID or saved crew name (works if they left the server)").setRequired(false).setMaxLength(100))
   )
   .addSubcommand(s => s.setName("list").setDescription("List all crew members"))
   .addSubcommand(s =>
@@ -510,15 +512,55 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === "remove") {
     if (!(await requireRole(interaction, "manager"))) return;
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const target = interaction.options.getUser("user", true);
-    const profile = await getProfile(target.id);
-    if (!profile) { await interaction.editReply({ content: "❌ User not found." }); return; }
-    await db.execute({ sql: "DELETE FROM user_roles WHERE discord_id = ?", args: [target.id] });
+    const targetUser = interaction.options.getUser("user");
+    const targetInput = interaction.options.getString("discord_id")?.trim();
+    if (targetUser && targetInput) {
+      await interaction.editReply({ content: "Choose either a server member or a Discord ID / crew name, not both." });
+      return;
+    }
+    if (!targetUser && !targetInput) {
+      await interaction.editReply({ content: "Choose a server member or enter their Discord ID / saved crew name." });
+      return;
+    }
+
+    let targetId = targetUser?.id ?? "";
+    if (targetInput) {
+      if (/^\d{17,20}$/.test(targetInput)) {
+        targetId = targetInput;
+      } else {
+        const matches = await db.execute({
+          sql: "SELECT discord_id, display_name FROM profiles WHERE display_name=? COLLATE NOCASE AND terminated_at IS NULL",
+          args: [targetInput],
+        });
+        if (matches.rows.length > 1) {
+          const ids = matches.rows.map(row => `\`${String(row[0])}\``).join(", ");
+          await interaction.editReply({ content: `More than one active crew profile uses that name. Use the Discord ID: ${ids}` });
+          return;
+        }
+        if (!matches.rows[0]) {
+          await interaction.editReply({ content: "No active crew member matched that Discord ID or saved crew name." });
+          return;
+        }
+        targetId = String(matches.rows[0][0]);
+      }
+    }
+
+    const profile = await getProfile(targetId);
+    if (!profile) { await interaction.editReply({ content: "❌ Crew profile not found." }); return; }
     const caller = await getProfile(interaction.user.id);
-    logEvent({
-      kind: "crew_changed", guildId: interaction.guild?.id, userId: target.id, userName: profile.display_name,
-      detail: `removed from crew by ${caller?.display_name ?? interaction.user.username}`,
-    });
+    const callerRole = await detectUserRoleLevel(interaction);
+    const actor: PortalAccount = {
+      id: interaction.user.id,
+      username: caller?.display_name ?? interaction.user.username,
+      role: callerRole === "owner" ? "owner" : callerRole === "manager" ? "manager" : "mechanic",
+      active: true,
+    };
+    try {
+      await removeCrewMember(interaction.client, actor, targetId);
+    } catch (error: any) {
+      await interaction.editReply({ content: `❌ Could not remove ${profile.display_name}: ${error?.message ?? "check permissions and try again"}` });
+      return;
+    }
     const embed = new EmbedBuilder()
       .setTitle("🗑️ Crew Member Removed")
       .setColor(COLORS.rejected)
@@ -526,6 +568,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         { name: "User", value: profile.display_name, inline: true },
         { name: "Removed By", value: caller?.display_name ?? interaction.user.username, inline: true }
       )
+      .setDescription("Crew access and website sign-in have been disabled. Order and payroll history are preserved.")
       .setFooter({ text: "Tokyo Drift Customs" }).setTimestamp();
     await interaction.editReply({ embeds: [embed] });
     await logToChannel(interaction, embed);

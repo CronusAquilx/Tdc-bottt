@@ -213,6 +213,45 @@ paths:
           description: Sign in required
         "403":
           description: Account is not allowed to view these orders
+    post:
+      operationId: createPortalOrder
+      tags: [portal]
+      summary: Create a mechanic order draft from the shared shop catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalOrderCreateInput"
+      responses:
+        "201":
+          description: Draft order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrderCreated"
+        "401":
+          description: Sign in required
+        "403":
+          description: An active crew profile is required
+        "409":
+          description: The mechanic must clock in or finish an open draft
+  /portal/catalog:
+    get:
+      operationId: getPortalOrderCatalog
+      tags: [portal]
+      summary: Get the shared shop catalog and the signed-in mechanic's current commission
+      responses:
+        "200":
+          description: Catalog and current commission details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOrderCatalog"
+        "401":
+          description: Sign in required
+        "403":
+          description: An active crew profile is required
   /portal/crew:
     get:
       operationId: getPortalCrew
@@ -922,6 +961,66 @@ components:
           type: string
         completed_at:
           type: ["string", "null"]
+    PortalOrderCreateInput:
+      type: object
+      required: [customer_name, item_ids]
+      properties:
+        customer_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        notes:
+          type: string
+          maxLength: 500
+        item_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+        labour:
+          type: number
+          minimum: 0
+    PortalOrderCreated:
+      type: object
+      required: [id, order_number]
+      properties:
+        id:
+          type: string
+        order_number:
+          type: string
+    PortalOrderCatalog:
+      type: object
+      required: [categories, items, commission_rate, week_commission, active_shift]
+      properties:
+        categories:
+          type: array
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, label, category, price, cost, labour]
+            properties:
+              id:
+                type: string
+              label:
+                type: string
+              category:
+                type: string
+              price:
+                type: number
+              cost:
+                type: number
+              labour:
+                type: number
+        commission_rate:
+          type: number
+        week_commission:
+          type: number
+        active_shift:
+          type: boolean
     PortalCrewMember:
       type: object
       required: [discord_id, display_name, role, status, in_city_id, sales_channel, week_labour, week_orders, effective_rate, week_commission, crew_cut, crew_cut_rate, total_pay]
