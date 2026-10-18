@@ -20,7 +20,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 container mx-auto px-4 py-8 md:py-10">
         {children}
       </main>
-      <footer className="border-t border-white/10 py-8 mt-12 bg-[#18212a]">
+      <footer className="border-t border-white/10 py-8 mt-12 bg-card">
         <div className="container mx-auto px-4 flex flex-col md:flex-row items-center justify-between text-muted-foreground text-xs font-mono">
           <p>&copy; {new Date().getFullYear()} TOKYO DRIFT CUSTOMS</p>
           <div className="flex gap-4 mt-4 md:mt-0">

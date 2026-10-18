@@ -95,74 +95,68 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* TDC pit-lane palette: mineral paper, ink, signal vermilion and sodium amber. */
+/* Tokyo Drift Customs: black, graphite, white, and deep crimson. */
 :root {
-  --button-outline: rgba(0,0,0, .10);
-  --badge-outline: rgba(0,0,0, .05);
+  color-scheme: dark;
+  --button-outline: rgba(255,255,255,.12);
+  --badge-outline: rgba(255,255,255,.08);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255,255,255,.035);
+  --elevate-2: rgba(255,255,255,.075);
 
-  --opaque-button-border-intensity: -8; 
+  --background: 0 0% 5%;
+  --foreground: 0 0% 95%;
+  --border: 0 0% 19%;
 
-  --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .08);
+  --card: 0 0% 9%;
+  --card-foreground: 0 0% 95%;
+  --card-border: 0 0% 19%;
 
-  --background: 34 24% 94%;
-  --foreground: 220 20% 14%;
-  --border: 34 12% 82%;
+  --sidebar: 0 0% 7%;
+  --sidebar-foreground: 0 0% 92%;
+  --sidebar-border: 0 0% 18%;
+  --sidebar-primary: 355 72% 48%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 0 0% 15%;
+  --sidebar-accent-foreground: 0 0% 96%;
+  --sidebar-ring: 355 68% 52%;
 
-  --card: 36 26% 98%;
-  --card-foreground: 220 20% 14%;
-  --card-border: 34 12% 82%;
+  --popover: 0 0% 10%;
+  --popover-foreground: 0 0% 95%;
+  --popover-border: 0 0% 21%;
 
-  --sidebar: 220 22% 15%;
-  --sidebar-foreground: 38 30% 92%;
-  --sidebar-border: 220 17% 24%;
-  --sidebar-primary: 12 79% 55%;
-  --sidebar-primary-foreground: 36 30% 98%;
-  --sidebar-accent: 220 18% 22%;
-  --sidebar-accent-foreground: 38 30% 92%;
-  --sidebar-ring: 12 79% 55%;
-
-  --popover: 36 26% 98%;
-  --popover-foreground: 220 20% 14%;
-  --popover-border: 34 12% 82%;
-
-  --primary: 12 79% 55%;
-  --primary-foreground: 36 30% 98%;
-
-  --secondary: 44 83% 54%;
-  --secondary-foreground: 220 20% 14%;
-
-  --muted: 35 15% 87%;
-  --muted-foreground: 220 10% 42%;
-
-  --accent: 44 83% 54%;
-  --accent-foreground: 220 20% 14%;
-
-  --destructive: 0 67% 48%;
+  --primary: 355 72% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 17%;
+  --secondary-foreground: 0 0% 94%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 0 0% 66%;
+  --accent: 355 72% 53%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 355 74% 50%;
   --destructive-foreground: 0 0% 100%;
+  --input: 0 0% 23%;
+  --ring: 355 72% 56%;
 
-  --input: 34 12% 82%;
-  --ring: 12 79% 55%;
-
-  --chart-1: 12 79% 55%;
-  --chart-2: 44 83% 54%;
-  --chart-3: 175 33% 40%;
-  --chart-4: 220 20% 30%;
-  --chart-5: 28 50% 63%;
+  --chart-1: 355 72% 56%;
+  --chart-2: 0 0% 82%;
+  --chart-3: 355 45% 34%;
+  --chart-4: 0 0% 53%;
+  --chart-5: 0 0% 29%;
 
   --app-font-sans: 'Outfit', sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'Space Mono', monospace;
   --radius: .5rem; 
 
-  --shadow-2xs: 0px 2px 0px 0px rgba(0,0,0,0.5); 
-  --shadow-xs: 0px 2px 0px 0px rgba(0,0,0,0.5); 
-  --shadow-sm: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.5);
-  --shadow: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.5);
-  --shadow-md: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 2px 4px -1px rgba(0,0,0,0.5);
-  --shadow-lg: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 4px 6px -1px rgba(0,0,0,0.5);
-  --shadow-xl: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 8px 10px -1px rgba(0,0,0,0.5);
-  --shadow-2xl: 0px 2px 0px 0px rgba(0,0,0,0.5);
+  --shadow-2xs: 0 2px 8px rgba(0,0,0,.35);
+  --shadow-xs: 0 2px 8px rgba(0,0,0,.35);
+  --shadow-sm: 0 4px 12px rgba(0,0,0,.4);
+  --shadow: 0 6px 18px rgba(0,0,0,.4);
+  --shadow-md: 0 8px 24px rgba(0,0,0,.45);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,.48);
+  --shadow-xl: 0 16px 40px rgba(0,0,0,.5);
+  --shadow-2xl: 0 20px 50px rgba(0,0,0,.55);
 
   --tracking-normal: 0em;
   --spacing: 0.25rem;
@@ -176,78 +170,13 @@
   --destructive-border: hsl(var(--destructive));
 }
 
-.dark {
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
-
-  --opaque-button-border-intensity: 9;  
-
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
-
-  --background: 34 24% 94%;
-  --foreground: 220 20% 14%;
-  --border: 34 12% 82%;
-
-  --card: 36 26% 98%;
-  --card-foreground: 220 20% 14%;
-  --card-border: 34 12% 82%;
-
-  --sidebar: 220 22% 15%;
-  --sidebar-foreground: 38 30% 92%;
-  --sidebar-border: 220 17% 24%;
-  --sidebar-primary: 12 79% 55%;
-  --sidebar-primary-foreground: 36 30% 98%;
-  --sidebar-accent: 220 18% 22%;
-  --sidebar-accent-foreground: 38 30% 92%;
-  --sidebar-ring: 12 79% 55%;
-
-  --popover: 36 26% 98%;
-  --popover-foreground: 220 20% 14%;
-  --popover-border: 34 12% 82%;
-
-  --primary: 12 79% 55%;
-  --primary-foreground: 36 30% 98%;
-
-  --secondary: 44 83% 54%;
-  --secondary-foreground: 220 20% 14%;
-
-  --muted: 35 15% 87%;
-  --muted-foreground: 220 10% 42%;
-
-  --accent: 44 83% 54%;
-  --accent-foreground: 220 20% 14%;
-
-  --destructive: 0 67% 48%;
-  --destructive-foreground: 0 0% 100%;
-
-  --input: 34 12% 82%;
-  --ring: 12 79% 55%;
-
-  --chart-1: 12 79% 55%;
-  --chart-2: 44 83% 54%;
-  --chart-3: 175 33% 40%;
-  --chart-4: 220 20% 30%;
-  --chart-5: 28 50% 63%;
-
-  --shadow-2xs: 0px 2px 0px 0px rgba(0,0,0,0.5);
-  --shadow-xs: 0px 2px 0px 0px rgba(0,0,0,0.5);
-  --shadow-sm: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.5);
-  --shadow: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 1px 2px -1px rgba(0,0,0,0.5);
-  --shadow-md: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 2px 4px -1px rgba(0,0,0,0.5);
-  --shadow-lg: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 4px 6px -1px rgba(0,0,0,0.5);
-  --shadow-xl: 0px 2px 0px 0px rgba(0,0,0,0.5), 0px 8px 10px -1px rgba(0,0,0,0.5);
-  --shadow-2xl: 0px 2px 0px 0px rgba(0,0,0,0.5);
-
-}
-
 @layer base {
-  body { background: #eeeae1; }
+  body { background: hsl(var(--background)); }
 }
 
 .tdc-kicker { font-family: var(--app-font-mono); font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; }
-.tdc-panel { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: 0 8px 24px rgba(40, 37, 31, .045); }
-.tdc-input { width:100%; border:1px solid hsl(var(--input)); background:#fffdf8; border-radius:7px; padding:.7rem .8rem; color:hsl(var(--foreground)); outline:none; }
+.tdc-panel { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: 0 10px 28px rgba(0, 0, 0, .28); }
+.tdc-input { width:100%; border:1px solid hsl(var(--input)); background:hsl(var(--card)); border-radius:7px; padding:.7rem .8rem; color:hsl(var(--foreground)); outline:none; }
 .tdc-input:focus { border-color:hsl(var(--primary)); box-shadow:0 0 0 3px hsl(var(--primary)/.12); }
 .tdc-table { width:100%; border-collapse:collapse; min-width:680px; }
 .tdc-table th { text-align:left; color:hsl(var(--muted-foreground)); font:600 .66rem var(--app-font-mono); letter-spacing:.1em; text-transform:uppercase; padding:12px 14px; border-bottom:1px solid hsl(var(--border)); }
@@ -257,13 +186,34 @@
 @keyframes tdcRise { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
 
 .public-shell {
-  --background: 216 23% 12%; --foreground: 38 28% 94%; --border: 216 15% 26%;
-  --card: 216 20% 16%; --card-foreground: 38 28% 94%; --card-border: 216 15% 26%;
-  --muted: 216 15% 23%; --muted-foreground: 216 10% 68%;
-  --input: 216 15% 27%; --primary: 12 79% 55%; --primary-foreground: 38 28% 94%;
-  --secondary: 44 83% 54%; --secondary-foreground: 216 23% 12%; --accent: 44 83% 54%;
-  --accent-foreground: 216 23% 12%; --popover: 216 20% 16%; --popover-foreground: 38 28% 94%;
+  --background: 0 0% 5%; --foreground: 0 0% 95%; --border: 0 0% 19%;
+  --card: 0 0% 9%; --card-foreground: 0 0% 95%; --card-border: 0 0% 19%;
+  --muted: 0 0% 14%; --muted-foreground: 0 0% 66%;
+  --input: 0 0% 23%; --primary: 355 72% 48%; --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 17%; --secondary-foreground: 0 0% 94%; --accent: 355 72% 53%;
+  --accent-foreground: 0 0% 100%; --popover: 0 0% 10%; --popover-foreground: 0 0% 95%;
   color: hsl(var(--foreground)); background: hsl(var(--background));
+}
+
+/* Keep older page-level palette utilities on the shared dark TDC theme. */
+@layer utilities {
+  .bg-\[\#e9e5dc\], .bg-\[\#eeeae1\] { background-color: hsl(var(--background)) !important; }
+  .bg-\[\#f8f6f0\], .bg-\[\#f4f0e6\] { background-color: hsl(var(--card)) !important; }
+  .bg-\[\#202a32\] { background-color: hsl(var(--sidebar)) !important; }
+  .bg-\[\#34414a\] { background-color: hsl(var(--primary) / .22) !important; }
+  .bg-\[\#cf563f\] { background-color: hsl(var(--primary)) !important; }
+  .bg-\[\#f7e4de\], .bg-\[\#f5eccf\], .bg-\[\#f5ecd0\] { background-color: hsl(var(--primary) / .16) !important; }
+  .bg-\[\#e0eee5\], .bg-\[\#e3eee5\] { background-color: hsl(var(--muted)) !important; }
+  .border-\[\#d4cec2\], .border-\[\#d8d2c7\], .border-\[\#38424a\] { border-color: hsl(var(--border)) !important; }
+  .border-\[\#e0b448\], .border-\[\#d5a934\] { border-color: hsl(var(--primary)) !important; }
+  .text-\[\#f3eee3\], .text-\[\#eee8dd\] { color: hsl(var(--foreground)) !important; }
+  .text-\[\#e5b94f\], .text-\[\#e0b448\], .text-\[\#896510\], .text-\[\#86640f\] { color: hsl(355 78% 78%) !important; }
+  .text-\[\#47785a\], .text-\[\#3f7051\], .text-\[\#b34c37\] { color: hsl(var(--foreground)) !important; }
+  .bg-\[\#72a78a\] { background-color: hsl(var(--primary)) !important; }
+  .border-red-300, .border-emerald-300 { border-color: hsl(var(--primary) / .55) !important; }
+  .bg-red-50, .bg-red-100, .bg-emerald-50 { background-color: hsl(var(--primary) / .16) !important; }
+  .text-red-800, .text-red-700 { color: hsl(0 75% 78%) !important; }
+  .text-emerald-900 { color: hsl(var(--foreground)) !important; }
 }
 
 @layer base {

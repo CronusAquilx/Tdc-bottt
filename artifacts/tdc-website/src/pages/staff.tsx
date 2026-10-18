@@ -62,15 +62,19 @@ export function PortalAuthPage({ mode }: { mode: "login" | "setup" | "activate" 
       if (values.password !== values.confirm && mode !== "login") throw new Error("Those passwords do not match.");
       if (mode === "login") {
         const session = await login.mutateAsync({ data: { username: values.username, password: values.password } });
+        qc.clear();
         qc.setQueryData(getGetPortalSessionQueryKey(), session);
         setLocation("/staff");
       } else if (mode === "setup") {
         const session = await setup.mutateAsync({ data: { setupKey: values.setupKey, username: values.username, password: values.password } });
+        qc.clear();
         qc.setQueryData(getGetPortalSessionQueryKey(), session);
         setLocation("/staff");
       } else {
         if (token.length < 20) throw new Error("This activation link is missing or invalid.");
-        await activate.mutateAsync({ data: { token, password: values.password } });
+        const session = await activate.mutateAsync({ data: { token, password: values.password } });
+        qc.clear();
+        qc.setQueryData(getGetPortalSessionQueryKey(), session);
         setDone(true);
       }
     } catch (err) { setError(err instanceof Error ? err.message : "That request could not be completed. Check the details and try again."); }
@@ -89,8 +93,8 @@ export function PortalAuthPage({ mode }: { mode: "login" | "setup" | "activate" 
         <div className="w-full max-w-md">
           <p className="tdc-kicker text-primary">{mode === "login" ? "Secure sign-in" : mode === "setup" ? "One-time owner setup" : "One-time activation"}</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight">{done ? "You're activated" : heading}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">{done ? "Your private password is set. Sign in to open your crew desk." : mode === "login" ? "Use the username and private password issued to you." : mode === "setup" ? "Create the first owner account using the one-time setup key." : "Choose a private password to activate your portal account."}</p>
-          {done ? <div className="mt-7 space-y-4"><Notice kind="success">Activation complete. You can now sign in with your username and password.</Notice><Button className="w-full" onClick={() => setLocation("/staff/login")} data-testid="button-go-login">Continue to sign in</Button></div> :
+          <p className="mt-2 text-sm text-muted-foreground">{done ? "Your password is set and your crew account is ready." : mode === "login" ? "Use the username and private password issued to you." : mode === "setup" ? "Create the first owner account using the one-time setup key." : "Choose a private password to activate your portal account."}</p>
+          {done ? <div className="mt-7 space-y-4"><Notice kind="success">Activation complete. Your private crew session is ready.</Notice><Button className="w-full" onClick={() => setLocation("/staff")} data-testid="button-go-login">Open the crew desk</Button></div> :
             <form onSubmit={submit} className="mt-7 space-y-4" data-testid={`form-${mode}`}>
               {mode !== "activate" && <Field id={`${mode}-username`} label="Username" autoComplete="username" value={values.username} onChange={change("username")} required maxLength={64} data-testid="input-username"/>}
               {mode === "setup" && <Field id="setup-key" label="One-time setup key" type="password" autoComplete="off" value={values.setupKey} onChange={change("setupKey")} required data-testid="input-setup-key"/>}
@@ -131,7 +135,7 @@ function StaffShell({ children, active }: { children: ReactNode; active: string 
     setLogoutError("");
     try {
       await logout.mutateAsync();
-      await qc.invalidateQueries({ queryKey: getGetPortalSessionQueryKey() });
+      qc.clear();
       setLocation("/staff/login");
     } catch {
       setLogoutError("Sign out could not be completed. Please try again.");
@@ -246,19 +250,54 @@ export function CrewPage() {
   const [person, setPerson] = useState("");
   const [commission, setCommission] = useState("");
   const [cut, setCut] = useState("");
+  const [commissionRate, setCommissionRate] = useState("");
+  const [managerRate, setManagerRate] = useState("");
   const [message, setMessage] = useState("");
+  const selectedCrew = crew.data?.crew.find(c => c.display_name === person);
+  const managerEligible = selectedCrew?.role === "manager" || selectedCrew?.role === "owner";
+  const hasPayChanges = Boolean(commission || cut || commissionRate || managerRate);
   const savePay = async (e: FormEvent) => {
     e.preventDefault(); setMessage("");
     try {
-      await pay.mutateAsync({ data: { display_name: person, commission: commission ? Number(commission) : null, manager_cut: cut ? Number(cut) : null } });
+      await pay.mutateAsync({
+        data: {
+          display_name: person,
+          commission: commission ? Number(commission) : null,
+          manager_cut: cut ? Number(cut) : null,
+          commission_rate: commissionRate ? Number(commissionRate) / 100 : null,
+          manager_rate: managerRate ? Number(managerRate) : null,
+        },
+      });
       setMessage(`Pay settings saved for ${person}.`);
+      setCommission("");
+      setCut("");
+      setCommissionRate("");
+      setManagerRate("");
       await qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() });
     } catch { setMessage("Pay settings could not be saved. Please check the values and try again."); }
   };
   return <StaffShell active="/staff/crew"><PageHead eyebrow="People / compensation" title="Crew & pay" detail="A clear weekly picture of labour, commission, crew cut and total pay."/>
     <section className="tdc-panel overflow-hidden"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Current week</p><h2 className="mt-1 font-bold">Crew earnings</h2></div><div className="tdc-kicker text-muted-foreground">{crew.data?.crew.length ?? 0} crew members</div></div><QueryState loading={crew.isLoading} error={!!crew.error} retry={() => void qc.invalidateQueries({ queryKey: getGetPortalCrewQueryKey() })}/>{!crew.isLoading && !crew.error && (crew.data?.crew.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Crew member</th><th>Role</th><th>Sales channel</th><th>Orders</th><th>Labour</th><th>Rate</th><th>Commission</th><th>Crew cut</th><th>Total pay</th></tr></thead><tbody>{crew.data.crew.map((c, i) => <tr key={`${c.display_name}-${i}`} data-testid={`row-crew-${i}`}><td className="font-semibold">{c.display_name}</td><td className="capitalize">{titleCase(c.role)}</td><td className="text-muted-foreground">{c.sales_channel || "—"}</td><td>{c.week_orders}</td><td className="font-mono">{cash(c.week_labour)}</td><td className="font-mono">{(c.effective_rate * 100).toFixed(1)}%</td><td className="font-mono">{cash(c.week_commission)}</td><td className="font-mono">{cash(c.crew_cut)} <span className="text-[10px] text-muted-foreground">({c.crew_cut_rate}%)</span></td><td className="font-mono font-bold">{cash(c.total_pay)}</td></tr>)}</tbody></table></div> : <Empty icon={Users} title="No crew data" detail="Crew earnings will appear when the roster is available."/>)}</section>
     <div className="mt-5 grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
-      <section className="tdc-panel p-5"><p className="tdc-kicker text-primary">Manager controls</p><h2 className="mt-1 font-bold">Set weekly pay</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Set a commission amount and manager cut for a crew member. Use rates only when the API's pay fields support them.</p><form className="mt-5 space-y-4" onSubmit={savePay} data-testid="form-pay-update"><label className="grid gap-1.5 text-sm font-medium">Crew member<select className="tdc-input" value={person} onChange={e => setPerson(e.target.value)} required data-testid="select-pay-member"><option value="">Choose crew member</option>{crew.data?.crew.map((c, i) => <option key={`${c.display_name}-${i}`} value={c.display_name}>{c.display_name}</option>)}</select></label><Field id="pay-commission" label="Commission amount ($)" type="number" min="0" step="0.01" value={commission} onChange={e => setCommission(e.target.value)} data-testid="input-pay-commission"/><Field id="pay-cut" label="Manager cut ($)" type="number" min="0" step="0.01" value={cut} onChange={e => setCut(e.target.value)} data-testid="input-pay-cut"/><Button type="submit" disabled={pay.isPending || !person} data-testid="button-save-pay"><BadgeDollarSign size={15}/>{pay.isPending ? "Saving…" : "Save pay settings"}</Button></form>{message && <p className={`mt-3 text-xs ${message.includes("could not") ? "text-red-700" : "text-emerald-800"}`} role="status" data-testid="status-pay-result">{message}</p>}</section>
+      <section className="tdc-panel p-5">
+        <p className="tdc-kicker text-primary">Manager controls</p>
+        <h2 className="mt-1 font-bold">Set weekly pay</h2>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Matches /setpay: set this week’s commission or manager cut, and optionally change the ongoing rates. Leave fields blank to keep them unchanged.</p>
+        <form className="mt-5 space-y-4" onSubmit={savePay} data-testid="form-pay-update">
+          <label className="grid gap-1.5 text-sm font-medium">Crew member
+            <select className="tdc-input" value={person} onChange={e => { setPerson(e.target.value); setCommission(""); setCut(""); setCommissionRate(""); setManagerRate(""); setMessage(""); }} required data-testid="select-pay-member">
+              <option value="">Choose crew member</option>
+              {crew.data?.crew.map((c, i) => <option key={`${c.display_name}-${i}`} value={c.display_name}>{c.display_name}</option>)}
+            </select>
+          </label>
+          <Field id="pay-commission" label="Weekly commission ($)" type="number" min="0" step="0.01" value={commission} onChange={e => setCommission(e.target.value)} data-testid="input-pay-commission"/>
+          {managerEligible && <Field id="pay-cut" label="Manager cut this week ($)" type="number" min="0" step="0.01" value={cut} onChange={e => setCut(e.target.value)} data-testid="input-pay-cut"/>}
+          <Field id="pay-commission-rate" label="Commission rate (%)" type="number" min="0" max="100" step="0.1" value={commissionRate} onChange={e => setCommissionRate(e.target.value)} data-testid="input-pay-commission-rate"/>
+          {managerEligible && <Field id="pay-manager-rate" label="Manager crew-cut rate (%)" type="number" min="0" max="100" step="0.1" value={managerRate} onChange={e => setManagerRate(e.target.value)} data-testid="input-pay-manager-rate"/>}
+          <Button type="submit" disabled={pay.isPending || !person || !hasPayChanges} data-testid="button-save-pay"><BadgeDollarSign size={15}/>{pay.isPending ? "Saving…" : "Save pay settings"}</Button>
+        </form>
+        {message && <p className={`mt-3 text-xs ${message.includes("could not") ? "text-red-700" : "text-emerald-800"}`} role="status" data-testid="status-pay-result">{message}</p>}
+      </section>
       <section className="tdc-panel overflow-hidden"><div className="border-b border-border px-5 py-4"><p className="tdc-kicker text-primary">Payroll record</p><h2 className="mt-1 font-bold">Payout history</h2></div><QueryState loading={payouts.isLoading} error={!!payouts.error} retry={() => void qc.invalidateQueries({ queryKey: getGetPortalPayoutsQueryKey({ limit: 100 }) })}/>{!payouts.isLoading && !payouts.error && (payouts.data?.payouts.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Week starting</th><th>Crew</th><th>Orders</th><th>Hours</th><th>Hourly pay</th><th>Manager cut</th><th>Total payout</th><th>Paid</th></tr></thead><tbody>{payouts.data.payouts.map(p => <tr key={p.id} data-testid={`row-payout-${p.id}`}><td>{dateOnly(p.week_start)}</td><td className="font-semibold">{p.mechanic_name}</td><td>{p.order_count}</td><td>{p.hours_worked}</td><td className="font-mono">{cash(p.hourly_pay)}</td><td className="font-mono">{cash(p.manager_cut)}</td><td className="font-mono font-bold">{cash(p.amount)}</td><td>{p.paid_at ? dateOnly(p.paid_at) : <span className="text-muted-foreground">Not marked paid</span>}</td></tr>)}</tbody></table></div> : <Empty icon={BadgeDollarSign} title="No payout records" detail="Payout entries will appear here when recorded."/>)}</section>
     </div>
   </StaffShell>;
@@ -285,19 +324,20 @@ export function AccountsPage() {
   const [role, setRole] = useState<PortalRole>("manager");
   const [crewName, setCrewName] = useState("");
   const [result, setResult] = useState("");
+  const [activationLink, setActivationLink] = useState("");
   const refresh = async () => { await qc.invalidateQueries({ queryKey: getGetPortalAccountsQueryKey() }); };
   const addAccount = async (e: FormEvent) => {
-    e.preventDefault(); setResult("");
-    try { const res = await create.mutateAsync({ data: { username, role } }); setResult(`Account created for ${res.account.username}. Activation link: ${res.setup_url}`); setUsername(""); await refresh(); }
+    e.preventDefault(); setResult(""); setActivationLink("");
+    try { const res = await create.mutateAsync({ data: { username, role } }); setResult(`Account created for ${res.account.username}. Share this one-time activation link with them.`); setActivationLink(res.setup_url); setUsername(""); await refresh(); }
     catch { setResult("Account could not be created. Verify the username and role."); }
   };
   const sendAll = async () => {
-    setResult("");
+    setResult(""); setActivationLink("");
     try { const res = await inviteAll.mutateAsync(); setResult(`Invitations sent: ${res.sent} · skipped: ${res.skipped}${res.failures.length ? ` · failed: ${res.failures.join(", ")}` : ""}`); await refresh(); }
     catch { setResult("Crew invitations could not be sent. Try again."); }
   };
   const sendOne = async (e: FormEvent) => {
-    e.preventDefault(); setResult("");
+    e.preventDefault(); setResult(""); setActivationLink("");
     try { const res = await inviteOne.mutateAsync({ data: { display_name: crewName } }); setResult(`Invitation sent: ${res.sent} · skipped: ${res.skipped}${res.failures.length ? ` · failed: ${res.failures.join(", ")}` : ""}`); setCrewName(""); await refresh(); }
     catch { setResult("Invite could not be sent. Check the crew member name."); }
   };
@@ -308,7 +348,7 @@ export function AccountsPage() {
       <section className="tdc-panel p-5"><span className="grid h-9 w-9 place-items-center rounded-lg bg-[#f5ecd0] text-[#896510]"><MessageSquareText size={17}/></span><p className="tdc-kicker mt-4 text-primary">Single invite</p><h2 className="mt-1 text-lg font-bold">Invite one crew member</h2><form className="mt-3 space-y-3" onSubmit={sendOne}><Field id="crew-invite-name" label="Display name" value={crewName} onChange={e => setCrewName(e.target.value)} placeholder="Crew member name" required data-testid="input-invite-name"/><Button type="submit" disabled={inviteOne.isPending} className="w-full" data-testid="button-invite-one">{inviteOne.isPending ? "Sending…" : "Send invitation"}</Button></form></section>
       <section className="tdc-panel p-5"><span className="grid h-9 w-9 place-items-center rounded-lg bg-[#e0eee5] text-[#47785a]"><LockKeyhole size={17}/></span><p className="tdc-kicker mt-4 text-primary">Portal-only account</p><h2 className="mt-1 text-lg font-bold">Create boss access</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Creates an account without Discord sign-in. They'll set their own password through activation.</p><form className="mt-3 space-y-3" onSubmit={addAccount}><Field id="account-username" label="Username" value={username} onChange={e => setUsername(e.target.value)} required maxLength={64} data-testid="input-account-username"/><label className="grid gap-1.5 text-sm font-medium">Portal role<select className="tdc-input" value={role} onChange={e => setRole(e.target.value as PortalRole)} data-testid="select-account-role">{roles.map(r => <option key={r} value={r}>{titleCase(r)}</option>)}</select></label><Button type="submit" disabled={create.isPending} className="w-full" data-testid="button-create-account">{create.isPending ? "Creating…" : "Create account"}</Button></form></section>
     </div>
-    {result && <div className="mt-4"><Notice kind={result.includes("could not") ? "error" : "success"}>{result}</Notice></div>}
+     {result && <div className="mt-4"><Notice kind={result.includes("could not") ? "error" : "success"}>{result}{activationLink && <a className="ml-2 inline-block font-semibold underline underline-offset-4" href={activationLink} target="_blank" rel="noreferrer">Open one-time activation link</a>}</Notice></div>}
     <section className="tdc-panel mt-5 overflow-hidden"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="tdc-kicker text-primary">Access register</p><h2 className="mt-1 font-bold">Portal accounts</h2></div><span className="text-xs text-muted-foreground">{accounts.data?.accounts.length ?? 0} accounts</span></div><QueryState loading={accounts.isLoading} error={!!accounts.error} retry={() => void refresh()}/>{!accounts.isLoading && !accounts.error && (accounts.data?.accounts.length ? <div className="overflow-x-auto"><table className="tdc-table"><thead><tr><th>Username</th><th>Role</th><th>Account status</th><th>Account ID</th></tr></thead><tbody>{accounts.data.accounts.map(a => <tr key={a.id} data-testid={`row-account-${a.id}`}><td className="font-semibold">{a.username}</td><td className="capitalize">{titleCase(a.role)}</td><td><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${a.active ? "bg-[#e3eee5] text-[#3f7051]" : "bg-[#f5ecd0] text-[#86640f]"}`}>{a.active ? "Active" : "Pending activation"}</span></td><td className="font-mono text-xs text-muted-foreground">{a.id}</td></tr>)}</tbody></table></div> : <Empty icon={Users} title="No portal accounts" detail="Create a boss account or send crew invitations to get started."/>)}</section>
   </StaffShell>;
 }

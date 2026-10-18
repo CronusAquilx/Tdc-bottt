@@ -11,3 +11,4 @@
 - [TDC Payroll Embed Limits](tdc-payroll-embed-limits.md) — payroll summaries must chunk crew lines because Discord embed field values are limited to 1,024 characters
 - [TDC Database Recovery](tdc-database-recovery.md) — SQLite data uses the configured persistent data directory, rotating snapshots every 10 minutes, startup restore, and immediate checkpoints after payroll/raffle writes
 - [TDC Daily Bank Account](tdc-bank-account.md) — expected balance is prior balance + order revenue − recorded payouts; use Chicago midnight prompts and wait until the next daily check after logging/payroll
+- [TDC Portal API Operations](tdc-portal-api-ops.md) — the web proxy and Discord bot need the same API secret; restart both after secret changes, and configure production bot/site URLs

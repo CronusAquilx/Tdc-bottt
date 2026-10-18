@@ -9,12 +9,12 @@ import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 
 const WHEEL_COLORS = [
-  "#ff0055", // Primary Pink/Red
-  "#00f0ff", // Electric Blue
-  "#ffaa00", // Gold
-  "#00ffaa", // Neon Green
-  "#9d00ff", // Purple
-  "#ff5500", // Orange
+  "#7b101c",
+  "#b51f30",
+  "#d32b40",
+  "#4a0b13",
+  "#555555",
+  "#a9a9a9",
 ];
 
 export function RaffleDetail() {
