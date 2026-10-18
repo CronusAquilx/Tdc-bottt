@@ -128,9 +128,11 @@ export function StaffShell({ children, active }: { children: ReactNode; active: 
   const links = [
     { href: "/staff", label: "Overview", icon: Gauge, show: true },
     { href: "/staff/orders", label: "Orders", icon: ClipboardList, show: true },
+    { href: "/staff/new-order", label: "New order", icon: PlusCircle, show: true },
     { href: "/staff/crew", label: "Crew & pay", icon: Users, show: canManageCrew(account.role) },
     { href: "/staff/timeclock", label: "Timeclock", icon: Gauge, show: true },
     { href: "/staff/leave", label: "Leave", icon: Activity, show: true },
+    { href: "/staff/payouts", label: "My payouts", icon: Wallet, show: true },
     { href: "/staff/bank", label: "Bank", icon: BadgeDollarSign, show: canManageCrew(account.role) },
     { href: "/staff/crew-admin", label: "Crew admin", icon: Wrench, show: canManageCrew(account.role) },
     { href: "/staff/channels", label: "Sales channels", icon: MessageSquareText, show: true },
@@ -166,8 +168,8 @@ export function StaffShell({ children, active }: { children: ReactNode; active: 
 export function PageHead({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail: string; action?: React.ReactNode }) {
   return <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="tdc-kicker text-primary">{eyebrow}</p><h1 className="mt-1 text-3xl font-bold tracking-tight md:text-[2.15rem]" data-testid="text-page-title">{title}</h1><p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{detail}</p></div>{action}</div>;
 }
-function Metric({ label, value, hint, icon: Icon, accent = "coral" }: { label: string; value: string; hint: string; icon: typeof Gauge; accent?: "coral" | "gold" | "green" }) {
-  return <article className="tdc-panel p-5"><div className="flex items-start justify-between"><div><p className="tdc-kicker text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-bold tracking-tight" data-testid={`metric-${label.toLowerCase().replaceAll(" ", "-")}`}>{value}</p></div><span className={`grid h-9 w-9 place-items-center rounded-lg ${accent === "gold" ? "bg-[#f5eccf] text-[#896510]" : accent === "green" ? "bg-[#e0eee5] text-[#47785a]" : "bg-[#f7e4de] text-[#b34c37]"}`}><Icon size={17}/></span></div><p className="mt-2 text-xs text-muted-foreground">{hint}</p></article>;
+function Metric({ label, value, hint, icon: Icon, accent = "coral" }: { label: string; value: string; hint: string; icon: typeof Gauge; accent?: "coral" | "gold" | "green" | "red" }) {
+  return <article className="tdc-panel p-5"><div className="flex items-start justify-between"><div><p className="tdc-kicker text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-bold tracking-tight" data-testid={`metric-${label.toLowerCase().replaceAll(" ", "-")}`}>{value}</p></div><span className={`grid h-9 w-9 place-items-center rounded-lg ${accent === "gold" ? "bg-[#f5eccf] text-[#896510]" : accent === "green" ? "bg-[#e0eee5] text-[#47785a]" : accent === "red" ? "bg-red-100 text-red-800" : "bg-[#f7e4de] text-[#b34c37]"}`}><Icon size={17}/></span></div><p className="mt-2 text-xs text-muted-foreground">{hint}</p></article>;
 }
 export function Empty({ icon: Icon, title, detail }: { icon: typeof Gauge; title: string; detail: string }) {
   return <div className="flex flex-col items-center justify-center px-6 py-14 text-center"><span className="grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground"><Icon size={21}/></span><h3 className="mt-4 font-semibold">{title}</h3><p className="mt-1 max-w-sm text-sm text-muted-foreground">{detail}</p></div>;
