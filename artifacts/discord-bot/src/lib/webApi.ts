@@ -1,13 +1,11 @@
 // Private HTTP API used by the TDC dashboard website.
 // Every request must send header `x-api-key: <WEB_API_SECRET>`.
 import type { IncomingMessage, ServerResponse } from "http";
-import { ChannelType, EmbedBuilder, type Client, type TextChannel } from "discord.js";
-import { db, getProfile, getUserRole, getGuildConfig, saveDatabaseSnapshot } from "../db.js";
+import { ChannelType, type Client, type TextChannel } from "discord.js";
+import { db, getProfile, getGuildConfig } from "../db.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
-import { resendOrderPanel } from "../interactions/orderpanel.js";
-import { logEvent } from "./eventLog.js";
-import { COLORS, money } from "./embeds.js";
-import { websiteIdentity, websiteManagement, websiteComplete, websitePayroll, websiteRemove, websiteAnnounce, websiteBank } from "./websiteActions.js";
+import { handlePortalApi } from "./portalApi.js";
+import { websiteIdentity, websiteManagement, websiteComplete, websitePayroll, websiteRemove, websiteAnnounce, websiteBank, websiteSetPay } from "./websiteActions.js";
 
 const SINCE_RESET_SQL =
   "datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))";
@@ -124,78 +122,16 @@ async function salesChannel(client: Client, mechanicId: string) {
   };
 }
 
-async function setPay(client: Client, body: any) {
-  const id = String(body.discord_id ?? "");
-  const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
-  const commission = num(body.commission);
-  const managerCut = num(body.manager_cut);
-  const commissionRate = num(body.commission_rate);
-  const managerRate = num(body.manager_rate);
-  for (const [k, v, max] of [["commission", commission, Infinity], ["manager_cut", managerCut, Infinity], ["commission_rate", commissionRate, 1], ["manager_rate", managerRate, 100]] as const) {
-    if (v !== null && (!Number.isFinite(v) || v < 0 || v > max)) throw new Error(`Invalid ${k}`);
-  }
-  if ([commission, managerCut, commissionRate, managerRate].every(v => v === null)) throw new Error("Nothing to change");
-  const profile = await getProfile(id);
-  if (!profile) throw new Error("Crew member not found");
-  if (managerCut !== null || managerRate !== null) {
-    const role = await getUserRole(id);
-    if (role !== "manager" && role !== "owner") throw new Error("Manager cut only applies to managers/owners");
-  }
-  const updates: string[] = [];
-  const args: (string | number)[] = [];
-  if (commission !== null) {
-    const s = await db.execute({ sql: `SELECT COALESCE(SUM(labour),0) FROM orders WHERE mechanic_id = ? AND ${DONE_STATUSES} AND COALESCE(is_own_car,0)=0 AND ${SINCE_RESET_SQL}`, args: [id] });
-    updates.push("commission_adjustment = ?", "commission_labour_snapshot = ?");
-    args.push(commission, Number(s.rows[0]?.[0] ?? 0));
-  }
-  if (managerCut !== null) {
-    const s = await db.execute({ sql: `SELECT COALESCE(SUM(labour),0) FROM orders WHERE ${DONE_STATUSES} AND ${SINCE_RESET_SQL} AND COALESCE(is_own_car,0)=0 AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`, args: [id] });
-    updates.push("manager_cut_adjustment = ?", "manager_labour_snapshot = ?");
-    args.push(managerCut, Number(s.rows[0]?.[0] ?? 0));
-  }
-  if (commissionRate !== null) { updates.push("commission_rate = ?"); args.push(commissionRate); }
-  if (managerRate !== null) { updates.push("manager_override_rate = ?"); args.push(managerRate / 100); }
-  args.push(id);
-  await db.execute({ sql: `UPDATE profiles SET ${updates.join(", ")} WHERE discord_id = ?`, args });
-  await saveDatabaseSnapshot();
-  logEvent({ kind: "pay_adjusted", userId: String(body.actor_id), userName: "website", amount: commission ?? undefined, detail: `web: target ${id} ${JSON.stringify({ commission, managerCut, commissionRate, managerRate })}` });
-
-  // Mirror the change into Discord: log channel embed + refresh their sales panel.
-  const lines: string[] = [];
-  if (commission !== null) lines.push(`> Weekly commission: **${money(commission)}**`);
-  if (managerCut !== null) lines.push(`> Manager cut this week: **${money(managerCut)}**`);
-  if (commissionRate !== null) lines.push(`> Commission rate: **${(commissionRate * 100).toFixed(0)}%**`);
-  if (managerRate !== null) lines.push(`> Manager crew-cut rate: **${managerRate.toFixed(1)}%**`);
-  const embed = new EmbedBuilder()
-    .setTitle("💸  Pay Updated (Dashboard)")
-    .setColor(COLORS.approved)
-    .setDescription(`<@${id}> — ${profile.display_name}\n${lines.join("\n")}`)
-    .setTimestamp();
-  for (const guild of client.guilds.cache.values()) {
-    try {
-      const config = await getGuildConfig(guild.id);
-      if (config?.log_channel_id) {
-        const ch = await guild.channels.fetch(config.log_channel_id).catch(() => null);
-        if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
-      }
-      if (profile.sales_channel_id) {
-        const sc = await guild.channels.fetch(profile.sales_channel_id).catch(() => null);
-        if (sc?.type === ChannelType.GuildText) {
-          const fresh = await getProfile(id);
-          await resendOrderPanel(sc as TextChannel, id, profile.display_name, fresh?.commission_rate ?? profile.commission_rate);
-        }
-      }
-    } catch (err) { console.error("[TDC] web setPay discord sync failed:", err); }
-  }
-  return { ok: true };
-}
-
 /** Returns true if the request was handled. */
 export async function handleWebApi(req: IncomingMessage, res: ServerResponse, client: Client): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return false;
   const secret = process.env.WEB_API_SECRET;
   if (!secret || req.headers["x-api-key"] !== secret) { send(res, 401, { error: "Unauthorized" }); return true; }
+  if (url.pathname.startsWith("/api/portal/")) {
+    await handlePortalApi(req, res, client);
+    return true;
+  }
   try {
     if (req.method === "GET" && url.pathname === "/api/identity") return send(res, 200, await websiteIdentity(client, String(url.searchParams.get("discord_id") ?? ""))), true;
     if (req.method === "POST" && url.pathname === "/api/orders/complete") return send(res, 200, await websiteComplete(client, await readJson(req))), true;
@@ -210,7 +146,7 @@ export async function handleWebApi(req: IncomingMessage, res: ServerResponse, cl
     if (req.method === "GET" && url.pathname === "/api/sales-channel") return send(res, 200, await salesChannel(client, String(url.searchParams.get("mechanic_id") ?? ""))), true;
     if (req.method === "POST" && url.pathname === "/api/pay") {
       const body = await readJson(req); await websiteManagement(client, body);
-      return send(res, 200, await setPay(client, body)), true;
+      return send(res, 200, await websiteSetPay(client, body)), true;
     }
     send(res, 404, { error: "Not found" });
   } catch (err: any) {

@@ -625,8 +625,8 @@ importers:
   lib/api-zod:
     dependencies:
       zod:
-        specifier: 'catalog:'
-        version: 3.25.76
+        specifier: ^4.6.7
+        version: 4.6.7
 
   lib/db:
     dependencies:

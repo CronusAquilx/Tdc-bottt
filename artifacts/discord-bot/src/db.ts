@@ -196,6 +196,35 @@ export async function initDb() {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS portal_accounts (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      username_key TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL DEFAULT 'mechanic',
+      password_hash TEXT,
+      password_salt TEXT,
+      active INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_login_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS portal_sessions (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS portal_setup_tokens (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS bank_account_logs (
       id TEXT PRIMARY KEY,
       guild_id TEXT NOT NULL,

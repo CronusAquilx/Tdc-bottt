@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from "react";
-import { useGetRaffle, useGetRaffleEntries, getGetRaffleQueryKey } from "@workspace/api-client-react";
+import { useGetRaffle, useGetRaffleEntries, getGetRaffleQueryKey, getGetRaffleEntriesQueryKey } from "@workspace/api-client-react";
 import { useParams } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,7 @@ const WHEEL_COLORS = [
 export function RaffleDetail() {
   const { id } = useParams<{ id: string }>();
   const { data: raffleData, isLoading: isLoadingRaffle } = useGetRaffle(id, { query: { enabled: !!id, queryKey: getGetRaffleQueryKey(id) } });
-  const { data: entriesData, isLoading: isLoadingEntries } = useGetRaffleEntries(id, { query: { enabled: !!id, queryKey: ["entries", id] as any } }); // Using custom key since we might need to cast or rely on generated one properly. Actually, let's use the hook directly as per rules.
-  // Wait, the rule states getGetRaffleEntriesQueryKey(id), but I just hardcoded a string array here to be safe if types mismatch, let's fix it later or just use enabled.
+  const { data: entriesData, isLoading: isLoadingEntries } = useGetRaffleEntries(id, { query: { enabled: !!id, queryKey: getGetRaffleEntriesQueryKey(id) } });
   
   const [spinning, setSpinning] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);

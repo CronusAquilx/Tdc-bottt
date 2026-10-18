@@ -11,6 +11,8 @@ tags:
     description: Health operations
   - name: raffles
     description: Raffle operations
+  - name: portal
+    description: Public raffle site and authenticated TDC crew portal
 paths:
   /healthz:
     get:
@@ -92,6 +94,328 @@ paths:
                       type: string
                   count:
                     type: integer
+  /portal/session:
+    get:
+      operationId: getPortalSession
+      tags: [portal]
+      summary: Check website login and first-owner setup status
+      responses:
+        "200":
+          description: Current website session status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSession"
+  /portal/login:
+    post:
+      operationId: loginPortal
+      tags: [portal]
+      summary: Sign in to the crew portal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLogin"
+      responses:
+        "200":
+          description: Signed in account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSession"
+        "401":
+          description: Invalid username or password
+  /portal/logout:
+    post:
+      operationId: logoutPortal
+      tags: [portal]
+      summary: Sign out of the crew portal
+      responses:
+        "200":
+          description: Signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+  /portal/setup:
+    post:
+      operationId: bootstrapPortal
+      tags: [portal]
+      summary: Create the first owner account using the one-time setup key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalBootstrap"
+      responses:
+        "201":
+          description: First owner account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSession"
+        "409":
+          description: Portal setup is already complete
+  /portal/activate:
+    post:
+      operationId: activatePortalAccount
+      tags: [portal]
+      summary: Set a private password from a one-time account setup link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalActivation"
+      responses:
+        "200":
+          description: Account activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSession"
+        "400":
+          description: Invalid or expired setup link
+  /portal/orders:
+    get:
+      operationId: getPortalOrders
+      tags: [portal]
+      summary: List orders permitted for the signed-in crew account
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orders]
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalOrder"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account is not allowed to view these orders
+  /portal/crew:
+    get:
+      operationId: getPortalCrew
+      tags: [portal]
+      summary: List crew and current pay totals for management
+      responses:
+        "200":
+          description: Crew
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [crew]
+                properties:
+                  crew:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalCrewMember"
+        "401":
+          description: Sign in required
+        "403":
+          description: Management role required
+  /portal/channels:
+    get:
+      operationId: getPortalChannels
+      tags: [portal]
+      summary: List sales-channel messages visible to the signed-in account
+      parameters:
+        - name: displayName
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sales channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channels]
+                properties:
+                  channels:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalSalesChannel"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account is not allowed to view all sales channels
+  /portal/payouts:
+    get:
+      operationId: getPortalPayouts
+      tags: [portal]
+      summary: List payout history permitted for the signed-in crew account
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Payout history
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payouts]
+                properties:
+                  payouts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalPayout"
+        "401":
+          description: Sign in required
+  /portal/accounts:
+    get:
+      operationId: getPortalAccounts
+      tags: [portal]
+      summary: List website accounts for owners and head managers
+      responses:
+        "200":
+          description: Website accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PortalAccount"
+        "401":
+          description: Sign in required
+        "403":
+          description: Owner or head manager required
+    post:
+      operationId: createPortalAccount
+      tags: [portal]
+      summary: Create an independent portal account and return a one-time setup link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalAccountInput"
+      responses:
+        "201":
+          description: Account invitation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalAccountInvite"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account is not allowed to create this role
+  /portal/invites/all:
+    post:
+      operationId: inviteAllPortalCrew
+      tags: [portal]
+      summary: Send one-time setup links to crew members in their sales channels
+      responses:
+        "200":
+          description: Invitation delivery summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalInviteSummary"
+        "401":
+          description: Sign in required
+        "403":
+          description: Owner or head manager required
+  /portal/invites/one:
+    post:
+      operationId: inviteOnePortalCrewMember
+      tags: [portal]
+      summary: Send one crew member a one-time setup link in their sales channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalInviteInput"
+      responses:
+        "200":
+          description: Invitation delivery status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalInviteSummary"
+        "401":
+          description: Sign in required
+        "403":
+          description: Owner or head manager required
+  /portal/pay:
+    post:
+      operationId: updatePortalPay
+      tags: [portal]
+      summary: Update a crew member's weekly pay using the Discord set-pay rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalPayUpdate"
+      responses:
+        "200":
+          description: Pay updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Manager role required
+  /portal/orders/{id}/complete:
+    post:
+      operationId: completePortalOrder
+      tags: [portal]
+      summary: Complete an order draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOk"
+        "401":
+          description: Sign in required
+        "403":
+          description: Account is not allowed to complete this order
 components:
   schemas:
     HealthStatus:
@@ -133,3 +457,270 @@ components:
           type: array
           items:
             type: string
+    PortalRole:
+      type: string
+      enum: [owner, head_manager, manager, trainer, mechanic]
+    PortalSession:
+      type: object
+      required: [initialized, account]
+      properties:
+        initialized:
+          type: boolean
+        account:
+          oneOf:
+            - $ref: "#/components/schemas/PortalAccount"
+            - type: "null"
+    PortalAccount:
+      type: object
+      required: [id, username, role, active]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/PortalRole"
+        active:
+          type: boolean
+    PortalLogin:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+    PortalBootstrap:
+      type: object
+      required: [setupKey, username, password]
+      properties:
+        setupKey:
+          type: string
+          minLength: 1
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        password:
+          type: string
+          minLength: 12
+    PortalActivation:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 20
+        password:
+          type: string
+          minLength: 12
+    PortalOk:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+    PortalOrderItem:
+      type: object
+      required: [label, category, price, cost, labour]
+      properties:
+        label:
+          type: string
+        category:
+          type: string
+        price:
+          type: number
+        cost:
+          type: number
+        labour:
+          type: number
+    PortalOrder:
+      type: object
+      required: [id, order_number, mechanic_name, status, items, total, labour, parts_cost, customer_name, notes, is_own_car, created_at]
+      properties:
+        id:
+          type: string
+        order_number:
+          type: string
+        mechanic_name:
+          type: string
+        status:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalOrderItem"
+        total:
+          type: number
+        labour:
+          type: number
+        parts_cost:
+          type: number
+        customer_name:
+          type: ["string", "null"]
+        notes:
+          type: string
+        is_own_car:
+          type: boolean
+        created_at:
+          type: string
+        completed_at:
+          type: ["string", "null"]
+    PortalCrewMember:
+      type: object
+      required: [display_name, role, sales_channel, week_labour, week_orders, effective_rate, week_commission, crew_cut, crew_cut_rate, total_pay]
+      properties:
+        display_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/PortalRole"
+        sales_channel:
+          type: ["string", "null"]
+        week_labour:
+          type: number
+        week_orders:
+          type: integer
+        effective_rate:
+          type: number
+        week_commission:
+          type: number
+        crew_cut:
+          type: number
+        crew_cut_rate:
+          type: number
+        total_pay:
+          type: number
+    PortalSalesChannel:
+      type: object
+      required: [display_name, channel_name, messages]
+      properties:
+        display_name:
+          type: string
+        channel_name:
+          type: ["string", "null"]
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalChannelMessage"
+    PortalChannelMessage:
+      type: object
+      required: [id, author, is_bot, content, created_at, embeds]
+      properties:
+        id:
+          type: string
+        author:
+          type: string
+        is_bot:
+          type: boolean
+        content:
+          type: string
+        created_at:
+          type: string
+        embeds:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalEmbed"
+    PortalEmbed:
+      type: object
+      required: [title, description, fields]
+      properties:
+        title:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalEmbedField"
+    PortalEmbedField:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+    PortalPayout:
+      type: object
+      required: [id, mechanic_name, week_start, amount, manager_cut, hourly_pay, order_count, hours_worked, paid_at, created_at]
+      properties:
+        id:
+          type: string
+        mechanic_name:
+          type: string
+        week_start:
+          type: string
+        amount:
+          type: number
+        manager_cut:
+          type: number
+        hourly_pay:
+          type: number
+        order_count:
+          type: integer
+        hours_worked:
+          type: number
+        paid_at:
+          type: ["string", "null"]
+        created_at:
+          type: string
+    PortalAccountInput:
+      type: object
+      required: [username, role]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role:
+          $ref: "#/components/schemas/PortalRole"
+    PortalAccountInvite:
+      type: object
+      required: [account, setup_url]
+      properties:
+        account:
+          $ref: "#/components/schemas/PortalAccount"
+        setup_url:
+          type: string
+    PortalInviteInput:
+      type: object
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+    PortalInviteSummary:
+      type: object
+      required: [sent, skipped, failures]
+      properties:
+        sent:
+          type: integer
+        skipped:
+          type: integer
+        failures:
+          type: array
+          items:
+            type: string
+    PortalPayUpdate:
+      type: object
+      required: [display_name]
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+        commission:
+          type: ["number", "null"]
+          minimum: 0
+        manager_cut:
+          type: ["number", "null"]
+          minimum: 0
+        commission_rate:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        manager_rate:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 100

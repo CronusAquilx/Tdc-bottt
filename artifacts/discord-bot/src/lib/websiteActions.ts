@@ -1,9 +1,9 @@
-import { ChannelType, type Client, type TextChannel } from "discord.js";
+import { ChannelType, EmbedBuilder, type Client, type TextChannel } from "discord.js";
 import { db, getUserRole, getProfile, getGuildConfig, splitRoleIds, rowToOrder, getSetting, saveDatabaseSnapshot } from "../db.js";
 import { processPayall, refreshPayLogPanel } from "../commands/payall.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
 import { resendOrderPanel } from "../interactions/orderpanel.js";
-import { buildOrderEmbed, money } from "./embeds.js";
+import { buildOrderEmbed, COLORS, money } from "./embeds.js";
 import { logEvent } from "./eventLog.js";
 import { weekStart } from "./utils.js";
 import { deliverCompletedOrder } from "./orderDelivery.js";
@@ -28,19 +28,26 @@ export async function websiteIdentity(client: Client, id: string) {
 
 export async function websiteManagement(client: Client, body: any) {
   const actor = await websiteIdentity(client, String(body.actor_id ?? ""));
-  if (actor.role !== "owner" && actor.role !== "manager") throw new Error("Management role required");
+  if (actor.role !== "owner" && actor.role !== "head_manager" && actor.role !== "manager") throw new Error("Management role required");
   return actor;
 }
 
 export async function websiteComplete(client: Client, body: any) {
-  const actor = await websiteIdentity(client, String(body.actor_id ?? ""));
+  const portalActor = body.portal_actor;
+  const actor = portalActor && typeof portalActor === "object"
+    ? {
+        discord_id: String(portalActor.discord_id ?? `portal:${portalActor.id ?? "unknown"}`),
+        display_name: String(portalActor.username ?? "Website account"),
+        role: String(portalActor.role ?? "mechanic"),
+      }
+    : await websiteIdentity(client, String(body.actor_id ?? ""));
   const guild = await crewGuild(client);
   if (!guild) throw new Error("Discord server unavailable");
   const id = String(body.order_id ?? "");
   const rows = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [id] });
   if (!rows.rows[0]) throw new Error("Order not found");
   const order = rowToOrder(rows.rows[0]);
-  if (actor.discord_id !== order.mechanic_id && !["owner", "manager"].includes(actor.role)) throw new Error("This order belongs to another mechanic");
+  if (actor.discord_id !== order.mechanic_id && !["owner", "head_manager", "manager"].includes(actor.role)) throw new Error("This order belongs to another mechanic");
   if (order.status !== "draft") throw new Error("Only draft orders can be completed");
   if (!order.items.length || !order.customer_name?.trim()) throw new Error("A customer name and at least one service are required");
   const profile = await getProfile(order.mechanic_id);
@@ -69,6 +76,73 @@ export async function websiteComplete(client: Client, body: any) {
   logEvent({ kind: "order_completed", guildId: guild.id, userId: actor.discord_id, orderId: id, orderNumber: order.order_number, amount: order.labour, detail: `website; sales_posted=${posted}` });
   await saveDatabaseSnapshot(); await refreshPayLogPanel(guild);
   return { ok: true, posted };
+}
+
+export async function websiteSetPay(client: Client, body: any) {
+  const id = String(body.discord_id ?? "");
+  const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
+  const commission = num(body.commission);
+  const managerCut = num(body.manager_cut);
+  const commissionRate = num(body.commission_rate);
+  const managerRate = num(body.manager_rate);
+  for (const [k, v, max] of [["commission", commission, Infinity], ["manager_cut", managerCut, Infinity], ["commission_rate", commissionRate, 1], ["manager_rate", managerRate, 100]] as const) {
+    if (v !== null && (!Number.isFinite(v) || v < 0 || v > max)) throw new Error(`Invalid ${k}`);
+  }
+  if ([commission, managerCut, commissionRate, managerRate].every(v => v === null)) throw new Error("Nothing to change");
+  const profile = await getProfile(id);
+  if (!profile) throw new Error("Crew member not found");
+  if (managerCut !== null || managerRate !== null) {
+    const role = await getUserRole(id);
+    if (role !== "manager" && role !== "owner") throw new Error("Manager cut only applies to managers/owners");
+  }
+  const updates: string[] = [];
+  const args: (string | number)[] = [];
+  if (commission !== null) {
+    const s = await db.execute({ sql: `SELECT COALESCE(SUM(labour),0) FROM orders WHERE mechanic_id = ? AND ${"status IN ('complete', 'approved', 'paid')"} AND COALESCE(is_own_car,0)=0 AND datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01'))`, args: [id] });
+    updates.push("commission_adjustment = ?", "commission_labour_snapshot = ?");
+    args.push(commission, Number(s.rows[0]?.[0] ?? 0));
+  }
+  if (managerCut !== null) {
+    const s = await db.execute({ sql: `SELECT COALESCE(SUM(labour),0) FROM orders WHERE status IN ('complete', 'approved', 'paid') AND datetime(COALESCE(completed_at, created_at)) >= datetime(COALESCE((SELECT value FROM app_settings WHERE key = 'order_number_reset_ts'), '2000-01-01')) AND COALESCE(is_own_car,0)=0 AND mechanic_id != ? AND role_level IN ('mechanic','trainer')`, args: [id] });
+    updates.push("manager_cut_adjustment = ?", "manager_labour_snapshot = ?");
+    args.push(managerCut, Number(s.rows[0]?.[0] ?? 0));
+  }
+  if (commissionRate !== null) { updates.push("commission_rate = ?"); args.push(commissionRate); }
+  if (managerRate !== null) { updates.push("manager_override_rate = ?"); args.push(managerRate / 100); }
+  args.push(id);
+  await db.execute({ sql: `UPDATE profiles SET ${updates.join(", ")} WHERE discord_id = ?`, args });
+  await saveDatabaseSnapshot();
+  const actorId = String(body.actor_id ?? "website");
+  const actorName = String(body.actor_name ?? "website");
+  logEvent({ kind: "pay_adjusted", userId: actorId, userName: actorName, amount: commission ?? undefined, detail: `web: target ${id} ${JSON.stringify({ commission, managerCut, commissionRate, managerRate })}` });
+
+  const lines: string[] = [];
+  if (commission !== null) lines.push(`> Weekly commission: **${money(commission)}**`);
+  if (managerCut !== null) lines.push(`> Manager cut this week: **${money(managerCut)}**`);
+  if (commissionRate !== null) lines.push(`> Commission rate: **${(commissionRate * 100).toFixed(0)}%**`);
+  if (managerRate !== null) lines.push(`> Manager crew-cut rate: **${managerRate.toFixed(1)}%**`);
+  const embed = new EmbedBuilder()
+    .setTitle("Pay Updated (Website)")
+    .setColor(COLORS.approved)
+    .setDescription(`<@${id}> — ${profile.display_name}\n${lines.join("\n")}`)
+    .setTimestamp();
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      const config = await getGuildConfig(guild.id);
+      if (config?.log_channel_id) {
+        const ch = await guild.channels.fetch(config.log_channel_id).catch(() => null);
+        if (ch?.isTextBased()) await (ch as any).send({ embeds: [embed] });
+      }
+      if (profile.sales_channel_id) {
+        const sc = await guild.channels.fetch(profile.sales_channel_id).catch(() => null);
+        if (sc?.type === ChannelType.GuildText) {
+          const fresh = await getProfile(id);
+          await resendOrderPanel(sc as TextChannel, id, profile.display_name, fresh?.commission_rate ?? profile.commission_rate);
+        }
+      }
+    } catch (err) { console.error("[TDC] web setPay discord sync failed:", err); }
+  }
+  return { ok: true };
 }
 
 export async function websitePayroll(client: Client, body: any) {
