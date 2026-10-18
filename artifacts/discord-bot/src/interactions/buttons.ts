@@ -18,6 +18,7 @@ import { scheduleNextBankReminder } from "./bankaccount.js";
 import { calculateCreditedShiftMinutes } from "../lib/timeclock.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole, resolveTdcRole } from "../lib/payrollPolicy.js";
+import { withOrderLock } from "../lib/resilience.js";
 
 /** SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" with no Z.
  *  Node.js treats this as LOCAL time — parse as UTC explicitly. */
@@ -56,6 +57,15 @@ async function clearWarnMessage(
 }
 
 export async function handleButton(interaction: ButtonInteraction) {
+  const [namespace, action, ...rest] = interaction.customId.split(":");
+  if (namespace === "clockin" && action === "then" && rest[0] === "order") {
+    const key = `new-order:${interaction.guildId ?? ""}:${interaction.user.id}`;
+    return withOrderLock(key, () => handleButtonUnlocked(interaction));
+  }
+  return handleButtonUnlocked(interaction);
+}
+
+async function handleButtonUnlocked(interaction: ButtonInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const id = rest.join(":");
 
@@ -162,6 +172,37 @@ export async function handleButton(interaction: ButtonInteraction) {
   if (ns === "clockin" && action === "then" && rest[0] === "order") {
     await interaction.deferUpdate();
 
+    const pendingNameKey = `pending_customer_name_${interaction.user.id}`;
+    const ownCarKey = `pending_own_car_${interaction.user.id}`;
+    const pendingName = (await getSetting(pendingNameKey))?.trim();
+    const pendingOwnCar = (await getSetting(ownCarKey)) === "1";
+    if (!pendingName) {
+      await interaction.editReply({
+        content: "This order request was already handled or has expired. Check your sales channel for the existing draft, or start a new order from its panel.",
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
+
+    const existingDraft = await db.execute({
+      sql: `SELECT order_number, customer_name FROM orders
+            WHERE mechanic_id = ? AND status = 'draft' AND (guild_id = ? OR guild_id = '')
+            ORDER BY datetime(created_at) DESC LIMIT 1`,
+      args: [interaction.user.id, interaction.guildId ?? ""],
+    });
+    if (existingDraft.rows[0]) {
+      await db.execute({ sql: "DELETE FROM app_settings WHERE key IN (?, ?)", args: [pendingNameKey, ownCarKey] });
+      const existingNumber = String(existingDraft.rows[0][0] ?? "an open order");
+      const existingName = String(existingDraft.rows[0][1] ?? "another customer");
+      await interaction.editReply({
+        content: `You already have **${existingNumber}** open for **${existingName}**. Finish or cancel that draft before starting another order.`,
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
+
     // Atomic insert — prevents race condition
     const tcId = randomUUID();
     const inserted = await db.execute({
@@ -216,8 +257,8 @@ export async function handleButton(interaction: ButtonInteraction) {
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         await db.execute({
-          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?)",
-          args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel]
+          sql: "INSERT INTO orders (id, order_number, mechanic_id, guild_id, status, items, parts_cost, total, labour, notes, role_level, customer_name, is_own_car) VALUES (?, ?, ?, ?, 'draft', '[]', 0, 0, 0, '', ?, ?, ?)",
+          args: [newOrderId, orderNumber, interaction.user.id, guildId, roleLevel, pendingName, pendingOwnCar ? 1 : 0]
         });
         break;
       } catch (err: any) {
@@ -229,19 +270,8 @@ export async function handleButton(interaction: ButtonInteraction) {
       }
     }
 
-    // Apply any pending customer name (stored before clock-in was required)
-    const pendingNameKey = `pending_customer_name_${interaction.user.id}`;
-    const pendingName = await getSetting(pendingNameKey);
-    const ownCarKey = `pending_own_car_${interaction.user.id}`;
-    const pendingOwnCar = (await getSetting(ownCarKey)) === "1";
-    if (pendingName) {
-      await db.execute({
-        sql: "UPDATE orders SET customer_name = ?, is_own_car = ? WHERE id = ?",
-        args: [pendingName, pendingOwnCar ? 1 : 0, newOrderId],
-      });
-      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [pendingNameKey] });
-      await db.execute({ sql: "DELETE FROM app_settings WHERE key = ?", args: [ownCarKey] });
-    }
+    // Clear pending state only after the draft insert succeeds.
+    await db.execute({ sql: "DELETE FROM app_settings WHERE key IN (?, ?)", args: [pendingNameKey, ownCarKey] });
 
     // Log the order creation
     logEvent({
