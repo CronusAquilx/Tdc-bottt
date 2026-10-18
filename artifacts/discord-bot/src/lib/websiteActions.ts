@@ -2,10 +2,11 @@ import { ChannelType, type Client, type TextChannel } from "discord.js";
 import { db, getUserRole, getProfile, getGuildConfig, splitRoleIds, rowToOrder, getSetting, saveDatabaseSnapshot } from "../db.js";
 import { processPayall, refreshPayLogPanel } from "../commands/payall.js";
 import { getCommissionData } from "../interactions/draftbuttons.js";
-import { buildCompletedOrderRow, resendOrderPanel } from "../interactions/orderpanel.js";
+import { resendOrderPanel } from "../interactions/orderpanel.js";
 import { buildOrderEmbed, money } from "./embeds.js";
 import { logEvent } from "./eventLog.js";
 import { weekStart } from "./utils.js";
+import { deliverCompletedOrder } from "./orderDelivery.js";
 
 /** Picks the Discord server the crew is configured in (the bot may be in several). */
 export async function crewGuild(client: Client) {
@@ -49,22 +50,23 @@ export async function websiteComplete(client: Client, body: any) {
   const pay = await getCommissionData(order.mechanic_id, guild.id, order.role_level);
   const claimed = await db.execute({ sql: "UPDATE orders SET status='complete', completed_at=datetime('now') WHERE id=? AND status='draft'", args: [id] });
   if (!claimed.rowsAffected) throw new Error("Order was already completed");
-  const freshRows = await db.execute({ sql: "SELECT * FROM orders WHERE id=?", args: [id] });
-  const fresh = rowToOrder(freshRows.rows[0]);
-  const embed = buildOrderEmbed(fresh, profile.display_name, pay.weekCommission + (fresh.is_own_car ? 0 : Math.round(fresh.labour * pay.rate)), pay.rate);
   let posted = false;
   try {
-    const message = await channel.send({ embeds: [embed], components: [await buildCompletedOrderRow(order.mechanic_id)] });
-    await db.execute({ sql: "UPDATE orders SET discord_message_id=? WHERE id=?", args: [message.id, id] });
-    posted = true;
+    const delivered = await deliverCompletedOrder(client, guild, id);
+    posted = delivered.posted || delivered.alreadyPosted;
   } catch (error) { console.error("[TDC] website order sales post failed", error); }
   const config = await getGuildConfig(guild.id);
   const logId = config?.orders_channel_id ?? config?.log_channel_id;
   if (logId && logId !== profile.sales_channel_id) {
     const log = await guild.channels.fetch(logId).catch(() => null);
-    if (log?.type === ChannelType.GuildText) await log.send({ embeds: [embed] }).catch(console.error);
+    if (log?.type === ChannelType.GuildText) {
+      const freshRows = await db.execute({ sql: "SELECT * FROM orders WHERE id=?", args: [id] });
+      const fresh = rowToOrder(freshRows.rows[0]);
+      const embed = buildOrderEmbed(fresh, profile.display_name, pay.weekCommission + (fresh.is_own_car ? 0 : Math.round(fresh.labour * pay.rate)), pay.rate);
+      await log.send({ embeds: [embed] }).catch(console.error);
+    }
   }
-  logEvent({ kind: "order_completed", guildId: guild.id, userId: actor.discord_id, orderId: id, orderNumber: fresh.order_number, amount: fresh.labour, detail: `website; sales_posted=${posted}` });
+  logEvent({ kind: "order_completed", guildId: guild.id, userId: actor.discord_id, orderId: id, orderNumber: order.order_number, amount: order.labour, detail: `website; sales_posted=${posted}` });
   await saveDatabaseSnapshot(); await refreshPayLogPanel(guild);
   return { ok: true, posted };
 }

@@ -9,11 +9,11 @@ import { requireRole, detectUserRoleLevel } from "../lib/roles.js";
 import { buildOrderEmbed, buildDraftEmbed, buildClockInPromptEmbed, COLORS, money } from "../lib/embeds.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent, logError } from "../lib/eventLog.js";
-import { safeUpdate, ephemeralNotice } from "../lib/resilience.js";
+import { safeUpdate, ephemeralNotice, withOrderLock } from "../lib/resilience.js";
 import { resolveDraftId } from "../lib/draftRecovery.js";
-import { buildCompletedOrderRow } from "./orderpanel.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
 import { payrollRateForRole } from "../lib/payrollPolicy.js";
+import { deliverCompletedOrder } from "../lib/orderDelivery.js";
 
 // Use completed_at so orders started before a reset but finished after it still count toward
 // the current pay period. Fall back to created_at for older rows that lack completed_at.
@@ -121,6 +121,15 @@ function categoryViewButtonRow(orderId: string): ActionRowBuilder<ButtonBuilder>
 export { mainDraftButtonRows, categoryViewButtonRow };
 
 export async function handleDraftButton(interaction: ButtonInteraction): Promise<boolean> {
+  const [namespace, action, ...rest] = interaction.customId.split(":");
+  const orderId = rest.join(":");
+  if (namespace === "order" && action !== "newpanel" && action !== "owncar" && orderId) {
+    return withOrderLock(orderId, () => handleDraftButtonUnlocked(interaction));
+  }
+  return handleDraftButtonUnlocked(interaction);
+}
+
+async function handleDraftButtonUnlocked(interaction: ButtonInteraction): Promise<boolean> {
   const [ns, action, ...rest] = interaction.customId.split(":");
   let orderId = rest.join(":");
 
@@ -192,6 +201,23 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
   // user's open draft or start a fresh one instead of dead-ending on every click.
   if (action !== "cancel" && action !== "newpanel" && action !== "owncar") {
     orderId = await resolveDraftId(interaction, orderId);
+  }
+
+  // Every order control except the two entry buttons refers to one specific
+  // draft. Never let an expired button edit or cancel a completed order.
+  if (ns === "order" && action !== "newpanel" && action !== "owncar") {
+    const current = await db.execute({
+      sql: "SELECT status FROM orders WHERE id = ?",
+      args: [orderId],
+    });
+    if (!current.rows[0]) {
+      await ephemeralNotice(interaction, "That order no longer exists. Start a new order from your sales panel.");
+      return true;
+    }
+    if (String(current.rows[0][0]) !== "draft") {
+      await ephemeralNotice(interaction, "That order is no longer a draft, so it can’t be changed.");
+      return true;
+    }
   }
 
   // ── Back to categories ──────────────────────────────────────────────────────
@@ -272,7 +298,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     const newLabour    = pkgItems.reduce((s: number, i: any) => s + (i.labour ?? 0), 0);
     const newTotal     = pkgItems.reduce((s: number, i: any) => s + (i.price ?? 0), 0);
     await db.execute({
-      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ? AND status = 'draft'",
       args: [JSON.stringify(pkgItems), newPartsCost, newLabour, newTotal, orderId]
     });
     const catalogStr = await getSetting("parts_catalog");
@@ -625,8 +651,6 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       crewCutInfo
     );
 
-    const newOrderRow = await buildCompletedOrderRow(mechanicId);
-
     // Reply to the mechanic FIRST — the channel posts below can be slow
     // (Discord rate limits), so they run after the user already sees "complete".
     const postedTo = profile?.sales_channel_id ?? "";
@@ -643,13 +667,7 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
       const postToSales = async () => {
         if (!profile?.sales_channel_id) return;
         try {
-          const ch = await guild.channels.fetch(profile.sales_channel_id);
-          if (ch?.isTextBased()) {
-            const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
-            await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
-          } else {
-            throw new Error("sales channel is not a text channel");
-          }
+          await deliverCompletedOrder(interaction.client, guild, orderId);
         } catch (err) {
           logError("order-post-sales", err, { guildId, userId: mechanicId, command: "order:submit" });
           await interaction.followUp({ content: `⚠️ **${completed.order_number}** was saved, but I couldn't post it to your sales channel.`, flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -707,7 +725,11 @@ export async function handleDraftButton(interaction: ButtonInteraction): Promise
     await interaction.deferUpdate();
     // Fetch order number for the log before deleting
     const cancelR = await db.execute({ sql: "SELECT order_number, mechanic_id FROM orders WHERE id = ?", args: [orderId] });
-    await db.execute({ sql: "DELETE FROM orders WHERE id = ?", args: [orderId] });
+    const deleted = await db.execute({ sql: "DELETE FROM orders WHERE id = ? AND status = 'draft'", args: [orderId] });
+    if (!deleted.rowsAffected) {
+      await interaction.editReply({ content: "That order is no longer a draft, so it wasn’t cancelled.", embeds: [], components: [] });
+      return true;
+    }
     if (cancelR.rows[0]) {
       logEvent({
         kind: "order_cancelled",

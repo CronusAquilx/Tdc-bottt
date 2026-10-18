@@ -808,6 +808,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
+    if (order.status !== "draft") {
+      await ephemeralNotice(interaction, "That order is no longer a draft, so it can’t be changed.");
+      return;
+    }
     const currentItems: any[] = order.items ?? [];
 
     const indicesToRemove = new Set(interaction.values.map(v => parseInt(v, 10)));
@@ -822,7 +826,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const newTotal     = newPartsCost + newLabour;
 
     await db.execute({
-      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ? AND status = 'draft'",
       args: [JSON.stringify(remaining), newPartsCost, newLabour, newTotal, orderId]
     });
 
@@ -867,6 +871,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
+    if (order.status !== "draft") {
+      await ephemeralNotice(interaction, "That order is no longer a draft, so it can’t be changed.");
+      return;
+    }
     const guildId2 = interaction.guildId ?? "";
     const commData2 = await getCommissionData(order.mechanic_id, guildId2, order.role_level);
     const crewCutInfo2 = ["trainer","manager","owner"].includes(order.role_level)
@@ -914,6 +922,10 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const r = await db.execute({ sql: "SELECT * FROM orders WHERE id = ?", args: [orderId] });
     if (!r.rows[0]) { await ephemeralNotice(interaction, "⚠️ That order no longer exists."); return; }
     const order = rowToOrder(r.rows[0]);
+    if (order.status !== "draft") {
+      await ephemeralNotice(interaction, "That order is no longer a draft, so it can’t be changed.");
+      return;
+    }
     const currentItems: any[] = order.items ?? [];
 
     const existingKeys = new Set(currentItems.map((i: any) => `${i.category}::${i.label}`));
@@ -940,7 +952,7 @@ export async function handleSelect(interaction: AnySelectMenuInteraction) {
     const newTotal     = newPartsCost + newLabour;
 
     await db.execute({
-      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ?",
+      sql: "UPDATE orders SET items = ?, parts_cost = ?, labour = ?, total = ? WHERE id = ? AND status = 'draft'",
       args: [JSON.stringify(merged), newPartsCost, newLabour, newTotal, orderId]
     });
 

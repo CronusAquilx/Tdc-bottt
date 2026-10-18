@@ -11,11 +11,36 @@ import { mainDraftButtonRows, getCommissionData } from "./draftbuttons.js";
 import { randomUUID } from "../lib/utils.js";
 import { logEvent } from "../lib/eventLog.js";
 import { isUpdateEnabled } from "../lib/featureFlags.js";
-import { buildCompletedOrderRow } from "./orderpanel.js";
+import { withOrderLock } from "../lib/resilience.js";
+import { deliverCompletedOrder } from "../lib/orderDelivery.js";
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
+  const [namespace, action, ...rest] = interaction.customId.split(":");
+  if (namespace === "order" && action !== "startorder" && action !== "startowncar" && rest.length) {
+    return withOrderLock(rest.join(":"), () => handleModalUnlocked(interaction));
+  }
+  if (namespace === "order" && (action === "startorder" || action === "startowncar")) {
+    return withOrderLock(`new-order:${interaction.guildId ?? ""}:${interaction.user.id}`, () => handleModalUnlocked(interaction));
+  }
+  return handleModalUnlocked(interaction);
+}
+
+async function handleModalUnlocked(interaction: ModalSubmitInteraction) {
   const [ns, action, ...rest] = interaction.customId.split(":");
   const extra = rest.join(":");
+
+  if (ns === "order" && action !== "startorder" && action !== "startowncar") {
+    const current = await db.execute({ sql: "SELECT status FROM orders WHERE id = ?", args: [extra] });
+    if (!current.rows[0] || String(current.rows[0][0]) !== "draft") {
+      await interaction.reply({
+        content: current.rows[0]
+          ? "That order is no longer a draft, so it can’t be changed."
+          : "That order no longer exists. Start a new order from your sales panel.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+  }
 
   // ── New Order: customer name modal → create draft and show category selector ─
   if (ns === "order" && (action === "startorder" || action === "startowncar")) {
@@ -112,7 +137,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     // Resume existing draft or create a new one
     let orderId: string;
     const existingDraftR = await db.execute({
-      sql: `SELECT id FROM orders WHERE mechanic_id = ? AND status = 'draft'
+      sql: `SELECT id, order_number, items, customer_name, is_own_car FROM orders WHERE mechanic_id = ? AND status = 'draft'
             AND (guild_id = ? OR guild_id = '')
             ORDER BY created_at DESC LIMIT 1`,
       args: [targetMechanicId, guildId]
@@ -120,10 +145,26 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     if (existingDraftR.rows[0]) {
       orderId = String(existingDraftR.rows[0][0]);
-      await db.execute({
-        sql: "UPDATE orders SET customer_name = ?, is_own_car = ? WHERE id = ?",
-        args: [customerName, isOwnCar ? 1 : 0, orderId],
-      });
+      const openOrderNumber = String(existingDraftR.rows[0][1] ?? "open order");
+      const existingName = String(existingDraftR.rows[0][3] ?? "").trim();
+      const existingOwnCar = Number(existingDraftR.rows[0][4] ?? 0) === 1;
+      if (
+        (existingName && existingName.toLocaleLowerCase() !== customerName.toLocaleLowerCase()) ||
+        existingOwnCar !== isOwnCar
+      ) {
+        await interaction.editReply({
+          content:
+            `You already have **${openOrderNumber}** open for **${existingName || "an unnamed customer"}**. ` +
+            "Finish or cancel that draft before starting an order for someone else. Its services and totals were left unchanged.",
+        });
+        return;
+      }
+      if (!existingName) {
+        await db.execute({
+          sql: "UPDATE orders SET customer_name = ? WHERE id = ? AND status = 'draft'",
+          args: [customerName, orderId],
+        });
+      }
     } else {
       orderId = randomUUID();
       let orderNumber = await nextOrderNumber();
@@ -228,18 +269,16 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
     const embed = buildOrderEmbed(completed, profile?.display_name ?? "Unknown", finalWeekCommission, prevCommData.rate, crewCutInfo);
 
-    const newOrderRow = await buildCompletedOrderRow(mechanicId);
-
     let postedTo = "";
     if (interaction.guild && profile?.sales_channel_id) {
       try {
-        const ch = await interaction.guild.channels.fetch(profile.sales_channel_id);
-        if (ch?.isTextBased()) {
-          const msg = await (ch as any).send({ embeds: [embed], components: [newOrderRow] });
+        const delivery = await deliverCompletedOrder(interaction.client, interaction.guild, orderId);
+        if (delivery.posted || delivery.alreadyPosted) {
           postedTo = profile.sales_channel_id;
-          await db.execute({ sql: "UPDATE orders SET discord_message_id = ? WHERE id = ?", args: [msg.id, orderId] });
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        console.error("[TDC] completed order delivery failed:", error);
+      }
     }
 
     if (interaction.guild) {

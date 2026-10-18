@@ -422,7 +422,9 @@ export async function refreshPayLogPanel(guild: Guild | null): Promise<void> {
     const newMsg = await (ch as any).send({ embeds: [embed], components });
     try { await (newMsg as any).pin(); } catch { /* ignore */ }
     await setSetting(payLogMsgKey(guild.id), (newMsg as any).id);
-  } catch { /* never let panel refresh crash the caller */ }
+  } catch (error) {
+    console.error("[TDC] Pay log panel refresh failed:", error);
+  }
 }
 
 export async function processPayall(

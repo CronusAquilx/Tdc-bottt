@@ -258,6 +258,11 @@ client.once(Events.ClientReady, async (c) => {
 
   // Weekly leaderboard auto-post — every Monday at midnight UTC
   scheduleWeeklyLeaderboard(c);
+
+  // Keep pay panels current, recover failed completed-order posts, and report
+  // crew/profile/channel drift without making automatic changes.
+  const { startShopIntegrityChecks } = await import("./lib/shopChecks.js");
+  startShopIntegrityChecks(c);
 });
 
 
