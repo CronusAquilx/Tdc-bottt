@@ -64,5 +64,8 @@ externalPort = 3002
 [userenv.shared]
 DISCORD_GUILD_ID = "1503609933365514393"
 
+[userenv.production]
+TDC_BOT_API_URL = "https://tdc-bottt-zdip.onrender.com"
+
 [nix]
 channel = "stable-25_05"
